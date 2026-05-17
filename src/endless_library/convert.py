@@ -105,3 +105,51 @@ def enrich_metadata(
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "")[-500:]
         raise ConvertError(f"ebook-meta exit {proc.returncode}: {tail}")
+
+
+def add_to_calibre_library(
+    path: Path,
+    *,
+    library_path: Path,
+    series: str | None = None,
+    tags: list[str] | None = None,
+    calibredb: str = "calibredb",
+    timeout_seconds: int = 60,
+) -> int | None:
+    """Add a downloaded book to a Calibre library via `calibredb add`. Returns
+    the new book's id, or None on failure. Idempotent on filename collision
+    — calibredb dedupes by metadata."""
+    if not path.exists():
+        raise ConvertError(f"source not found for calibre import: {path}")
+    library_path.mkdir(parents=True, exist_ok=True)
+    cmd: list[str] = [
+        calibredb, "add", "--library-path", str(library_path), str(path),
+    ]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=timeout_seconds, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    if proc.returncode != 0:
+        return None
+    # Output looks like: "Added book ids: 42"
+    import re
+    m = re.search(r"Added book ids:\s*(\d+)", proc.stdout)
+    book_id = int(m.group(1)) if m else None
+    # Apply series + tags
+    if book_id is None or (not series and not tags):
+        return book_id
+    set_metadata: list[str] = []
+    if series:
+        set_metadata += ["--field", f"series:{series}"]
+    if tags:
+        set_metadata += ["--field", f"tags:{\",\".join(tags)}"]
+    if set_metadata:
+        subprocess.run(
+            [calibredb, "set_metadata", "--library-path", str(library_path),
+             str(book_id), *set_metadata],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+    return book_id

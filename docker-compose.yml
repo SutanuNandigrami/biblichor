@@ -30,3 +30,19 @@ services:
     environment:
       - LOG_LEVEL=info
       - TZ=${TZ:-Asia/Kolkata}
+
+
+  calibre-web:
+    image: lscr.io/linuxserver/calibre-web:latest
+    container_name: calibre-web
+    restart: unless-stopped
+    ports:
+      - "${TAILSCALE_IP:-127.0.0.1}:8083:8083"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-Asia/Kolkata}
+      - DOCKER_MODS=linuxserver/mods:universal-calibre  # for ebook-convert support
+    volumes:
+      - ./data/calibre-library:/books
+      - ./data/calibre-web-config:/config
