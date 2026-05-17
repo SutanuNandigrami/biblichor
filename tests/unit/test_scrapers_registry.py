@@ -10,7 +10,7 @@ def test_available_includes_all_six():
         "annas_curl",
         "annas_flaresolverr",
         "annas_playwright",
-        "annas_camoufox",
+        "annas_cloakbrowser",
         "welib_curl",
         "libgen_curl",
     } <= set(names)

@@ -36,7 +36,7 @@ scrapers:
   order:
     - annas_curl
     - annas_flaresolverr
-    - annas_camoufox
+    - annas_cloakbrowser
     - welib_curl
     - welib_playwright
     - libgen_curl
@@ -44,7 +44,7 @@ scrapers:
     annas_curl: true
     annas_flaresolverr: true
     annas_playwright: false
-    annas_camoufox: true
+    annas_cloakbrowser: true
     welib_curl: true
     welib_playwright: true
     libgen_curl: true

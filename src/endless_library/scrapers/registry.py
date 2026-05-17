@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from endless_library.config import ScrapersCfg
-from endless_library.scrapers.annas_camoufox import AnnasArchiveCamoufox
+from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
 from endless_library.scrapers.annas_curl import AnnasArchiveCurl
 from endless_library.scrapers.annas_flaresolverr import AnnasArchiveFlareSolverr
 from endless_library.scrapers.annas_playwright import AnnasArchivePlaywright
@@ -15,7 +15,7 @@ _REGISTRY = {
     "annas_curl": AnnasArchiveCurl,
     "annas_flaresolverr": AnnasArchiveFlareSolverr,
     "annas_playwright": AnnasArchivePlaywright,
-    "annas_camoufox": AnnasArchiveCamoufox,
+    "annas_cloakbrowser": AnnasArchiveCloakBrowser,
     "welib_curl": WelibCurl,
     "welib_playwright": WelibPlaywright,
     "libgen_curl": LibgenCurl,
