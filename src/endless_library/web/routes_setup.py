@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse
 
 
 @dataclass
-class Checks:
+class Checks:  # mutable
     sources: bool
     sources_count: int
     smtp: bool
@@ -54,7 +54,7 @@ def _gather(deps) -> Checks:
         calibre=bool(calibre_bin),
         calibre_version=calibre_ver,
         outbound_smtp=None,
-        smtp_probe=getattr(deps, "_last_smtp_probe", None),
+        smtp_probe=None,
     )
 
 
@@ -64,6 +64,7 @@ def register(app: FastAPI) -> None:
         deps = request.app.state.deps
         templates = request.app.state.templates
         checks = _gather(deps)
+        checks.smtp_probe = getattr(request.app.state, "last_smtp_probe", None)
         return templates.TemplateResponse(
             request, "setup.html", {"cfg": deps.cfg.public_view(), "checks": asdict(checks)}
         )
@@ -75,5 +76,5 @@ def register(app: FastAPI) -> None:
         host = cfg.smtp.host or "smtp.gmail.com"
         port = int(cfg.smtp.port or 587)
         result = _probe_smtp(host, port)
-        deps._last_smtp_probe = result  # type: ignore[attr-defined]
+        request.app.state.last_smtp_probe = result
         return {"ok": result.startswith("OK"), "result": result}
