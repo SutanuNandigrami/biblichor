@@ -1,0 +1,32 @@
+services:
+  endless-library:
+    build:
+      context: .
+      args:
+        WITH_BROWSERS: "0"
+    image: endless-library:latest
+    container_name: endless-library
+    restart: unless-stopped
+    ports:
+      - "${TAILSCALE_IP:-127.0.0.1}:8080:8080"
+    volumes:
+      - ./data:/data
+      - ./config:/config
+    env_file:
+      - ./config/.env
+    environment:
+      - CONFIG_PATH=/config/config.yaml
+      - LIBRARY_DB=/data/library.db
+      - TZ=${TZ:-Asia/Kolkata}
+    depends_on:
+      - flaresolverr
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    expose:
+      - "8191"
+    environment:
+      - LOG_LEVEL=info
+      - TZ=${TZ:-Asia/Kolkata}

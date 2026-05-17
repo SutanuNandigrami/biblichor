@@ -1,0 +1,15 @@
+[Unit]
+Description=endless-library (Goodreads/Hardcover -> Anna's -> Kindle)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/endless-library
+ExecStart=/home/ubuntu/endless-library/scripts/run-native.sh
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
