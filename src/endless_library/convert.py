@@ -54,3 +54,54 @@ def convert_to_epub(
         size = dest.stat().st_size if dest.exists() else 0
         raise ConvertError(f"output too small or missing ({size}B)")
     return ConvertResult(path=dest, stderr_tail=(proc.stderr or "")[-500:])
+
+
+def enrich_metadata(
+    path: Path,
+    *,
+    title: str | None = None,
+    author: str | None = None,
+    series: str | None = None,
+    tags: list[str] | None = None,
+    isbn: str | None = None,
+    language: str | None = None,
+    ebook_meta: str = "ebook-meta",
+    timeout_seconds: int = 60,
+) -> None:
+    """Edit metadata on an epub/azw3/mobi in place via Calibre's ebook-meta.
+
+    Amazon's Send-to-Kindle reads the embedded metadata when ingesting
+    personal docs; setting --authors/--series/--tags here makes books cluster
+    correctly in the user's Kindle library even though all uploads land under
+    the "Docs" category.
+    """
+    if not path.exists():
+        raise ConvertError(f"source not found for metadata enrich: {path}")
+    cmd: list[str] = [ebook_meta, str(path)]
+    if title:
+        cmd += ["--title", title]
+    if author:
+        cmd += ["--authors", author]
+    if series:
+        cmd += ["--series", series]
+    if tags:
+        cmd += ["--tags", ",".join(tags)]
+    if isbn:
+        cmd += ["--isbn", isbn]
+    if language:
+        cmd += ["--language", language]
+    if len(cmd) <= 2:
+        return  # nothing to set
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise ConvertError(f"ebook-meta timeout after {timeout_seconds}s") from e
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "")[-500:]
+        raise ConvertError(f"ebook-meta exit {proc.returncode}: {tail}")

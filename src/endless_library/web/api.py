@@ -638,6 +638,18 @@ def register(app: FastAPI) -> None:
             "weights": scoring_cfg.model_dump(),
         }
 
+    @router.post("/books/{book_id}/tags")
+    def set_book_tags(book_id: int, payload: dict, request: Request):
+        deps = request.app.state.deps
+        if not deps.books.get(book_id):
+            raise HTTPException(404)
+        series = payload.get("series")
+        tags = payload.get("tags")
+        if isinstance(tags, list):
+            tags = ",".join(str(t).strip() for t in tags if str(t).strip())
+        deps.books.set_tags(book_id, series=series, tags=tags)
+        return {"ok": True}
+
     app.include_router(router)
 
     # ---------- WebSocket: live events ----------

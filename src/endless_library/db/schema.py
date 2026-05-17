@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS books (
   downloaded_at   TEXT,
   converted_at    TEXT,
   sent_at         TEXT,
+  series          TEXT,
+  tags            TEXT,
   UNIQUE(source, goodreads_id),
   UNIQUE(source, hardcover_id)
 );

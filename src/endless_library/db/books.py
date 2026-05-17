@@ -31,6 +31,8 @@ class BookRow:
     downloaded_at: str | None
     converted_at: str | None
     sent_at: str | None
+    series: str | None
+    tags: str | None
 
     @classmethod
     def from_row(cls, r: sqlite3.Row) -> BookRow:
@@ -55,6 +57,8 @@ class BookRow:
             downloaded_at=r["downloaded_at"],
             converted_at=r["converted_at"],
             sent_at=r["sent_at"],
+            series=(r["series"] if "series" in r.keys() else None),
+            tags=(r["tags"] if "tags" in r.keys() else None),
         )
 
 
@@ -183,6 +187,23 @@ class BookRepo:
                 f"UPDATE books SET {sets}, updated_at = datetime('now') WHERE id = ?",
                 (book_id,),
             )
+
+    def set_tags(self, book_id: int, *, series: str | None = None, tags: str | None = None) -> None:
+        """Update tags/series. None values are left unchanged."""
+        sets = []
+        params: list[object] = []
+        if series is not None:
+            sets.append("series = ?")
+            params.append(series)
+        if tags is not None:
+            sets.append("tags = ?")
+            params.append(tags)
+        if not sets:
+            return
+        sets.append("updated_at = datetime('now')")
+        params.append(book_id)
+        with self._connect() as conn:
+            conn.execute(f"UPDATE books SET {', '.join(sets)} WHERE id = ?", params)
 
     def increment_attempts(self, book_id: int) -> None:
         with self._connect() as conn:

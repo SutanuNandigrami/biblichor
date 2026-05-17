@@ -334,6 +334,32 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
                 deps.books.set_status(book.id, "failed", error=f"convert failed: {e}")
                 return "failed"
     deps.books.set_status(book.id, "sending")
+    # Enrich epub/azw3 metadata so Kindle sees real author/series/tags.
+    if deps.cfg.calibre.enabled and file_path.suffix.lower() in {".epub", ".azw3", ".mobi"}:
+        from endless_library.convert import enrich_metadata
+
+        tags = (book.tags or "").split(",") if book.tags else None
+        tags = [t.strip() for t in tags if t.strip()] if tags else None
+        try:
+            enrich_metadata(
+                file_path,
+                title=book.title,
+                author=book.author,
+                series=book.series,
+                tags=tags,
+                isbn=book.isbn13,
+            )
+            deps.events.append(
+                book_id=book.id,
+                kind="convert",
+                message="metadata enriched (author/series/tags/isbn)",
+            )
+        except ConvertError as e:
+            deps.events.append(
+                book_id=book.id,
+                kind="error",
+                message=f"metadata enrich failed (non-fatal): {e}",
+            )
     try:
         send_to_kindle(
             attachment=file_path,
