@@ -60,42 +60,53 @@ class PipelineDeps:
 # ----- source polling -----
 
 
-def poll_sources(deps: PipelineDeps) -> int:
-    """Iterate every enabled source account, upsert discovered books. Returns count added."""
+def poll_source_account(deps: PipelineDeps, account_id: int) -> int:
+    """Poll a single source account. Returns count of new books added."""
+    acct = deps.sources.get(account_id)
+    if acct is None or not acct.enabled:
+        return 0
     added = 0
-    for acct in deps.sources.list_enabled():
-        try:
-            src = sources_registry.build(acct.source)
-            refs = list(src.list_to_read(identifier=acct.identifier, token=acct.token))
-        except Exception as e:
+    try:
+        src = sources_registry.build(acct.source)
+        refs = list(src.list_to_read(identifier=acct.identifier, token=acct.token))
+    except Exception as e:
+        deps.events.append(
+            book_id=None,
+            kind="error",
+            message=f"poll {acct.source} {acct.identifier} failed: {e}",
+        )
+        log.warning("poll failed for %s: %s", acct.source, e)
+        return 0
+    for ref in refs:
+        existing = deps.books.count()
+        bid = deps.books.upsert(
+            title=ref.title,
+            author=ref.author,
+            isbn13=ref.isbn13,
+            source=ref.source,
+            source_id=ref.source_id,
+            source_added_at=ref.source_added_at,
+        )
+        if deps.books.count() > existing:
+            added += 1
             deps.events.append(
-                book_id=None,
-                kind="error",
-                message=f"poll {acct.source} {acct.identifier} failed: {e}",
+                book_id=bid,
+                kind="state_change",
+                message=f"added from {ref.source}",
+                meta={"isbn13": ref.isbn13, "source_id": ref.source_id},
             )
-            log.warning("poll failed for %s: %s", acct.source, e)
-            continue
-        for ref in refs:
-            existing = deps.books.count()
-            bid = deps.books.upsert(
-                title=ref.title,
-                author=ref.author,
-                isbn13=ref.isbn13,
-                source=ref.source,
-                source_id=ref.source_id,
-                source_added_at=ref.source_added_at,
-            )
-            if deps.books.count() > existing:
-                added += 1
-                deps.events.append(
-                    book_id=bid,
-                    kind="state_change",
-                    message=f"added from {ref.source}",
-                    meta={"isbn13": ref.isbn13, "source_id": ref.source_id},
-                )
-        deps.sources.mark_polled(acct.id)
-    log.info("poll_sources added %d new books", added)
+    deps.sources.mark_polled(acct.id)
+    log.info("poll account %d (%s) added %d new books", acct.id, acct.source, added)
     return added
+
+
+def poll_sources(deps: PipelineDeps) -> int:
+    """Iterate every enabled source account. Used by manual Run-Now."""
+    total = 0
+    for acct in deps.sources.list_enabled():
+        total += poll_source_account(deps, acct.id)
+    log.info("poll_sources added %d new books across %d accounts", total, len(deps.sources.list_enabled()))
+    return total
 
 
 # ----- queue processing -----

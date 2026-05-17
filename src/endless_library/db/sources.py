@@ -70,6 +70,13 @@ class SourceAccountRepo:
                 (1 if enabled else 0, account_id),
             )
 
+    def set_interval(self, account_id: int, minutes: int) -> None:
+        with connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE source_accounts SET poll_interval_minutes = ? WHERE id = ?",
+                (int(minutes), account_id),
+            )
+
     def mark_polled(self, account_id: int) -> None:
         with connect(self.db_path) as conn:
             conn.execute(

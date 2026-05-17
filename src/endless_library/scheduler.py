@@ -7,22 +7,28 @@ from pathlib import Path
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from endless_library.config import Config
-from endless_library.pipeline import PipelineDeps, poll_sources, process_queue
+from endless_library.db.sources import SourceAccountRow
+from endless_library.pipeline import (
+    PipelineDeps,
+    poll_source_account,
+    poll_sources,
+    process_queue,
+)
 
 log = logging.getLogger(__name__)
 
-# Canonical job IDs; the API knows these names so we keep them stable.
-JOB_POLL = "poll"
 JOB_PROCESS = "process"
 JOB_RETRY = "retry"
 JOB_SUMMARY = "summary"
+SOURCE_JOB_PREFIX = "poll:"  # full id: f"poll:{account_id}"
 
 
-def _attach_jobs(sched: AsyncIOScheduler, cfg: Config, deps: PipelineDeps) -> None:
-    """Attach the four core jobs to an already-built scheduler."""
+def source_job_id(account_id: int) -> str:
+    return f"{SOURCE_JOB_PREFIX}{account_id}"
 
-    async def _poll_job():
-        await asyncio.to_thread(poll_sources, deps)
+
+def _attach_system_jobs(sched: AsyncIOScheduler, cfg: Config, deps: PipelineDeps) -> None:
+    """Attach the three non-source-specific jobs: process, retry, summary."""
 
     async def _process_job():
         tally = await asyncio.to_thread(process_queue, deps)
@@ -41,19 +47,14 @@ def _attach_jobs(sched: AsyncIOScheduler, cfg: Config, deps: PipelineDeps) -> No
         deps.notifier.daily_summary(sent=sent, failed=failed, needs_review=needs)
 
     sched.add_job(
-        _poll_job, "interval",
-        minutes=cfg.general.poll_interval_minutes,
-        id=JOB_POLL, name="Poll reading-list sources",
-        replace_existing=True, max_instances=1,
-    )
-    sched.add_job(
         _process_job, "interval",
-        minutes=cfg.general.poll_interval_minutes,
+        minutes=cfg.general.process_interval_minutes,
         id=JOB_PROCESS, name="Process the queue (search + download + send)",
         replace_existing=True, max_instances=1,
     )
     sched.add_job(
-        _retry_job, "interval", hours=6,
+        _retry_job, "interval",
+        hours=cfg.general.retry_interval_hours,
         id=JOB_RETRY, name="Retry failed downloads",
         replace_existing=True, max_instances=1,
     )
@@ -64,16 +65,66 @@ def _attach_jobs(sched: AsyncIOScheduler, cfg: Config, deps: PipelineDeps) -> No
     )
 
 
+def add_source_job(
+    sched: AsyncIOScheduler, deps: PipelineDeps, account: SourceAccountRow
+) -> None:
+    """Schedule a per-source poll job. Idempotent (replace_existing=True)."""
+
+    aid = account.id
+    name = f"Poll {account.source} ({account.identifier})"
+
+    async def _job():
+        await asyncio.to_thread(poll_source_account, deps, aid)
+
+    sched.add_job(
+        _job, "interval",
+        minutes=max(1, account.poll_interval_minutes),
+        id=source_job_id(aid),
+        name=name,
+        replace_existing=True, max_instances=1,
+    )
+
+
+def remove_source_job(sched: AsyncIOScheduler, account_id: int) -> None:
+    """Remove a per-source job. No-op if not present."""
+    jid = source_job_id(account_id)
+    if sched.get_job(jid) is not None:
+        sched.remove_job(jid)
+
+
+def _attach_source_jobs(sched: AsyncIOScheduler, deps: PipelineDeps) -> None:
+    """Register a poll job for every currently-enabled source account."""
+    for acct in deps.sources.list_enabled():
+        add_source_job(sched, deps, acct)
+
+
 def build_scheduler(cfg: Config, db_path: Path) -> tuple[AsyncIOScheduler, PipelineDeps]:
     """Build deps + scheduler. Kept for the CLI `endless-library run` entrypoint."""
     deps = PipelineDeps.build(cfg=cfg, db_path=db_path)
     sched = AsyncIOScheduler(timezone=cfg.general.timezone)
-    _attach_jobs(sched, cfg, deps)
+    _attach_system_jobs(sched, cfg, deps)
+    _attach_source_jobs(sched, deps)
     return sched, deps
 
 
 def build_scheduler_with_deps(cfg: Config, deps: PipelineDeps) -> AsyncIOScheduler:
     """Build scheduler around already-constructed deps (FastAPI lifespan path)."""
     sched = AsyncIOScheduler(timezone=cfg.general.timezone)
-    _attach_jobs(sched, cfg, deps)
+    _attach_system_jobs(sched, cfg, deps)
+    _attach_source_jobs(sched, deps)
     return sched
+
+
+# Re-export for convenience
+__all__ = [
+    "JOB_PROCESS",
+    "JOB_RETRY",
+    "JOB_SUMMARY",
+    "SOURCE_JOB_PREFIX",
+    "add_source_job",
+    "build_scheduler",
+    "build_scheduler_with_deps",
+    "poll_sources",  # for /api/run
+    "remove_source_job",
+    "source_job_id",
+]

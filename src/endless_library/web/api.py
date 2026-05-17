@@ -297,7 +297,16 @@ def register(app: FastAPI) -> None:
 
     @router.post("/schedule/jobs/{job_id}/reschedule")
     def reschedule_job(job_id: str, payload: RescheduleJob, request: Request):
+        """Reschedule a job and persist the change so it survives restart.
+
+        Mapping of job_id to durable storage:
+          - process           -> cfg.general.process_interval_minutes
+          - retry             -> cfg.general.retry_interval_hours
+          - summary           -> cfg.general.daily_summary_hour_utc
+          - poll:<account_id> -> source_accounts.poll_interval_minutes for that row
+        """
         sched = request.app.state.scheduler
+        deps = request.app.state.deps
         try:
             if payload.cron_hour is not None:
                 sched.reschedule_job(job_id, trigger="cron", hour=payload.cron_hour)
@@ -311,7 +320,29 @@ def register(app: FastAPI) -> None:
             raise
         except Exception as e:
             raise HTTPException(404, detail=str(e)) from e
-        return {"ok": True}
+
+        persisted = False
+        if job_id.startswith("poll:"):
+            try:
+                acct_id = int(job_id.split(":", 1)[1])
+            except ValueError:
+                acct_id = None
+            if acct_id is not None and payload.minutes is not None:
+                deps.sources.set_interval(acct_id, payload.minutes)
+                persisted = True
+        elif job_id == "process" and payload.minutes is not None:
+            deps.cfg.general.process_interval_minutes = payload.minutes
+            save_config(deps.cfg, request.app.state.config_path)
+            persisted = True
+        elif job_id == "retry" and payload.hours is not None:
+            deps.cfg.general.retry_interval_hours = payload.hours
+            save_config(deps.cfg, request.app.state.config_path)
+            persisted = True
+        elif job_id == "summary" and payload.cron_hour is not None:
+            deps.cfg.general.daily_summary_hour_utc = payload.cron_hour
+            save_config(deps.cfg, request.app.state.config_path)
+            persisted = True
+        return {"ok": True, "persisted": persisted}
 
     # ---------- sources ----------
 
@@ -340,6 +371,13 @@ def register(app: FastAPI) -> None:
             )
         except Exception as e:
             raise HTTPException(400, detail=str(e)) from e
+        sched = getattr(request.app.state, "scheduler", None)
+        if sched is not None:
+            from endless_library.scheduler import add_source_job
+
+            acct = deps.sources.get(sid)
+            if acct is not None and acct.enabled:
+                add_source_job(sched, deps, acct)
         return {"id": sid}
 
     @router.post("/sources/{sid}/poll")
@@ -356,12 +394,28 @@ def register(app: FastAPI) -> None:
         row = deps.sources.get(sid)
         if not row:
             raise HTTPException(404)
-        deps.sources.set_enabled(sid, not row.enabled)
-        return {"ok": True, "enabled": not row.enabled}
+        new_enabled = not row.enabled
+        deps.sources.set_enabled(sid, new_enabled)
+        sched = getattr(request.app.state, "scheduler", None)
+        if sched is not None:
+            from endless_library.scheduler import add_source_job, remove_source_job
+
+            if new_enabled:
+                acct = deps.sources.get(sid)
+                if acct is not None:
+                    add_source_job(sched, deps, acct)
+            else:
+                remove_source_job(sched, sid)
+        return {"ok": True, "enabled": new_enabled}
 
     @router.post("/sources/{sid}/delete")
     def delete_source(sid: int, request: Request):
         deps = request.app.state.deps
+        sched = getattr(request.app.state, "scheduler", None)
+        if sched is not None:
+            from endless_library.scheduler import remove_source_job
+
+            remove_source_job(sched, sid)
         deps.sources.delete(sid)
         return {"ok": True}
 
