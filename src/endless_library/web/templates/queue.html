@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Queue · endless-library{% endblock %}
+{% block content %}
+<div class="flex gap-2 items-end mb-4">
+  <form method="get" action="/queue" class="flex gap-2 flex-1">
+    <input type="text" name="q" value="{{ q or '' }}" placeholder="search title/author"
+           class="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm flex-1">
+    <select name="status" class="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm">
+      <option value="">all</option>
+      {% for s in statuses %}<option {% if s==status_filter %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select>
+    <button class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-sm">filter</button>
+  </form>
+  <details class="bg-slate-900 border border-slate-700 rounded p-3">
+    <summary class="cursor-pointer text-sm">+ add book</summary>
+    <form method="post" action="/api/books/add" class="flex flex-col gap-2 mt-3 w-72">
+      <input name="title" placeholder="title" required class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm">
+      <input name="author" placeholder="author" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm">
+      <input name="isbn13" placeholder="isbn13 (optional)" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm">
+      <button class="bg-emerald-600 hover:bg-emerald-500 rounded px-2 py-1 text-sm">add</button>
+    </form>
+  </details>
+</div>
+<table class="w-full text-sm">
+  <thead class="text-slate-400 text-left border-b border-slate-800">
+    <tr>
+      <th class="py-2">Title</th><th>Author</th><th>Source</th>
+      <th>Status</th><th>Format</th><th>Attempts</th><th>Updated</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for b in books %}
+    <tr class="border-b border-slate-900 hover:bg-slate-900">
+      <td class="py-2"><a class="text-emerald-400" href="/book/{{ b.id }}">{{ b.title }}</a></td>
+      <td>{{ b.author or '' }}</td>
+      <td class="text-slate-400">{{ b.source }}</td>
+      <td>
+        <span class="px-2 py-0.5 rounded text-xs
+          {% if b.status == 'sent' %}bg-emerald-700{% elif b.status == 'failed' %}bg-red-800
+          {% elif b.status == 'needs_review' %}bg-amber-700{% elif b.status == 'skipped' %}bg-slate-700
+          {% else %}bg-blue-800{% endif %}">{{ b.status }}</span>
+      </td>
+      <td>{{ b.format or '' }}</td>
+      <td>{{ b.attempts }}</td>
+      <td class="text-slate-500 text-xs">{{ b.updated_at }}</td>
+      <td class="text-right">
+        <button hx-post="/api/books/{{ b.id }}/retry" hx-swap="none"
+                class="text-xs px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded">retry</button>
+        <button hx-post="/api/books/{{ b.id }}/delete" hx-swap="none" hx-confirm="Delete this row?"
+                class="text-xs px-2 py-1 bg-red-900 hover:bg-red-800 rounded">delete</button>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="py-6 text-slate-500 text-center">no books — add one above or configure a source</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

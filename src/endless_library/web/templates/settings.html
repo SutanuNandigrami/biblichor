@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-3">Settings</h1>
+<form method="post" action="/api/settings" hx-post="/api/settings" hx-swap="none" class="grid grid-cols-2 gap-4 max-w-3xl text-sm">
+  <fieldset class="border border-slate-800 rounded p-3 col-span-2">
+    <legend class="px-2 text-slate-400">General</legend>
+    <label>poll_interval_minutes <input name="poll_interval_minutes" value="{{ cfg.general.poll_interval_minutes }}" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded w-24"></label>
+    <label class="ml-4">max_attempts <input name="max_attempts" value="{{ cfg.general.max_attempts }}" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded w-20"></label>
+    <label class="ml-4">auto_pick_threshold <input name="auto_pick_threshold" value="{{ cfg.general.auto_pick_threshold }}" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded w-20"></label>
+    <label class="ml-4">gap <input name="auto_pick_gap" value="{{ cfg.general.auto_pick_gap }}" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded w-20"></label>
+    <label class="ml-4">log_level
+      <select name="log_level" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded">
+        <option {% if cfg.general.log_level=="DEBUG" %}selected{% endif %}>DEBUG</option>
+        <option {% if cfg.general.log_level=="INFO" %}selected{% endif %}>INFO</option>
+        <option {% if cfg.general.log_level=="WARNING" %}selected{% endif %}>WARNING</option>
+      </select>
+    </label>
+  </fieldset>
+  <fieldset class="border border-slate-800 rounded p-3 col-span-2">
+    <legend class="px-2 text-slate-400">Kindle + SMTP</legend>
+    <label class="block">recipient <input name="kindle_recipient" value="{{ cfg.kindle.recipient }}" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded w-72"></label>
+    <label class="block mt-2">SMTP host <input name="smtp_host" value="{{ cfg.smtp.host }}" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded w-72"> port <input name="smtp_port" value="{{ cfg.smtp.port }}" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded w-20"></label>
+    <label class="block mt-2">user <input name="smtp_user" value="{{ cfg.smtp.user }}" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded w-72"> password <input name="smtp_password" type="password" placeholder="(unchanged)" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded w-48"></label>
+    <button type="button" hx-post="/api/settings/test-smtp" hx-swap="none"
+            class="mt-2 px-3 py-1 bg-slate-700 rounded text-xs">test SMTP</button>
+  </fieldset>
+  <fieldset class="border border-slate-800 rounded p-3 col-span-2">
+    <legend class="px-2 text-slate-400">Pushover</legend>
+    <label>enabled <input name="pushover_enabled" type="checkbox" value="on" {% if cfg.pushover.enabled %}checked{% endif %}></label>
+    <label class="ml-4">user_key <input name="pushover_user_key" value="{{ cfg.pushover.user_key }}" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded w-72"></label>
+    <label class="ml-4">app_token <input name="pushover_app_token" value="{{ cfg.pushover.app_token }}" class="bg-slate-900 border border-slate-700 px-2 py-1 rounded w-72"></label>
+    <button type="button" hx-post="/api/settings/test-pushover" hx-swap="none"
+            class="mt-2 px-3 py-1 bg-slate-700 rounded text-xs">test Pushover</button>
+  </fieldset>
+  <button class="col-span-2 bg-emerald-600 hover:bg-emerald-500 rounded px-3 py-2 text-sm">save</button>
+</form>
+{% endblock %}

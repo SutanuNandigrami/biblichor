@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="mb-6">
+  <h1 class="text-xl font-semibold mb-3">Sources</h1>
+  <table class="w-full text-sm">
+    <thead class="text-slate-400 border-b border-slate-800"><tr>
+      <th class="text-left py-2">Source</th><th class="text-left">Identifier</th>
+      <th>Enabled</th><th>Interval</th><th>Last polled</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for s in sources %}
+      <tr class="border-b border-slate-900">
+        <td class="py-2">{{ s.source }}</td>
+        <td>{{ s.identifier }}</td>
+        <td>{{ 'yes' if s.enabled else 'no' }}</td>
+        <td>{{ s.poll_interval_minutes }}m</td>
+        <td class="text-slate-500 text-xs">{{ s.last_polled_at or '—' }}</td>
+        <td class="text-right space-x-1">
+          <button hx-post="/api/sources/{{ s.id }}/poll" hx-swap="none"
+                  class="text-xs px-2 py-1 bg-slate-700 rounded">poll</button>
+          <button hx-post="/api/sources/{{ s.id }}/toggle" hx-swap="none"
+                  class="text-xs px-2 py-1 bg-slate-700 rounded">toggle</button>
+          <button hx-post="/api/sources/{{ s.id }}/delete" hx-swap="none" hx-confirm="Delete?"
+                  class="text-xs px-2 py-1 bg-red-900 rounded">delete</button>
+        </td>
+      </tr>
+      {% else %}<tr><td colspan="6" class="py-4 text-slate-500 text-center">no sources configured.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+<section>
+  <h2 class="font-semibold mb-2">Add source</h2>
+  <form method="post" action="/api/sources" class="flex flex-wrap gap-2 items-end">
+    <select name="source" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
+      <option value="goodreads">goodreads</option>
+      <option value="hardcover">hardcover</option>
+      <option value="manual">manual</option>
+    </select>
+    <input name="identifier" placeholder="user_id:shelf  OR  me" required
+           class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
+    <input name="token" placeholder="API token (hardcover only)"
+           class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm w-72">
+    <button class="bg-emerald-600 hover:bg-emerald-500 rounded px-3 py-1 text-sm">add</button>
+  </form>
+</section>
+{% endblock %}
