@@ -11,6 +11,7 @@ from endless_library.db.bench import BenchRunRepo
 from endless_library.db.books import BookRepo, BookRow
 from endless_library.db.candidates import CandidateRepo
 from endless_library.db.events import EventRepo
+from endless_library.db.mirrors import MirrorRepo
 from endless_library.db.schema import init_db
 from endless_library.db.sources import SourceAccountRepo
 from endless_library.domain.format_router import decide_format_action
@@ -36,10 +37,13 @@ class PipelineDeps:
     events: EventRepo
     sources: SourceAccountRepo
     bench: BenchRunRepo
+    mirrors: MirrorRepo
 
     @classmethod
     def build(cls, *, cfg: Config, db_path: Path) -> PipelineDeps:
         init_db(db_path)
+        mirrors = MirrorRepo(db_path)
+        mirrors.seed_curated()  # idempotent
         return cls(
             cfg=cfg,
             db_path=db_path,
@@ -49,6 +53,7 @@ class PipelineDeps:
             events=EventRepo(db_path),
             sources=SourceAccountRepo(db_path),
             bench=BenchRunRepo(db_path),
+            mirrors=mirrors,
         )
 
 

@@ -13,6 +13,7 @@ def test_init_db_creates_all_tables(tmp_path: Path) -> None:
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         ).fetchall()
     names = {r[0] for r in rows}
+    assert "mirrors" in {t for t in EXPECTED_TABLES}
     for t in EXPECTED_TABLES:
         assert t in names, f"missing table: {t}"
 

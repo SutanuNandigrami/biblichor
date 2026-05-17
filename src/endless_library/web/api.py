@@ -426,6 +426,99 @@ def register(app: FastAPI) -> None:
             db_size = 0
         return {"ok": True, "queue_size": queue, "db_size_bytes": db_size}
 
+    # ---------- mirrors ----------
+
+    @router.get("/mirrors")
+    def list_mirrors(request: Request):
+        from dataclasses import asdict
+
+        deps = request.app.state.deps
+        rows = deps.mirrors.list_all()
+        return {"mirrors": [asdict(r) for r in rows]}
+
+    @router.post("/mirrors")
+    def add_mirror(payload: dict, request: Request):
+        deps = request.app.state.deps
+        kind = payload.get("kind")
+        url = (payload.get("url") or "").strip()
+        if not kind or not url:
+            raise HTTPException(400, "kind + url required")
+        try:
+            mid = deps.mirrors.add(kind=kind, url=url, label=payload.get("label"))
+        except Exception as e:
+            raise HTTPException(400, str(e)) from e
+        return {"id": mid}
+
+    @router.post("/mirrors/{mid}/probe")
+    async def probe_mirror(mid: int, request: Request):
+        import asyncio
+
+        from endless_library.probes import probe_http
+
+        deps = request.app.state.deps
+        row = deps.mirrors.get(mid)
+        if not row:
+            raise HTTPException(404)
+        result = await asyncio.to_thread(probe_http, row.url)
+        deps.mirrors.record_probe(
+            mid,
+            ok=result.ok,
+            status=result.status,
+            latency_ms=result.latency_ms,
+            error=result.error,
+        )
+        return {
+            "ok": result.ok,
+            "status": result.status,
+            "latency_ms": result.latency_ms,
+            "error": result.error,
+        }
+
+    @router.post("/mirrors/probe-all")
+    async def probe_all_mirrors(request: Request):
+        import asyncio
+
+        from endless_library.probes import probe_http
+
+        deps = request.app.state.deps
+        rows = deps.mirrors.list_all()
+
+        async def _one(row):
+            r = await asyncio.to_thread(probe_http, row.url)
+            deps.mirrors.record_probe(
+                row.id,
+                ok=r.ok,
+                status=r.status,
+                latency_ms=r.latency_ms,
+                error=r.error,
+            )
+            return {
+                "id": row.id,
+                "url": row.url,
+                "ok": r.ok,
+                "status": r.status,
+                "latency_ms": r.latency_ms,
+                "error": r.error,
+            }
+
+        results = await asyncio.gather(*(_one(r) for r in rows))
+        return {"results": list(results)}
+
+    @router.post("/mirrors/{mid}/toggle")
+    def toggle_mirror(mid: int, request: Request):
+        deps = request.app.state.deps
+        row = deps.mirrors.get(mid)
+        if not row:
+            raise HTTPException(404)
+        deps.mirrors.set_enabled(mid, not row.enabled)
+        return {"ok": True, "enabled": not row.enabled}
+
+    @router.post("/mirrors/{mid}/delete")
+    def delete_mirror(mid: int, request: Request):
+        deps = request.app.state.deps
+        deps.mirrors.delete(mid)
+        return {"ok": True}
+
     app.include_router(router)
 
     # ---------- WebSocket: live events ----------

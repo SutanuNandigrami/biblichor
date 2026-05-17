@@ -11,6 +11,7 @@ EXPECTED_TABLES = (
     "events",
     "source_accounts",
     "bench_runs",
+    "mirrors",
 )
 
 SCHEMA_SQL = """
@@ -82,6 +83,21 @@ CREATE TABLE IF NOT EXISTS source_accounts (
   last_polled_at TEXT,
   UNIQUE(source, identifier)
 );
+
+CREATE TABLE IF NOT EXISTS mirrors (
+  id              INTEGER PRIMARY KEY,
+  kind            TEXT NOT NULL,           -- 'annas' | 'welib' | 'libgen'
+  url             TEXT NOT NULL UNIQUE,
+  label           TEXT,
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  last_probed_at  TEXT,
+  last_ok_at      TEXT,
+  last_status     INTEGER,
+  last_latency_ms INTEGER,
+  last_error      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mirrors_kind ON mirrors(kind, enabled);
 
 CREATE TABLE IF NOT EXISTS bench_runs (
   id         INTEGER PRIMARY KEY,
