@@ -32,13 +32,39 @@ def _filename_from_handle(handle: DownloadHandle, fallback: str) -> str:
     if handle.expected_filename:
         return handle.expected_filename
     # Pull last URL segment with a book ext, else fallback. URL-decode first so
-    # %20 etc. become spaces (later normalized by safe_filename).
+    # %20 etc. become spaces, then strip Anna's boilerplate before safe_filename
+    # has to truncate.
     from urllib.parse import unquote
 
     tail = unquote(handle.url.split("?", 1)[0].rsplit("/", 1)[-1])
     if "." in tail and tail.rsplit(".", 1)[-1].lower() in BOOK_EXTENSIONS:
-        return tail
+        return clean_book_filename(tail)
     return fallback
+
+
+_ANNAS_TRAIL_RE = re.compile(
+    r"\s+--\s+(?:Anna[\u2019']s\s+Archive)\s*$",
+    re.IGNORECASE,
+)
+_MD5_SEGMENT_RE = re.compile(r"\s+--\s+[0-9a-f]{32}\b", re.IGNORECASE)
+
+
+def clean_book_filename(name: str) -> str:
+    """Strip Anna's Archive boilerplate from a CDN filename.
+
+    Examples:
+      "Title -- Author -- 2017 -- Pub -- abc...32hex -- Anna's Archive.epub"
+        -> "Title -- Author -- 2017 -- Pub.epub"
+      "Some File.epub" -> "Some File.epub" (unchanged when no markers)
+    """
+    if "." not in name:
+        return name
+    stem, _, ext = name.rpartition(".")
+    # 1. Strip trailing "-- Anna's Archive"
+    stem = _ANNAS_TRAIL_RE.sub("", stem)
+    # 2. Strip the standalone " -- <32hex>" md5 segment anywhere in the stem
+    stem = _MD5_SEGMENT_RE.sub("", stem)
+    return (stem.strip() + "." + ext) if stem.strip() else name
 
 
 def safe_filename(name: str, *, max_length: int = 200) -> str:
