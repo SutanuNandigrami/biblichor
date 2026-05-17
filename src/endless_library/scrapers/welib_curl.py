@@ -103,12 +103,17 @@ class WelibCurl:
         html = self._get(md5_url)
         if not html:
             return None
-        # 1) Prefer IPFS — no CF, no countdown
+        # 1) Prefer IPFS — no CF, no countdown — but HEAD-verify; many public
+        #    gateways return 410 for copyrighted CIDs.
         for m in _IPFS_RE.finditer(html):
             url = m.group(0)
-            if _is_book_payload_url(url):
-                log.info("welib: picked IPFS URL")
+            if not _is_book_payload_url(url):
+                continue
+            if self._ipfs_reachable(url):
+                log.info("welib: picked IPFS URL (HEAD ok)")
                 return DownloadHandle(url=url, headers={}, expected_filename=None)
+            log.info("welib: IPFS URL not reachable, will fall back")
+            break  # all gateway variants in the page share the same CID — same outcome
         # 2) Meta refresh
         m = _META_REFRESH_RE.search(html)
         if m and _is_book_payload_url(m.group(1)):
@@ -149,6 +154,23 @@ class WelibCurl:
             log.warning("welib status=%d for %s", r.status_code, url)
             return None
         return r.text
+
+    def _ipfs_reachable(self, url: str, *, timeout: float = 8.0) -> bool:
+        """HEAD-probe an IPFS URL. Returns True only on 2xx response."""
+        import httpx
+
+        try:
+            with httpx.Client(
+                timeout=timeout,
+                follow_redirects=True,
+                verify=False,  # public IPFS gateways often have cert issues
+                headers={"User-Agent": "endless-library/0.1"},
+            ) as c:
+                r = c.head(url)
+                return 200 <= r.status_code < 300
+        except Exception as e:
+            log.info("welib IPFS HEAD failed for %s: %s", url[:80], e)
+            return False
 
     def _poll_slow_download(self, url: str) -> DownloadHandle | None:
         deadline = time.time() + self.cfg.slow_download_timeout_seconds
