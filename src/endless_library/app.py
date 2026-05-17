@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from endless_library.config import Config, load_config
 from endless_library.pipeline import PipelineDeps
-from endless_library.web import api
+from endless_library.web import api, proxy_calibre
 
 
 def create_app(*, deps: PipelineDeps, config_path: Path) -> FastAPI:
@@ -17,6 +17,7 @@ def create_app(*, deps: PipelineDeps, config_path: Path) -> FastAPI:
     app.state.deps = deps
     app.state.config_path = config_path
     api.register(app)
+    proxy_calibre.register(app)
 
     # Serve SPA static build (webapp/dist) at /. SPA handles routing client-side.
     dist = Path(__file__).resolve().parent.parent.parent / "webapp" / "dist"

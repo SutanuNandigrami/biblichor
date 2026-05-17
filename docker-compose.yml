@@ -37,12 +37,11 @@ services:
     container_name: calibre-web
     restart: unless-stopped
     ports:
-      - "100.95.138.44:8083:8083"
+      - "127.0.0.1:8083:8083"  # internal-only; FastAPI proxies /library/*
     environment:
       - PUID=1000
       - PGID=1000
       - TZ=${TZ:-Asia/Kolkata}
-      - DOCKER_MODS=linuxserver/mods:universal-calibre  # for ebook-convert support
     volumes:
       - ./data/calibre-library:/books
       - ./data/calibre-web-config:/config

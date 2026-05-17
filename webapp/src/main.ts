@@ -18,6 +18,7 @@ const router = createRouter({
     { path: "/settings", name: "settings", component: () => import("./pages/SettingsPage.vue") },
     { path: "/logs",     name: "logs",     component: () => import("./pages/LogsPage.vue") },
     { path: "/setup",    name: "setup",    component: () => import("./pages/SetupPage.vue") },
+    { path: "/lib",         name: "library",  component: () => import("./pages/LibraryPage.vue") },
   ],
 })
 
