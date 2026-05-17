@@ -1,13 +1,19 @@
-"""Welib scraper. Welib runs behind Cloudflare so we route through FlareSolverr
-when configured. Welib has an /auto_download/<md5>/0/0 endpoint that resolves
-to the CDN URL directly (no slow_download wait, unlike Anna's).
+"""Welib scraper.
 
-Search DOM uses the same /md5/<hash> link pattern as Anna's Archive — both
-projects share a common fork.
+Architecture:
+  * search uses FlareSolverr to clear Cloudflare on welib.org
+  * for resolve_cdn we hit the /md5/<hash> page (already past CF cookie via FS)
+    and prefer in this order:
+      1. IPFS gateway URLs (no CF, no countdown, direct file)
+      2. /slow_download/<md5>/0/0 polled for the CDN URL (same flow as Anna's)
+      3. CDN URLs embedded on the md5 page itself
+  * we also accept a meta-refresh fallback (inspired by the userscript) — some
+    welib pages auto-redirect to the file via <meta http-equiv="refresh">.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import time
@@ -18,22 +24,53 @@ from bs4 import BeautifulSoup
 from endless_library.config import ScrapersCfg
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.flaresolverr import FlareSolverr, FlareSolverrError
-from endless_library.scrapers.base import parse_filesize
+from endless_library.scrapers.base import BOOK_EXTENSIONS, parse_filesize
 from endless_library.scrapers.rate_limit import TokenBucket
 
 log = logging.getLogger(__name__)
 
 WELIB_BASE = "https://welib.org"
-WELIB_CDN_REGEX = re.compile(
-    r'https?://[^"\'\s>]*?(?:welib-premium|welib-public|welib\.[a-z]+)\.org[^"\'\s>]*',
+
+# Anything that looks like a publicly-fetchable book payload.
+_IPFS_RE = re.compile(
+    r'https?://[^"\'\s<>]*?(?:ipfs(?:[.-][a-z0-9-]+)*\.[a-z]+|ipfs\.io)'
+    r'/ipfs/[a-z0-9]+[^"\'\s<>]*',
+    re.IGNORECASE,
+)
+_WELIB_CDN_RE = re.compile(
+    r'https?://[^"\'\s<>]*?welib-(?:premium|public)\.org[^"\'\s<>]*',
+    re.IGNORECASE,
+)
+_ANNAS_CDN_RE = re.compile(
+    r'https://[^/\s"\']+/d3/y/[^/\s"\']+/[^"\'\s>]+',
+    re.IGNORECASE,
+)
+_META_REFRESH_RE = re.compile(
+    r'<meta[^>]+http-equiv=["\']refresh["\'][^>]+url=["\']?(https?://[^"\'>\s]+)',
     re.IGNORECASE,
 )
 
 
+def _is_book_payload_url(url: str) -> bool:
+    """True if URL plausibly points at a book file (not a cover/thumbnail)."""
+    lc = url.lower()
+    if "/covers/" in lc or "covers/proxy" in lc:
+        return False
+    path = lc.split("?", 1)[0]
+    if any(path.endswith("." + ext) for ext in BOOK_EXTENSIONS):
+        return True
+    # IPFS URLs typically lack a normal extension but carry filename=...epub
+    if "/ipfs/" in path:
+        # require either book ext somewhere in the query or filename=
+        if any(("." + ext) in lc for ext in BOOK_EXTENSIONS):
+            return True
+        if "filename=" in lc:
+            return True
+    return False
+
+
 class WelibCurl:
-    """Welib via FlareSolverr (forced; curl-cffi gets 403 on every welib endpoint
-    because of Cloudflare). Name retained for backward-compat with config order.
-    """
+    """Welib scraper (FlareSolverr-backed). Class name kept for config back-compat."""
 
     name = "welib_curl"
     provider = "welib"
@@ -42,7 +79,7 @@ class WelibCurl:
         self,
         cfg: ScrapersCfg,
         *,
-        http_get=None,  # legacy test hook (status, text)
+        http_get=None,
         flaresolverr: FlareSolverr | None = None,
     ) -> None:
         self.cfg = cfg
@@ -61,41 +98,41 @@ class WelibCurl:
     def resolve_cdn(self, candidate: Candidate) -> DownloadHandle | None:
         if not candidate.md5:
             return None
-        # Welib's auto_download endpoint redirects straight to the CDN.
-        # Going through FlareSolverr means Chromium follows the redirect; the
-        # final solved URL is what we want.
-        auto_url = f"{WELIB_BASE}/auto_download/{candidate.md5}/0/0"
-        html, final_url = self._get_with_final_url(auto_url)
-        if final_url and self._looks_like_cdn(final_url):
-            return DownloadHandle(url=final_url, headers={}, expected_filename=None)
-        if html:
-            cdn = self._first_cdn(html)
-            if cdn:
-                return DownloadHandle(url=cdn, headers={}, expected_filename=None)
-        # Fallback: scrape the /md5/ page for a download link
+        # Hit the md5 page (same as /auto_download/ landing for welib).
         md5_url = f"{WELIB_BASE}/md5/{candidate.md5}"
         html = self._get(md5_url)
         if not html:
             return None
-        cdn = self._first_cdn(html)
-        if cdn:
-            return DownloadHandle(url=cdn, headers={}, expected_filename=None)
-        return None
+        # 1) Prefer IPFS — no CF, no countdown
+        for m in _IPFS_RE.finditer(html):
+            url = m.group(0)
+            if _is_book_payload_url(url):
+                log.info("welib: picked IPFS URL")
+                return DownloadHandle(url=url, headers={}, expected_filename=None)
+        # 2) Meta refresh
+        m = _META_REFRESH_RE.search(html)
+        if m and _is_book_payload_url(m.group(1)):
+            log.info("welib: picked meta-refresh URL")
+            return DownloadHandle(url=m.group(1), headers={}, expected_filename=None)
+        # 3) welib-(premium|public).org URL that's not a cover
+        for cm in _WELIB_CDN_RE.finditer(html):
+            url = cm.group(0)
+            if _is_book_payload_url(url):
+                log.info("welib: picked welib-CDN URL")
+                return DownloadHandle(url=url, headers={}, expected_filename=None)
+        # 4) /slow_download/<md5>/0/0 — polling flow (same as Anna's)
+        slow_url = f"{WELIB_BASE}/slow_download/{candidate.md5}/0/0"
+        return self._poll_slow_download(slow_url)
 
-    # -------------------- HTTP transport --------------------
+    # ---------------- transport ----------------
 
     def _get(self, url: str) -> str | None:
-        html, _ = self._get_with_final_url(url)
-        return html
-
-    def _get_with_final_url(self, url: str) -> tuple[str | None, str | None]:
         sleep = self.bucket.acquire(url)
         if sleep > 0:
             time.sleep(sleep)
         if self._http_get is not None:
             status, text = self._http_get(url, headers={"User-Agent": "Mozilla/5.0"})
-            return (text, url) if status == 200 else (None, None)
-        # Lazy-init FlareSolverr from cfg
+            return text if status == 200 else None
         fs = self._fs
         if fs is None:
             fs = FlareSolverr(self.cfg.flaresolverr_url, max_timeout_ms=60_000)
@@ -103,82 +140,91 @@ class WelibCurl:
         try:
             r = fs.get(url)
         except FlareSolverrError as e:
-            log.warning("welib FlareSolverr error %s: %s", url, e)
-            return None, None
+            log.warning("welib FS error %s: %s", url, e)
+            return None
         except Exception as e:
-            log.warning("welib FlareSolverr request failed %s: %s", url, e)
-            return None, None
+            log.warning("welib FS request failed %s: %s", url, e)
+            return None
         if r.status_code != 200:
             log.warning("welib status=%d for %s", r.status_code, url)
-            return None, None
-        # FlareSolverr's solution.url is the final URL after redirects (when
-        # Chromium followed any). We only get the body, but the body itself
-        # tells us a lot. For auto_download specifically, if the response is
-        # short and references a CDN URL, that's our handle.
-        return r.text, url
+            return None
+        return r.text
 
-    # -------------------- parsing --------------------
+    def _poll_slow_download(self, url: str) -> DownloadHandle | None:
+        deadline = time.time() + self.cfg.slow_download_timeout_seconds
+        while time.time() < deadline:
+            html = self._get(url)
+            if not html:
+                time.sleep(8)
+                continue
+            for rx in (_ANNAS_CDN_RE, _IPFS_RE, _WELIB_CDN_RE):
+                m = rx.search(html)
+                if m and _is_book_payload_url(m.group(0)):
+                    return DownloadHandle(url=m.group(0), headers={}, expected_filename=None)
+            soup = BeautifulSoup(html, "lxml")
+            cd = soup.select_one(".js-partner-countdown")
+            wait = 8
+            if cd:
+                with contextlib.suppress(ValueError):
+                    wait = int(cd.get_text(strip=True)) + 3
+            wait = max(1, min(wait, int(deadline - time.time())))
+            log.info("welib slow_download wait %ds", wait)
+            time.sleep(wait)
+        return None
 
-    @staticmethod
-    def _looks_like_cdn(url: str) -> bool:
-        return bool(WELIB_CDN_REGEX.search(url))
-
-    @staticmethod
-    def _first_cdn(html: str) -> str | None:
-        m = WELIB_CDN_REGEX.search(html)
-        return m.group(0) if m else None
+    # ---------------- parsing ----------------
 
     @staticmethod
     def _parse_results(html: str) -> list[Candidate]:
         soup = BeautifulSoup(html, "lxml")
         out: list[Candidate] = []
         seen: set[str] = set()
-        # Welib search rows have /md5/<hash> anchors (same pattern as Anna's).
-        # Per inspection, the image anchor (empty text) appears first, then a
-        # title anchor inside .book-title. The title anchor exposes the human title.
-        for md5_a in soup.select('a[href^="/md5/"]'):
-            href = md5_a.get("href", "")
-            m = re.search(r"/md5/([a-f0-9]{32})", href)
-            if not m:
+        # The title anchors are /md5/<hash> with non-empty text.
+        # Image anchors share the same href but have empty text — skip them.
+        # Build {md5: anchors[]} so we can require paired (image + title) anchors.
+        # Sidebar recommendations have only one anchor for their md5.
+        from collections import defaultdict
+
+        groups: defaultdict[str, list] = defaultdict(list)
+        for a in soup.select('a[href^="/md5/"]'):
+            m = re.search(r"/md5/([a-f0-9]{32})", a.get("href", ""))
+            if m:
+                groups[m.group(1)].append(a)
+        for md5, anchors in groups.items():
+            if len(anchors) < 2:
+                continue  # likely a sidebar/recommendation single-link
+            # Find the one with non-empty text (the title)
+            title_a = next((x for x in anchors if x.get_text(" ", strip=True)), None)
+            if title_a is None:
                 continue
-            md5 = m.group(1)
+            a = title_a
+            text = a.get_text(" ", strip=True)
             if md5 in seen:
                 continue
             seen.add(md5)
-            title = md5_a.get_text(" ", strip=True) or None
-            # Walk up to find the result card and pull metadata text
-            row = md5_a
-            for _ in range(6):
+            # Walk up to the row container
+            row = a
+            for _ in range(8):
                 row = row.parent
                 if row is None:
                     break
                 cls = " ".join(row.get("class") or [])
-                if "book-card" in cls or "border" in cls:
+                if "book-list" in cls or "flex-wrap" in cls:
                     break
-            row_text = row.get_text(" ", strip=True) if row else ""
-            # If our anchor was the image (empty text), the title is usually in
-            # a sibling .book-title anchor under the same parent.
-            if not title and row is not None:
-                tnode = row.select_one(".book-title, .js-vim-focus")
-                if tnode:
-                    title = tnode.get_text(" ", strip=True)
-            fmt = WelibCurl._parse_format(row_text)
-            filesize = parse_filesize(row_text)
-            year = WelibCurl._parse_year(row_text)
-            language = WelibCurl._parse_language(row_text)
+            row_text = row.get_text(" ", strip=True) if row else text
             out.append(
                 Candidate(
                     provider="welib",
                     md5=md5,
-                    title=title,
+                    title=text,
                     author=None,
-                    language=language,
-                    format=fmt,
-                    filesize_bytes=filesize,
-                    year=year,
+                    language=WelibCurl._lang(row_text),
+                    format=WelibCurl._fmt(row_text),
+                    filesize_bytes=parse_filesize(row_text),
+                    year=WelibCurl._year(row_text),
                     publisher=None,
                     edition_hints=row_text.lower()[:400],
-                    detail_url=urljoin(WELIB_BASE, href),
+                    detail_url=urljoin(WELIB_BASE, a["href"]),
                     raw={"row_text": row_text[:400]},
                 )
             )
@@ -187,7 +233,7 @@ class WelibCurl:
         return out
 
     @staticmethod
-    def _parse_format(s: str) -> str | None:
+    def _fmt(s: str) -> str | None:
         m = re.search(
             r"\b(epub|pdf|mobi|azw3|djvu|fb2|cbz|cbr|doc|docx|rtf|txt|lit)\b",
             s,
@@ -196,12 +242,12 @@ class WelibCurl:
         return m.group(1).lower() if m else None
 
     @staticmethod
-    def _parse_year(s: str) -> int | None:
+    def _year(s: str) -> int | None:
         m = re.search(r"\b(19|20)\d{2}\b", s)
         return int(m.group(0)) if m else None
 
     @staticmethod
-    def _parse_language(s: str) -> str | None:
+    def _lang(s: str) -> str | None:
         m = re.search(
             r"\b(English|German|French|Spanish|Italian|Russian|Portuguese|Hindi|Bengali|Chinese|Japanese)\b",
             s,
@@ -209,7 +255,7 @@ class WelibCurl:
         )
         if not m:
             return None
-        mapping = {
+        mp = {
             "english": "en",
             "german": "de",
             "french": "fr",
@@ -222,4 +268,4 @@ class WelibCurl:
             "chinese": "zh",
             "japanese": "ja",
         }
-        return mapping.get(m.group(1).lower())
+        return mp.get(m.group(1).lower())
