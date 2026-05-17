@@ -56,7 +56,7 @@ async def _send_smtp(
     kwargs: dict = dict(hostname=smtp.host, port=smtp.port, timeout=timeout)
     if smtp.user and smtp.password:
         kwargs["username"] = smtp.user
-        kwargs["password"] = smtp.password
+        kwargs["password"] = smtp.password.replace(" ", "").strip()
     if smtp.starttls:
         kwargs["start_tls"] = True
     else:

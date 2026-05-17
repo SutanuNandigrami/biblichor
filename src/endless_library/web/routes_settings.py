@@ -44,7 +44,7 @@ def register(app: FastAPI) -> None:
         cfg.smtp.port = smtp_port
         cfg.smtp.user = smtp_user
         if smtp_password and smtp_password != "***":
-            cfg.smtp.password = smtp_password
+            cfg.smtp.password = smtp_password.replace(" ", "").strip()
         cfg.pushover.enabled = bool(pushover_enabled)
         if pushover_user_key and pushover_user_key != "***":
             cfg.pushover.user_key = pushover_user_key
