@@ -1,0 +1,18 @@
+[Unit]
+Description=biblichor (Goodreads / Hardcover -> Anna's Archive -> Kindle)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Substitute the values below for your install:
+User=__USER__
+WorkingDirectory=__PROJECT_ROOT__
+ExecStart=__PROJECT_ROOT__/scripts/run-native.sh
+# If you bind the dashboard to a Tailscale IP, set that here:
+# Environment=TAILSCALE_IP=100.x.y.z
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

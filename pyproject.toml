@@ -1,5 +1,5 @@
 [project]
-name = "endless-library"
+name = "biblichor"
 version = "0.1.0"
 description = "Self-hosted Goodreads/Hardcover -> Anna's Archive -> Kindle automation"
 requires-python = ">=3.12"
