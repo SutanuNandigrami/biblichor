@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Search, BookOpen, Plus } from 'lucide-vue-next'
+import { Search, BookOpen, Plus, Trash2 } from 'lucide-vue-next'
 import { api } from '@/composables/useApi'
 import { useEventStream } from '@/composables/useWebSocket'
 import { useToast } from '@/composables/useToast'
@@ -25,6 +25,7 @@ const statusFilter = ref('')
 const addOpen = ref(false)
 const addTitle = ref(''); const addAuthor = ref(''); const addIsbn = ref('')
 const detailId = ref<number | null>(null)
+const selected = ref<Set<number>>(new Set())
 const toast = useToast()
 
 async function fetchBooks() {
@@ -34,11 +35,12 @@ async function fetchBooks() {
   const r = await api<{ books: Book[]; total: number }>('/api/books?' + params)
   books.value = r.books
   total.value = r.total
+  const visible = new Set(r.books.map((b) => b.id))
+  selected.value = new Set([...selected.value].filter((id) => visible.has(id)))
 }
 onMounted(fetchBooks)
-watch([query, statusFilter], fetchBooks)
+watch([query, statusFilter], () => { selected.value.clear(); fetchBooks() })
 
-// Refresh queue when WebSocket signals a state_change or new book event
 useEventStream((msg) => {
   if (msg.type === 'event' && (msg.data.kind === 'state_change' || msg.data.kind === 'send')) {
     fetchBooks().catch(() => {})
@@ -46,6 +48,23 @@ useEventStream((msg) => {
 })
 
 const statuses = computed(() => Array.from(new Set(books.value.map((b) => b.status))).sort())
+const allVisibleSelected = computed(() =>
+  books.value.length > 0 && books.value.every((b) => selected.value.has(b.id)),
+)
+const someSelected = computed(() => selected.value.size > 0)
+
+function toggleOne(id: number) {
+  const next = new Set(selected.value)
+  if (next.has(id)) next.delete(id); else next.add(id)
+  selected.value = next
+}
+function toggleAllVisible() {
+  if (allVisibleSelected.value) {
+    selected.value = new Set()
+  } else {
+    selected.value = new Set(books.value.map((b) => b.id))
+  }
+}
 
 async function add() {
   if (!addTitle.value.trim()) return
@@ -77,6 +96,39 @@ async function del(b: Book) {
     await fetchBooks()
   } catch (e: any) { toast.error('Delete failed', String(e?.message ?? e)) }
 }
+
+async function bulkDelete(opts: { hard: boolean }) {
+  const ids = [...selected.value]
+  if (!ids.length) return
+  const label = opts.hard ? `Hard-delete ${ids.length} books? (cannot undo)` : `Delete ${ids.length} selected books?`
+  if (!confirm(label)) return
+  try {
+    const r = await api<{ deleted: number; hard: boolean }>('/api/books/bulk_delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids, hard: opts.hard }),
+    })
+    toast.success(`${r.deleted} ${opts.hard ? 'removed' : 'deleted'}`)
+    selected.value = new Set()
+    await fetchBooks()
+  } catch (e: any) { toast.error('Bulk delete failed', String(e?.message ?? e)) }
+}
+
+async function bulkDeleteByStatus(opts: { hard: boolean }) {
+  if (!statusFilter.value) {
+    toast.error('Pick a status filter first', 'Set a status to scope the delete')
+    return
+  }
+  const verb = opts.hard ? 'hard-remove' : 'delete'
+  if (!confirm(`${verb.toUpperCase()} every book with status="${statusFilter.value}"?`)) return
+  try {
+    const r = await api<{ deleted: number }>('/api/books/bulk_delete', {
+      method: 'POST',
+      body: JSON.stringify({ status: statusFilter.value, hard: opts.hard }),
+    })
+    toast.success(`${r.deleted} ${opts.hard ? 'removed' : 'deleted'}`)
+    await fetchBooks()
+  } catch (e: any) { toast.error('Bulk delete failed', String(e?.message ?? e)) }
+}
 </script>
 
 <template>
@@ -90,7 +142,7 @@ async function del(b: Book) {
       </Button>
     </div>
 
-    <div class="flex gap-2">
+    <div class="flex gap-2 items-center">
       <div class="relative flex-1 max-w-md">
         <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <Input v-model="query" placeholder="Search title or author" class="pl-9" />
@@ -100,12 +152,41 @@ async function del(b: Book) {
         <option value="">All statuses</option>
         <option v-for="s in statuses" :key="s">{{ s }}</option>
       </select>
+      <Button
+        v-if="statusFilter"
+        size="sm" variant="outline"
+        @click="bulkDeleteByStatus({ hard: false })">
+        <Trash2 class="w-3.5 h-3.5" /> Clear {{ statusFilter }}
+      </Button>
+      <Button
+        v-if="statusFilter"
+        size="sm" variant="ghost"
+        class="text-destructive"
+        @click="bulkDeleteByStatus({ hard: true })">
+        Hard
+      </Button>
+    </div>
+
+    <div v-if="someSelected" class="flex items-center gap-3 px-4 py-2 rounded-md bg-accent/50 border border-border">
+      <span class="text-sm font-medium">{{ selected.size }} selected</span>
+      <div class="flex-1"></div>
+      <Button size="sm" variant="outline" @click="bulkDelete({ hard: false })">
+        <Trash2 class="w-3.5 h-3.5" /> Delete selected
+      </Button>
+      <Button size="sm" variant="ghost" class="text-destructive" @click="bulkDelete({ hard: true })">
+        Hard delete
+      </Button>
+      <Button size="sm" variant="ghost" @click="selected = new Set()">Clear</Button>
     </div>
 
     <Card class="overflow-hidden">
       <table class="w-full text-sm">
         <thead class="text-xs text-muted-foreground border-b border-border">
           <tr class="text-left">
+            <th class="px-4 py-3 w-8">
+              <input type="checkbox" :checked="allVisibleSelected" @change="toggleAllVisible"
+                     class="rounded border-input" />
+            </th>
             <th class="px-4 py-3">Title</th>
             <th class="px-4 py-3">Author</th>
             <th class="px-4 py-3">Source</th>
@@ -117,8 +198,13 @@ async function del(b: Book) {
         </thead>
         <tbody>
           <tr v-for="b in books" :key="b.id"
-              class="border-b border-border/60 last:border-0 hover:bg-accent/40 cursor-pointer"
+              :class="['border-b border-border/60 last:border-0 hover:bg-accent/40 cursor-pointer',
+                       selected.has(b.id) ? 'bg-accent/30' : '']"
               @click="detailId = b.id">
+            <td class="px-4 py-3" @click.stop>
+              <input type="checkbox" :checked="selected.has(b.id)" @change="toggleOne(b.id)"
+                     class="rounded border-input" />
+            </td>
             <td class="px-4 py-3">
               <div class="flex items-center gap-2">
                 <BookOpen class="w-4 h-4 text-muted-foreground" />
@@ -136,7 +222,7 @@ async function del(b: Book) {
             </td>
           </tr>
           <tr v-if="!books.length">
-            <td colspan="7" class="px-4 py-12 text-center text-muted-foreground">
+            <td colspan="8" class="px-4 py-12 text-center text-muted-foreground">
               <BookOpen class="w-8 h-8 mx-auto mb-3 opacity-50" />
               Nothing in the queue yet. Add a book or configure a source.
             </td>
