@@ -1,4 +1,5 @@
 """FlareSolverr client session lifecycle."""
+
 from __future__ import annotations
 
 import pytest
@@ -36,10 +37,12 @@ class _Client:
 
 
 def test_create_and_destroy_session():
-    client = _Client([
-        _Resp({"status": "ok"}),  # sessions.create
-        _Resp({"status": "ok"}),  # sessions.destroy
-    ])
+    client = _Client(
+        [
+            _Resp({"status": "ok"}),  # sessions.create
+            _Resp({"status": "ok"}),  # sessions.destroy
+        ]
+    )
     fs = FlareSolverr("http://x:8191/v1", client_factory=lambda: client)
     with fs.session() as sid:
         assert sid.startswith("el-")
@@ -48,20 +51,32 @@ def test_create_and_destroy_session():
 
 
 def test_get_includes_session_id_when_provided():
-    client = _Client([
-        _Resp({"status": "ok",
-               "solution": {"status": 200, "response": "hi", "userAgent": "", "cookies": []}})
-    ])
+    client = _Client(
+        [
+            _Resp(
+                {
+                    "status": "ok",
+                    "solution": {"status": 200, "response": "hi", "userAgent": "", "cookies": []},
+                }
+            )
+        ]
+    )
     fs = FlareSolverr("http://x:8191/v1", client_factory=lambda: client)
     fs.get("https://annas-archive.gl/", session="my-sid")
     assert client.posted[0][1]["session"] == "my-sid"
 
 
 def test_get_without_session_param():
-    client = _Client([
-        _Resp({"status": "ok",
-               "solution": {"status": 200, "response": "hi", "userAgent": "", "cookies": []}})
-    ])
+    client = _Client(
+        [
+            _Resp(
+                {
+                    "status": "ok",
+                    "solution": {"status": 200, "response": "hi", "userAgent": "", "cookies": []},
+                }
+            )
+        ]
+    )
     fs = FlareSolverr("http://x:8191/v1", client_factory=lambda: client)
     fs.get("https://annas-archive.gl/")
     assert "session" not in client.posted[0][1]

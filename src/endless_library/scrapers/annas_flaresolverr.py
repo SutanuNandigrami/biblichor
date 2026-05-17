@@ -6,6 +6,7 @@ curl-cffi."""
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import random
 import time
@@ -42,7 +43,7 @@ class AnnasArchiveFlareSolverr(AnnasArchiveCurl):
         except FlareSolverrError as e:
             log.warning("annas_flaresolverr: could not create session: %s", e)
             self._session_id = None
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             # MagicMock returns a Mock object from create_session — treat as no session
             log.debug("annas_flaresolverr session create non-fatal: %s", e)
             self._session_id = None
@@ -50,10 +51,8 @@ class AnnasArchiveFlareSolverr(AnnasArchiveCurl):
             return super().resolve_cdn(candidate)
         finally:
             if self._session_id:
-                try:
+                with contextlib.suppress(Exception):
                     self.fs.destroy_session(self._session_id)
-                except Exception:
-                    pass
                 self._session_id = None
 
     def _get(self, url: str) -> str | None:

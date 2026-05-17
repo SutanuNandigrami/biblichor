@@ -121,34 +121,34 @@ class WelibCurl:
                 self._session_id = None
 
     def _resolve_with_session(self, candidate: Candidate) -> DownloadHandle | None:
-        # Hit the md5 page (same as /auto_download/ landing for welib).
+        # 1) /ipfs_downloads/md5:<md5> lists ~40 gateway URLs for the CID;
+        #    iterate, HEAD-probe each, first 2xx wins.
+        listing = self._get(f"{WELIB_BASE}/ipfs_downloads/md5:{candidate.md5}")
+        if listing:
+            urls = list(dict.fromkeys(_IPFS_RE.findall(listing)))
+            log.info("welib: probing %d IPFS gateways", len(urls))
+            for url in urls[:30]:
+                if not _is_book_payload_url(url):
+                    continue
+                if self._ipfs_reachable(url, timeout=6.0):
+                    log.info("welib: picked IPFS gateway: %s", url[:80])
+                    return DownloadHandle(url=url, headers={}, expected_filename=None)
+
+        # 2) Fall back to the md5 detail page
         md5_url = f"{WELIB_BASE}/md5/{candidate.md5}"
         html = self._get(md5_url)
         if not html:
             return None
-        # 1) Prefer IPFS — no CF, no countdown — but HEAD-verify; many public
-        #    gateways return 410 for copyrighted CIDs.
-        for m in _IPFS_RE.finditer(html):
-            url = m.group(0)
-            if not _is_book_payload_url(url):
-                continue
-            if self._ipfs_reachable(url):
-                log.info("welib: picked IPFS URL (HEAD ok)")
-                return DownloadHandle(url=url, headers={}, expected_filename=None)
-            log.info("welib: IPFS URL not reachable, will fall back")
-            break  # all gateway variants in the page share the same CID — same outcome
-        # 2) Meta refresh
         m = _META_REFRESH_RE.search(html)
         if m and _is_book_payload_url(m.group(1)):
             log.info("welib: picked meta-refresh URL")
             return DownloadHandle(url=m.group(1), headers={}, expected_filename=None)
-        # 3) welib-(premium|public).org URL that's not a cover
         for cm in _WELIB_CDN_RE.finditer(html):
             url = cm.group(0)
             if _is_book_payload_url(url):
                 log.info("welib: picked welib-CDN URL")
                 return DownloadHandle(url=url, headers={}, expected_filename=None)
-        # 4) /slow_download/<md5>/0/0 — polling flow (same as Anna's)
+        # 3) Anonymous slow_download polling (often slow / fails)
         slow_url = f"{WELIB_BASE}/slow_download/{candidate.md5}/0/0"
         return self._poll_slow_download(slow_url)
 
