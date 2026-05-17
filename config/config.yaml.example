@@ -38,6 +38,7 @@ scrapers:
     - annas_flaresolverr
     - annas_camoufox
     - welib_curl
+    - welib_playwright
     - libgen_curl
   enabled:
     annas_curl: true
@@ -45,6 +46,7 @@ scrapers:
     annas_playwright: false
     annas_camoufox: true
     welib_curl: true
+    welib_playwright: true
     libgen_curl: true
   format_priority: [epub, azw3, mobi, pdf]
   language: en
