@@ -87,3 +87,43 @@ def test_zombie_sweep(repo: BookRepo) -> None:
     row = repo.get(bid)
     assert row is not None
     assert row.status == "failed"
+
+
+def test_mark_stage_sets_timestamp(repo: BookRepo) -> None:
+    bid = repo.upsert(title="X", author=None, isbn13=None, source="manual", source_id="m1")
+    repo.mark_stage(bid, "downloaded")
+    row = repo.get(bid)
+    assert row is not None
+    assert row.downloaded_at is not None
+    assert row.converted_at is None
+
+
+def test_clear_stages_from_downloaded(repo: BookRepo) -> None:
+    bid = repo.upsert(title="X", author=None, isbn13=None, source="manual", source_id="m1")
+    for stage in ("searched", "downloaded", "converted", "sent"):
+        repo.mark_stage(bid, stage)
+    repo.clear_stages_from(bid, stage="downloaded")
+    row = repo.get(bid)
+    assert row is not None
+    assert row.searched_at is not None
+    assert row.downloaded_at is None
+    assert row.converted_at is None
+    assert row.sent_at is None
+
+
+def test_set_status_records_file_size(repo: BookRepo) -> None:
+    bid = repo.upsert(title="X", author=None, isbn13=None, source="manual", source_id="m1")
+    repo.set_status(bid, "searching")
+    repo.set_status(bid, "downloading", file_size=12345)
+    with repo._connect() as conn:
+        r = conn.execute("SELECT file_size FROM books WHERE id=?", (bid,)).fetchone()
+    assert r["file_size"] == 12345
+
+
+def test_set_status_downloading_marks_downloaded_at(repo: BookRepo) -> None:
+    bid = repo.upsert(title="X", author=None, isbn13=None, source="manual", source_id="m1")
+    repo.set_status(bid, "searching")
+    repo.set_status(bid, "downloading", file_path="/tmp/x.epub", md5="a" * 32)
+    row = repo.get(bid)
+    assert row is not None
+    assert row.downloaded_at is not None

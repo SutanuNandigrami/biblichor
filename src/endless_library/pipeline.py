@@ -130,6 +130,7 @@ def _search_with_strategies(
                 scraper=s_name,
                 message=f"got {len(cands)} candidates",
             )
+            deps.books.mark_stage(book.id, "searched")
             return cands, s_name
     return [], None
 
@@ -215,13 +216,38 @@ def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Pa
             md5=result.md5,
             file_path=str(result.path),
             format=result.path.suffix.lstrip("."),
+            file_size=result.size,
         )
+        deps.books.mark_stage(book.id, "downloaded")
         return result.path
     return None
 
 
 def process_one(deps: PipelineDeps, book: BookRow) -> str:
-    """Run the full pipeline on a single book. Returns final status."""
+    """Run the full pipeline on a single book. Returns final status.
+
+    Resume semantics:
+      - If `downloaded_at` is set AND the file is still on disk, skip the
+        search+download steps entirely and resume at convert/send.
+      - If `converted_at` is set AND the converted file is on disk, skip convert.
+      - `attempts` only increments when we actually do a fresh search.
+    """
+    if book.downloaded_at and book.file_path:
+        existing = Path(book.file_path)
+        if existing.exists() and existing.stat().st_size > 0:
+            deps.events.append(
+                book_id=book.id,
+                kind="state_change",
+                message=f"resume: already downloaded at {book.downloaded_at}, jumping to convert/send",
+            )
+            return _process_from_downloaded(deps, book, existing)
+        deps.books.clear_stages_from(book.id, stage="downloaded")
+        deps.events.append(
+            book_id=book.id,
+            kind="state_change",
+            message="resume: downloaded file missing on disk; restarting from search",
+        )
+
     deps.books.set_status(book.id, "searching")
     deps.books.increment_attempts(book.id)
     deps.events.append(book_id=book.id, kind="state_change", message="-> searching")
@@ -258,24 +284,50 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
     if not file_path:
         deps.books.set_status(book.id, "failed", error="all scrapers failed to resolve/download")
         return "failed"
-    # format routing
+    return _process_from_downloaded(deps, book, file_path)
+
+
+def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path) -> str:
+    """Resume the pipeline from a known-good downloaded file."""
     action = decide_format_action(file_path.suffix)
     if action == "skip":
         deps.books.set_status(book.id, "skipped", error=f"format unsupported: {file_path.suffix}")
         return "skipped"
     if action == "convert" and deps.cfg.calibre.enabled:
-        deps.books.set_status(book.id, "converting")
-        try:
-            cr = convert_to_epub(
-                file_path,
-                output_profile=deps.cfg.calibre.output_profile,
-                timeout_seconds=deps.cfg.calibre.conversion_timeout_seconds,
+        already_converted = (
+            book.converted_at
+            and book.file_path
+            and Path(book.file_path).suffix == ".epub"
+            and Path(book.file_path).exists()
+        )
+        if already_converted:
+            file_path = Path(book.file_path)
+            deps.events.append(
+                book_id=book.id,
+                kind="state_change",
+                message="resume: skipping convert, output already exists",
             )
-            file_path = cr.path
-            deps.books.set_status(book.id, "converting", format="epub", file_path=str(file_path))
-        except ConvertError as e:
-            deps.books.set_status(book.id, "failed", error=f"convert failed: {e}")
-            return "failed"
+        else:
+            deps.books.set_status(book.id, "converting")
+            try:
+                cr = convert_to_epub(
+                    file_path,
+                    output_profile=deps.cfg.calibre.output_profile,
+                    timeout_seconds=deps.cfg.calibre.conversion_timeout_seconds,
+                )
+                file_path = cr.path
+                deps.books.set_status(
+                    book.id, "converting", format="epub", file_path=str(file_path)
+                )
+                deps.books.mark_stage(book.id, "converted")
+                deps.events.append(
+                    book_id=book.id,
+                    kind="convert",
+                    message=f"converted to {file_path.name}",
+                )
+            except ConvertError as e:
+                deps.books.set_status(book.id, "failed", error=f"convert failed: {e}")
+                return "failed"
     deps.books.set_status(book.id, "sending")
     try:
         send_to_kindle(

@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS books (
   last_error      TEXT,
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  searched_at     TEXT,
+  downloaded_at   TEXT,
+  converted_at    TEXT,
   sent_at         TEXT,
   UNIQUE(source, goodreads_id),
   UNIQUE(source, hardcover_id)
@@ -110,3 +113,17 @@ def init_db(db_path: Path | str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with connect(db_path) as conn:
         conn.executescript(SCHEMA_SQL)
+        _migrate(conn)
+
+
+def _migrate(conn) -> None:
+    """Best-effort schema migrations for older DBs. ALTER TABLE ADD COLUMN
+    is idempotent only when wrapped in try/except (SQLite raises if exists)."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(books)")}
+    for new_col, ddl in (
+        ("searched_at", "ALTER TABLE books ADD COLUMN searched_at TEXT"),
+        ("downloaded_at", "ALTER TABLE books ADD COLUMN downloaded_at TEXT"),
+        ("converted_at", "ALTER TABLE books ADD COLUMN converted_at TEXT"),
+    ):
+        if new_col not in cols:
+            conn.execute(ddl)

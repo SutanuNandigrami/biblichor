@@ -27,6 +27,9 @@ class BookRow:
     last_error: str | None
     created_at: str
     updated_at: str
+    searched_at: str | None
+    downloaded_at: str | None
+    converted_at: str | None
     sent_at: str | None
 
     @classmethod
@@ -48,6 +51,9 @@ class BookRow:
             last_error=r["last_error"],
             created_at=r["created_at"],
             updated_at=r["updated_at"],
+            searched_at=r["searched_at"],
+            downloaded_at=r["downloaded_at"],
+            converted_at=r["converted_at"],
             sent_at=r["sent_at"],
         )
 
@@ -116,6 +122,7 @@ class BookRepo:
         format: str | None = None,
         file_path: str | None = None,
         md5: str | None = None,
+        file_size: int | None = None,
     ) -> None:
         fields = ["status = ?", "updated_at = datetime('now')"]
         params: list[object] = [status]
@@ -131,11 +138,51 @@ class BookRepo:
         if md5 is not None:
             fields.append("md5 = ?")
             params.append(md5)
-        if status == "sent":
+        if file_size is not None:
+            fields.append("file_size = ?")
+            params.append(file_size)
+        # Stage-completion timestamps fire on the canonical 'success' transitions
+        if status == "downloading":
+            fields.append("downloaded_at = datetime('now')")
+        elif status == "sending":
+            # The convert step (if any) just completed before we switch to sending.
+            # We track converted_at separately via mark_stage.
+            pass
+        elif status == "sent":
             fields.append("sent_at = datetime('now')")
         params.append(book_id)
         with self._connect() as conn:
             conn.execute(f"UPDATE books SET {', '.join(fields)} WHERE id = ?", params)
+
+    def mark_stage(self, book_id: int, stage: str) -> None:
+        """Set a stage-completion timestamp. stage ∈ {searched, downloaded, converted, sent}."""
+        col = {
+            "searched": "searched_at",
+            "downloaded": "downloaded_at",
+            "converted": "converted_at",
+            "sent": "sent_at",
+        }[stage]
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE books SET {col} = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+                (book_id,),
+            )
+
+    def clear_stages_from(self, book_id: int, *, stage: str) -> None:
+        """Reset stage-completion timestamps from `stage` onward. Used on retry
+        when the user wants a true 'restart from scratch'."""
+        cols_from = {
+            "searched": ["searched_at", "downloaded_at", "converted_at", "sent_at"],
+            "downloaded": ["downloaded_at", "converted_at", "sent_at"],
+            "converted": ["converted_at", "sent_at"],
+            "sent": ["sent_at"],
+        }[stage]
+        sets = ", ".join(f"{c} = NULL" for c in cols_from)
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE books SET {sets}, updated_at = datetime('now') WHERE id = ?",
+                (book_id,),
+            )
 
     def increment_attempts(self, book_id: int) -> None:
         with self._connect() as conn:
