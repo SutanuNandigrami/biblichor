@@ -163,7 +163,8 @@ def register(app: FastAPI) -> None:
             finally:
                 state._running = False
 
-        asyncio.create_task(_runner())
+        _t = asyncio.create_task(_runner())
+        state._task = _t
         return {"ok": True, "running": True}
 
     @router.get("/cycle/status")
