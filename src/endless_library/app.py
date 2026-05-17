@@ -14,6 +14,7 @@ from endless_library.web import (
     routes_queue,
     routes_scrapers,
     routes_settings,
+    routes_setup,
     routes_sources,
 )
 
@@ -28,6 +29,7 @@ def create_app(*, deps: PipelineDeps, config_path: Path) -> FastAPI:
     app.state.templates = templates
     app.state.config_path = config_path
 
+    routes_setup.register(app)
     routes_queue.register(app)
     routes_book.register(app)
     routes_sources.register(app)
