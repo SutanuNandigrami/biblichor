@@ -57,8 +57,8 @@ class BookRow:
             downloaded_at=r["downloaded_at"],
             converted_at=r["converted_at"],
             sent_at=r["sent_at"],
-            series=(r.get("series", None)),
-            tags=(r.get("tags", None)),
+            series=dict(r).get("series"),
+            tags=dict(r).get("tags"),
         )
 
 
