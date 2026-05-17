@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { BookOpen, Inbox, Database, Cpu, Settings as SettingsIcon, FileText, Sparkles, Play, Activity, Server } from 'lucide-vue-next'
+import { BookOpen, Inbox, Database, Cpu, Settings as SettingsIcon, FileText, Sparkles, Play, Activity, Server, Sliders } from 'lucide-vue-next'
 import Toaster from '@/components/ui/Toaster.vue'
 import Button from '@/components/ui/Button.vue'
 import { useToast } from '@/composables/useToast'
@@ -17,6 +17,7 @@ const nav = [
   { to: '/sources',  label: 'Sources',  icon: Database },
   { to: '/scrapers', label: 'Scrapers', icon: Cpu },
   { to: '/mirrors',  label: 'Mirrors',  icon: Server },
+  { to: '/scoring',  label: 'Scoring',  icon: Sliders },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
   { to: '/logs',     label: 'Logs',     icon: FileText },
   { to: '/setup',    label: 'Setup',    icon: Sparkles },
