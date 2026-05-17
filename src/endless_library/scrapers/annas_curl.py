@@ -105,7 +105,9 @@ class AnnasArchiveCurl:
                 status, text = r.status_code, r.text
             except Exception as e:
                 log.warning("curl_cffi failed for %s: %s", url, e)
+                self._last_status = None
                 return None
+        self._last_status = status
         if status == 200:
             return text
         log.warning("HTTP %d for %s", status, url)
@@ -224,6 +226,13 @@ class AnnasArchiveCurl:
         while time.time() < deadline:
             html = self._get(url)
             if not html:
+                # If the last response was a hard block (403/429/503), don't bother polling.
+                # Let the caller fall back to a different scraper strategy.
+                if getattr(self, "_last_status", None) in (403, 429, 503):
+                    log.info(
+                        "slow_download blocked (status=%s); giving up early", self._last_status
+                    )
+                    return None
                 time.sleep(8)
                 continue
             cdn = self._first_cdn(html)

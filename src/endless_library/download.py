@@ -31,8 +31,11 @@ class DownloadError(Exception):
 def _filename_from_handle(handle: DownloadHandle, fallback: str) -> str:
     if handle.expected_filename:
         return handle.expected_filename
-    # Pull last URL segment with a book ext, else fallback
-    tail = handle.url.split("?", 1)[0].rsplit("/", 1)[-1]
+    # Pull last URL segment with a book ext, else fallback. URL-decode first so
+    # %20 etc. become spaces (later normalized by safe_filename).
+    from urllib.parse import unquote
+
+    tail = unquote(handle.url.split("?", 1)[0].rsplit("/", 1)[-1])
     if "." in tail and tail.rsplit(".", 1)[-1].lower() in BOOK_EXTENSIONS:
         return tail
     return fallback
