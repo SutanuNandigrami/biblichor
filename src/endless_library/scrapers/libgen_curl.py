@@ -97,33 +97,65 @@ class LibgenCurl:
         return None
 
     def _parse_results(self, html: str, base_url: str) -> list[Candidate]:
+        """libgen.li simple view results table: td[0] title, td[1] author,
+        td[2] publisher, td[3] year, td[4] lang, td[6] size, td[7] format,
+        td[8] mirror anchors (ads.php?md5=...)."""
         soup = BeautifulSoup(html, "lxml")
         out: list[Candidate] = []
         for tr in soup.select("tr"):
             cells = tr.select("td")
-            if len(cells) < 4:
+            if len(cells) < 9:
                 continue
-            link = tr.select_one('a[href*="ads.php"], a[href*="/book/"]')
-            if not link:
+            md5_anchor = None
+            for a in cells[8].select("a[href]"):
+                if "ads.php?md5=" in a.get("href", ""):
+                    md5_anchor = a
+                    break
+            if md5_anchor is None:
                 continue
-            href = link.get("href", "")
-            title = link.get_text(" ", strip=True) or None
-            block = tr.get_text(" ", strip=True)
-            fmt_match = re.search(r"\b(epub|pdf|mobi|azw3|djvu|fb2)\b", block, re.I)
-            fmt = fmt_match.group(1).lower() if fmt_match else None
+            m = re.search(r"md5=([a-f0-9]{32})", md5_anchor.get("href", ""))
+            if not m:
+                continue
+            md5 = m.group(1)
+            title = cells[0].get_text(" ", strip=True) or None
+            author = cells[1].get_text(" ", strip=True) or None
+            publisher = cells[2].get_text(" ", strip=True) or None
+            year_text = cells[3].get_text(" ", strip=True)
+            year = None
+            if year_text.isdigit():
+                year = int(year_text)
+            lang_text = cells[4].get_text(" ", strip=True).lower()
+            lang_map = {
+                "english": "en",
+                "german": "de",
+                "french": "fr",
+                "spanish": "es",
+                "italian": "it",
+                "russian": "ru",
+                "portuguese": "pt",
+                "hindi": "hi",
+            }
+            language = lang_map.get(lang_text)
+            size_text = cells[6].get_text(" ", strip=True)
+            filesize = parse_filesize(size_text)
+            fmt = (cells[7].get_text(" ", strip=True) or "").lower()
+            if fmt not in {"epub", "pdf", "mobi", "azw3", "djvu", "fb2"}:
+                fmt = None
+            ads_href = md5_anchor.get("href", "")
+            row_text = tr.get_text(" ", strip=True)
             out.append(
                 Candidate(
                     provider="libgen",
-                    md5=None,
+                    md5=md5,
                     title=title,
-                    author=None,
-                    language=None,
+                    author=author,
+                    language=language,
                     format=fmt,
-                    filesize_bytes=parse_filesize(block),
-                    year=None,
-                    publisher=None,
-                    edition_hints=block.lower()[:300],
-                    detail_url=urljoin(base_url, href),
+                    filesize_bytes=filesize,
+                    year=year,
+                    publisher=publisher,
+                    edition_hints=row_text.lower()[:300],
+                    detail_url=urljoin(base_url, ads_href),
                 )
             )
             if len(out) >= 25:
