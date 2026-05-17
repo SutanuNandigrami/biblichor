@@ -86,6 +86,7 @@ class WelibCurl:
         self.bucket = TokenBucket(capacity=6, period_seconds=60)
         self._http_get = http_get
         self._fs = flaresolverr
+        self._session_id: str | None = None
 
     def search(self, query: SearchQuery) -> list[Candidate]:
         q = f"{query.title} {query.author or ''}".strip()
@@ -98,6 +99,28 @@ class WelibCurl:
     def resolve_cdn(self, candidate: Candidate) -> DownloadHandle | None:
         if not candidate.md5:
             return None
+        # Wrap the entire resolve in a single FlareSolverr session so the
+        # slow_download countdown actually progresses across polls.
+        if self._http_get is not None:
+            # Test transport — no real FS available; skip session lifecycle
+            return self._resolve_with_session(candidate)
+        fs = self._fs
+        if fs is None:
+            fs = FlareSolverr(self.cfg.flaresolverr_url, max_timeout_ms=60_000)
+            self._fs = fs
+        try:
+            self._session_id = fs.create_session()
+        except FlareSolverrError as e:
+            log.info("welib: session create failed (%s); proceeding stateless", e)
+            self._session_id = None
+        try:
+            return self._resolve_with_session(candidate)
+        finally:
+            if self._session_id:
+                fs.destroy_session(self._session_id)
+                self._session_id = None
+
+    def _resolve_with_session(self, candidate: Candidate) -> DownloadHandle | None:
         # Hit the md5 page (same as /auto_download/ landing for welib).
         md5_url = f"{WELIB_BASE}/md5/{candidate.md5}"
         html = self._get(md5_url)
@@ -143,7 +166,7 @@ class WelibCurl:
             fs = FlareSolverr(self.cfg.flaresolverr_url, max_timeout_ms=60_000)
             self._fs = fs
         try:
-            r = fs.get(url)
+            r = fs.get(url, session=self._session_id)
         except FlareSolverrError as e:
             log.warning("welib FS error %s: %s", url, e)
             return None

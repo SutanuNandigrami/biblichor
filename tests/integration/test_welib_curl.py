@@ -64,6 +64,8 @@ def test_resolve_cdn_prefers_ipfs_over_cover(monkeypatch):
     html = (FIX / "detail_ready.html").read_text()
     s = WelibCurl(_cfg(), http_get=lambda u, *, headers: (200, html))
     monkeypatch.setattr("time.sleep", lambda *_: None)
+    # Stub the real HEAD probe so the test stays hermetic
+    monkeypatch.setattr(WelibCurl, "_ipfs_reachable", lambda self, u, timeout=8.0: True)
     c = Candidate(
         provider="welib",
         md5="a" * 32,

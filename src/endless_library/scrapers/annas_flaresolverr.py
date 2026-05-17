@@ -31,6 +31,30 @@ class AnnasArchiveFlareSolverr(AnnasArchiveCurl):
         # Skip parent's http_get; we override _get entirely.
         super().__init__(cfg)
         self.fs = flaresolverr or FlareSolverr(cfg.flaresolverr_url)
+        self._session_id: str | None = None
+
+    def resolve_cdn(self, candidate: Candidate) -> DownloadHandle | None:
+        """Wrap the parent resolve_cdn in a single FS session so the countdown
+        survives multiple polls."""
+        # If a mock fs is in use (tests), MagicMock-style ducks work fine.
+        try:
+            self._session_id = self.fs.create_session()
+        except FlareSolverrError as e:
+            log.warning("annas_flaresolverr: could not create session: %s", e)
+            self._session_id = None
+        except Exception as e:  # noqa: BLE001
+            # MagicMock returns a Mock object from create_session — treat as no session
+            log.debug("annas_flaresolverr session create non-fatal: %s", e)
+            self._session_id = None
+        try:
+            return super().resolve_cdn(candidate)
+        finally:
+            if self._session_id:
+                try:
+                    self.fs.destroy_session(self._session_id)
+                except Exception:
+                    pass
+                self._session_id = None
 
     def _get(self, url: str) -> str | None:
         sleep = self.bucket.acquire(url)
@@ -40,7 +64,7 @@ class AnnasArchiveFlareSolverr(AnnasArchiveCurl):
         else:
             time.sleep(self.cfg.request_delay_seconds + random.uniform(0.5, 2.0))
         try:
-            r = self.fs.get(url)
+            r = self.fs.get(url, session=self._session_id)
         except FlareSolverrError as e:
             log.warning("FlareSolverr error for %s: %s", url, e)
             return None
@@ -56,6 +80,3 @@ class AnnasArchiveFlareSolverr(AnnasArchiveCurl):
 
     def search(self, query: SearchQuery) -> list[Candidate]:
         return super().search(query)
-
-    def resolve_cdn(self, candidate: Candidate) -> DownloadHandle | None:
-        return super().resolve_cdn(candidate)

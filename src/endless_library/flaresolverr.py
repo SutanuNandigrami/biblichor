@@ -1,9 +1,17 @@
-"""FlareSolverr HTTP client. POSTs to /v1 with a request.get command,
-parses the `solution.response` HTML out of the response."""
+"""FlareSolverr HTTP client with session support.
+
+Sessions matter for endpoints that depend on cookies set in earlier requests
+— e.g. Anna's / Welib `/slow_download/` pages whose countdown is tracked
+server-side per cookie. Without a session, every `request.get` launches a
+fresh Chromium and the countdown resets each poll, so we never break free.
+"""
 
 from __future__ import annotations
 
 import logging
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import httpx
@@ -40,11 +48,46 @@ class FlareSolverr:
     def _factory(self):
         if self._client_factory is not None:
             return self._client_factory()
-        # FlareSolverr can take ~30s for a CF challenge; pad the HTTP timeout
         return httpx.Client(timeout=(self.max_timeout_ms / 1000) + 15)
 
+    # ---------- session lifecycle ----------
+
+    def create_session(self, session: str | None = None) -> str:
+        """Create a FlareSolverr session; returns the session id.
+
+        Sessions keep cookies + the same browser process alive across calls.
+        """
+        sid = session or f"el-{uuid.uuid4().hex[:12]}"
+        with self._factory() as c:
+            r = c.post(self.endpoint, json={"cmd": "sessions.create", "session": sid})
+            r.raise_for_status()
+            body = r.json()
+        if body.get("status") != "ok":
+            raise FlareSolverrError(
+                f"sessions.create failed: {body.get('status')} {body.get('message')}"
+            )
+        return sid
+
+    def destroy_session(self, session: str) -> None:
+        try:
+            with self._factory() as c:
+                c.post(self.endpoint, json={"cmd": "sessions.destroy", "session": session})
+        except Exception as e:
+            log.debug("sessions.destroy ignored error: %s", e)
+
+    @contextmanager
+    def session(self) -> Iterator[str]:
+        """Context manager that creates a session and destroys it on exit."""
+        sid = self.create_session()
+        try:
+            yield sid
+        finally:
+            self.destroy_session(sid)
+
+    # ---------- request ----------
+
     def get(self, url: str, *, session: str | None = None) -> FlareSolverrResponse:
-        payload = {"cmd": "request.get", "url": url, "maxTimeout": self.max_timeout_ms}
+        payload: dict = {"cmd": "request.get", "url": url, "maxTimeout": self.max_timeout_ms}
         if session:
             payload["session"] = session
         with self._factory() as c:
