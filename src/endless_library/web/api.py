@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 from dataclasses import asdict
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -456,6 +457,34 @@ def register(app: FastAPI) -> None:
         save_config(deps.cfg, request.app.state.config_path)
         return {"ok": True, "order": deps.cfg.scrapers.order}
 
+    @router.get("/bench/history")
+    def bench_history(request: Request, limit: int = 7):
+        """Per-scraper recent bench outcomes. Returns the last N runs for
+        each scraper currently in cfg.scrapers.order, oldest-first so the UI
+        can paint a left-to-right sparkline.
+        """
+        deps = request.app.state.deps
+        out: dict[str, list[dict]] = {}
+        for name in deps.cfg.scrapers.order:
+            rows = deps.bench.recent(scraper=name, limit=limit)
+            # rows come back newest-first; flip for left-to-right reading
+            out[name] = [
+                {
+                    "ts": r.ts,
+                    "query": r.query,
+                    "success": r.success,
+                    "duration_ms": r.duration_ms,
+                    "http_code": r.http_code,
+                }
+                for r in reversed(rows)
+            ]
+        # 30-day rolling success rate per scraper
+        rates = {
+            name: round(deps.bench.success_rate(scraper=name, days=30), 3)
+            for name in deps.cfg.scrapers.order
+        }
+        return {"history": out, "success_rates_30d": rates}
+
     @router.post("/bench/run")
     async def run_bench_endpoint(request: Request, mode: str = "quick"):
         deps = request.app.state.deps
@@ -629,6 +658,47 @@ def register(app: FastAPI) -> None:
         return {"ok": True, "queue_size": queue, "db_size_bytes": db_size}
 
     # ---------- mirrors ----------
+
+    @router.get("/mirrors/effective")
+    def mirrors_effective(request: Request):
+        """Show the *effective* Anna's mirror list scrapers actually use.
+
+        Sources:
+          - configured: cfg.scrapers.annas_mirrors (user-edited config.yaml)
+          - wiki:       cached domains from data/wiki_annas_domains.json
+          - merged:     what scrapers see right now (after wiki refresh has
+                        merged the two — see scrapers/annas_domains.py)
+
+        Also returns last/next wiki refresh timestamps so the UI can show
+        when the cache was last updated and when the next 6-hourly job runs.
+        """
+        from datetime import datetime, timedelta
+
+        from endless_library.scrapers.annas_domains import (
+            cache_path,
+            effective_mirrors,
+            read_cache,
+        )
+
+        deps = request.app.state.deps
+        configured = list(deps.cfg.scrapers.annas_mirrors or [])
+        wiki, ts = read_cache(cache_path(deps.db_path.parent))
+        merged = effective_mirrors(configured, wiki)
+        last_iso: str | None = None
+        next_iso: str | None = None
+        if ts > 0:
+            last_dt = datetime.fromtimestamp(ts, tz=UTC)
+            last_iso = last_dt.isoformat()
+            interval = deps.cfg.general.mirror_refresh_hours
+            next_iso = (last_dt + timedelta(hours=interval)).isoformat()
+        return {
+            "configured": configured,
+            "wiki": wiki,
+            "merged": merged,
+            "last_refresh_at": last_iso,
+            "next_refresh_at": next_iso,
+            "refresh_interval_hours": deps.cfg.general.mirror_refresh_hours,
+        }
 
     @router.get("/mirrors")
     def list_mirrors(request: Request):

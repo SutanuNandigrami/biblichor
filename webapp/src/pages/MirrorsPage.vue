@@ -23,8 +23,19 @@ type Mirror = {
   last_error: string | null
 }
 
+type Effective = {
+  configured: string[]
+  wiki: string[]
+  merged: string[]
+  last_refresh_at: string | null
+  next_refresh_at: string | null
+  refresh_interval_hours: number
+}
+
 const mirrors = ref<Mirror[]>([])
+const effective = ref<Effective | null>(null)
 const probing = ref(false)
+const refreshingMirrors = ref(false)
 const addOpen = ref(false)
 const newKind = ref<'annas' | 'welib' | 'libgen'>('annas')
 const newUrl = ref('')
@@ -33,6 +44,32 @@ const toast = useToast()
 
 async function load() {
   mirrors.value = (await api<{ mirrors: Mirror[] }>('/api/mirrors')).mirrors
+  try { effective.value = await api<Effective>('/api/mirrors/effective') }
+  catch { effective.value = null }
+}
+
+async function refreshWikiNow() {
+  refreshingMirrors.value = true
+  try {
+    await api('/api/schedule/jobs/mirrors_refresh/run', { method: 'POST' })
+    toast.success('Mirror refresh queued', 'Wikipedia fetch fires on next scheduler tick')
+    // Give the job a moment to run, then reload
+    setTimeout(load, 4000)
+  } catch (e: any) { toast.error('Refresh failed', String(e?.message ?? e)) }
+  finally { refreshingMirrors.value = false }
+}
+
+function relTime(iso: string | null): string {
+  if (!iso) return 'never'
+  const d = new Date(iso).getTime() - Date.now()
+  const ad = Math.abs(d)
+  if (ad < 60_000) return d < 0 ? 'just now' : 'in <1m'
+  if (ad < 3_600_000) {
+    const m = Math.round(ad / 60_000)
+    return d < 0 ? `${m}m ago` : `in ${m}m`
+  }
+  const h = Math.round(ad / 3_600_000)
+  return d < 0 ? `${h}h ago` : `in ${h}h`
 }
 onMounted(load)
 
@@ -106,6 +143,50 @@ function latencyColor(ms: number | null): 'success' | 'warning' | 'danger' | 'mu
       Anna's Archive + Welib + LibGen mirrors. Auto-disable after 5 consecutive probe failures.
       Pipeline picks healthy ones at search time.
     </p>
+
+    <Card v-if="effective" class="p-4 space-y-3">
+      <div class="flex items-center gap-2">
+        <Activity class="w-4 h-4 text-primary" />
+        <h2 class="font-semibold">Effective Anna's Archive mirrors</h2>
+        <span class="text-xs text-muted-foreground">— what scrapers actually use right now</span>
+        <div class="flex-1"></div>
+        <Button size="sm" variant="outline" :loading="refreshingMirrors" @click="refreshWikiNow">
+          <RefreshCw class="w-3.5 h-3.5" /> Refresh from Wikipedia now
+        </Button>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+        <div>
+          <div class="text-xs text-muted-foreground mb-1">Merged ({{ effective.merged.length }})</div>
+          <ul class="space-y-1">
+            <li v-for="m in effective.merged" :key="m" class="font-mono text-xs flex items-center gap-2">
+              <span>{{ m }}</span>
+              <Badge v-if="effective.configured.includes(m)" variant="info">config</Badge>
+              <Badge v-else variant="success">wiki</Badge>
+            </li>
+          </ul>
+        </div>
+        <div class="space-y-2">
+          <div>
+            <div class="text-xs text-muted-foreground">Last Wikipedia refresh</div>
+            <div class="text-sm">
+              {{ effective.last_refresh_at ? new Date(effective.last_refresh_at).toLocaleString() : 'never' }}
+              <span class="text-xs text-muted-foreground">({{ relTime(effective.last_refresh_at) }})</span>
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-muted-foreground">Next refresh</div>
+            <div class="text-sm">
+              {{ effective.next_refresh_at ? new Date(effective.next_refresh_at).toLocaleString() : '—' }}
+              <span class="text-xs text-muted-foreground">({{ relTime(effective.next_refresh_at) }})</span>
+            </div>
+          </div>
+          <div class="text-xs text-muted-foreground">
+            Interval: every {{ effective.refresh_interval_hours }}h
+            (change on the <a class="underline" href="/schedule">Schedule</a> page)
+          </div>
+        </div>
+      </div>
+    </Card>
 
     <Card class="overflow-hidden">
       <table class="w-full text-sm">

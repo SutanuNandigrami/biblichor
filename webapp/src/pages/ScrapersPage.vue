@@ -11,12 +11,27 @@ type ScrapersResp = {
   available: string[]; order: string[]; enabled: Record<string, boolean>
   success_rates_30d: Record<string, number>
 }
+type BenchHistoryEntry = {
+  ts: string; query: string; success: boolean
+  duration_ms: number | null; http_code: number | null
+}
+type BenchHistoryResp = {
+  history: Record<string, BenchHistoryEntry[]>
+  success_rates_30d: Record<string, number>
+}
 const data = ref<ScrapersResp | null>(null)
+const history = ref<Record<string, BenchHistoryEntry[]>>({})
 const benchOutput = ref<string>('')
 const benching = ref(false)
 const toast = useToast()
 
-async function load() { data.value = await api<ScrapersResp>('/api/scrapers') }
+async function load() {
+  data.value = await api<ScrapersResp>('/api/scrapers')
+  try {
+    const r = await api<BenchHistoryResp>('/api/bench/history?limit=7')
+    history.value = r.history
+  } catch { history.value = {} }
+}
 onMounted(load)
 
 async function toggle(name: string) {
@@ -69,6 +84,7 @@ async function bench(mode: 'quick' | 'full') {
             <th class="px-4 py-3">Strategy</th>
             <th class="px-4 py-3">State</th>
             <th class="px-4 py-3">Success (30d)</th>
+            <th class="px-4 py-3">Recent</th>
             <th class="px-4 py-3 text-right">Order</th>
             <th class="px-4 py-3 text-right">Action</th>
           </tr>
@@ -83,6 +99,15 @@ async function bench(mode: 'quick' | 'full') {
               </Badge>
             </td>
             <td class="px-4 py-3">{{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}%</td>
+            <td class="px-4 py-3">
+              <div class="flex items-center gap-1">
+                <span v-for="(e, i) in (history[name] ?? [])" :key="i"
+                  :title="`${e.query} — ${e.success ? 'OK' : 'fail'}${e.duration_ms ? ' (' + e.duration_ms + 'ms)' : ''}`"
+                  :class="['inline-block w-2.5 h-2.5 rounded-full',
+                          e.success ? 'bg-emerald-500' : 'bg-red-500']"></span>
+                <span v-if="!(history[name] ?? []).length" class="text-xs text-muted-foreground">no runs</span>
+              </div>
+            </td>
             <td class="px-4 py-3 text-right">
               <Button size="sm" variant="ghost" :disabled="idx === 0" @click="move(name, -1)"><ArrowUp class="w-3.5 h-3.5" /></Button>
               <Button size="sm" variant="ghost" :disabled="idx === data.order.length - 1" @click="move(name, 1)"><ArrowDown class="w-3.5 h-3.5" /></Button>
@@ -97,6 +122,7 @@ async function bench(mode: 'quick' | 'full') {
             <td class="px-4 py-3 font-mono">{{ name }}</td>
             <td class="px-4 py-3"><Badge variant="muted">unused</Badge></td>
             <td class="px-4 py-3">{{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}%</td>
+            <td class="px-4 py-3 text-xs text-muted-foreground">no runs</td>
             <td></td><td class="px-4 py-3 text-right">
               <Button size="sm" variant="outline" @click="toggle(name)">Enable</Button>
             </td>
