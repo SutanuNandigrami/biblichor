@@ -41,3 +41,17 @@ def create_app(*, deps: PipelineDeps, config_path: Path) -> FastAPI:
         return HTMLResponse('<meta http-equiv="refresh" content="0; url=/queue">')
 
     return app
+
+
+def entry() -> FastAPI:
+    """uvicorn entry-point: reads CONFIG_PATH and LIBRARY_DB env vars."""
+    import os
+
+    from endless_library.config import load_config
+    from endless_library.pipeline import PipelineDeps
+
+    config_path = Path(os.environ.get("CONFIG_PATH", "config/config.yaml"))
+    db_path = Path(os.environ.get("LIBRARY_DB", "data/library.db"))
+    cfg = load_config(config_path)
+    deps = PipelineDeps.build(cfg=cfg, db_path=db_path)
+    return create_app(deps=deps, config_path=config_path)

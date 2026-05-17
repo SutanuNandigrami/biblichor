@@ -13,5 +13,5 @@ fi
 TAILSCALE_IP="${TAILSCALE_IP:-127.0.0.1}"
 PORT="${PORT:-8080}"
 echo "==> http://${TAILSCALE_IP}:${PORT}/queue"
-exec uvicorn "endless_library.app:create_app" --factory \
+exec uvicorn "endless_library.app:entry" --factory \
   --host "$TAILSCALE_IP" --port "$PORT"
