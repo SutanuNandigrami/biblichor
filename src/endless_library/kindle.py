@@ -54,7 +54,7 @@ async def _send_smtp(
     timeout: float = 60.0,
 ) -> SendResult:
     kwargs: dict = dict(hostname=smtp.host, port=smtp.port, timeout=timeout)
-    if smtp.user:
+    if smtp.user and smtp.password:
         kwargs["username"] = smtp.user
         kwargs["password"] = smtp.password
     if smtp.starttls:
@@ -85,8 +85,8 @@ def send_to_kindle(
     """
     if not kindle.recipient:
         raise KindleSendError("kindle recipient not configured")
-    if not smtp.user:
-        raise KindleSendError("SMTP user not configured")
+    if not smtp.host:
+        raise KindleSendError("SMTP host not configured")
     size_mb = attachment.stat().st_size / (1024 * 1024)
     limit = max_mb_override or kindle.attachment_max_mb
     if size_mb > limit:

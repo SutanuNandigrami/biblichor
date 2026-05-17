@@ -1,0 +1,309 @@
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+
+from endless_library.config import Config
+from endless_library.convert import ConvertError, convert_to_epub
+from endless_library.db.bench import BenchRunRepo
+from endless_library.db.books import BookRepo, BookRow
+from endless_library.db.candidates import CandidateRepo
+from endless_library.db.events import EventRepo
+from endless_library.db.schema import init_db
+from endless_library.db.sources import SourceAccountRepo
+from endless_library.domain.format_router import decide_format_action
+from endless_library.domain.models import Candidate, SearchQuery
+from endless_library.domain.scoring import score_candidate
+from endless_library.domain.state_machine import decide_auto_pick
+from endless_library.download import DownloadError, download
+from endless_library.kindle import KindleSendError, send_to_kindle
+from endless_library.notifier import Notifier
+from endless_library.scrapers import registry as scrapers_registry
+from endless_library.sources import registry as sources_registry
+
+log = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class PipelineDeps:
+    cfg: Config
+    db_path: Path
+    notifier: Notifier
+    books: BookRepo
+    cands: CandidateRepo
+    events: EventRepo
+    sources: SourceAccountRepo
+    bench: BenchRunRepo
+
+    @classmethod
+    def build(cls, *, cfg: Config, db_path: Path) -> PipelineDeps:
+        init_db(db_path)
+        return cls(
+            cfg=cfg,
+            db_path=db_path,
+            notifier=Notifier(cfg.pushover),
+            books=BookRepo(db_path),
+            cands=CandidateRepo(db_path),
+            events=EventRepo(db_path),
+            sources=SourceAccountRepo(db_path),
+            bench=BenchRunRepo(db_path),
+        )
+
+
+# ----- source polling -----
+
+
+def poll_sources(deps: PipelineDeps) -> int:
+    """Iterate every enabled source account, upsert discovered books. Returns count added."""
+    added = 0
+    for acct in deps.sources.list_enabled():
+        try:
+            src = sources_registry.build(acct.source)
+            refs = list(src.list_to_read(identifier=acct.identifier, token=acct.token))
+        except Exception as e:
+            deps.events.append(
+                book_id=None,
+                kind="error",
+                message=f"poll {acct.source} {acct.identifier} failed: {e}",
+            )
+            log.warning("poll failed for %s: %s", acct.source, e)
+            continue
+        for ref in refs:
+            existing = deps.books.count()
+            bid = deps.books.upsert(
+                title=ref.title,
+                author=ref.author,
+                isbn13=ref.isbn13,
+                source=ref.source,
+                source_id=ref.source_id,
+                source_added_at=ref.source_added_at,
+            )
+            if deps.books.count() > existing:
+                added += 1
+                deps.events.append(
+                    book_id=bid,
+                    kind="state_change",
+                    message=f"added from {ref.source}",
+                    meta={"isbn13": ref.isbn13, "source_id": ref.source_id},
+                )
+        deps.sources.mark_polled(acct.id)
+    log.info("poll_sources added %d new books", added)
+    return added
+
+
+# ----- queue processing -----
+
+
+def _search_with_strategies(
+    deps: PipelineDeps,
+    book: BookRow,
+) -> tuple[list[Candidate], str | None]:
+    """Try each enabled scraper strategy until one returns candidates.
+    Returns (candidates, strategy_name_or_None)."""
+    sq = SearchQuery(
+        title=book.title,
+        author=book.author,
+        isbn13=book.isbn13,
+        format_priority=tuple(deps.cfg.scrapers.format_priority),
+        language=deps.cfg.scrapers.language,
+    )
+    for s_name in scrapers_registry.enabled_order(deps.cfg.scrapers):
+        try:
+            scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
+            cands = scraper.search(sq)
+        except NotImplementedError:
+            continue
+        except Exception as e:
+            deps.events.append(
+                book_id=book.id,
+                kind="error",
+                scraper=s_name,
+                message=f"search error: {e}",
+            )
+            continue
+        if cands:
+            deps.events.append(
+                book_id=book.id,
+                kind="scrape",
+                scraper=s_name,
+                message=f"got {len(cands)} candidates",
+            )
+            return cands, s_name
+    return [], None
+
+
+def _score_and_persist(deps: PipelineDeps, book: BookRow, candidates: list[Candidate]):
+    deps.cands.clear_for_book(book.id)
+    scored: list[tuple[float, Candidate]] = []
+    for c in candidates:
+        isbn_match = bool(book.isbn13) and book.isbn13 in (c.raw.get("isbns") or [])
+        sq = SearchQuery(
+            title=book.title,
+            author=book.author,
+            isbn13=book.isbn13,
+            format_priority=tuple(deps.cfg.scrapers.format_priority),
+            language=deps.cfg.scrapers.language,
+        )
+        sb = score_candidate(c, sq, deps.cfg.scoring, isbn13_match=isbn_match)
+        if sb.is_hard_skip:
+            continue
+        deps.cands.insert(
+            book_id=book.id,
+            provider=c.provider,
+            md5=c.md5,
+            title=c.title,
+            author=c.author,
+            language=c.language,
+            format=c.format,
+            filesize_bytes=c.filesize_bytes,
+            year=c.year,
+            publisher=c.publisher,
+            edition_hints=c.edition_hints,
+            score=sb.total,
+            detail_url=c.detail_url,
+            raw_json=json.dumps(c.raw or {}),
+        )
+        scored.append((sb.total, c))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored
+
+
+def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Path | None:
+    """Find a scraper that can resolve this candidate's CDN URL and stream the file down."""
+    for s_name in scrapers_registry.enabled_order(deps.cfg.scrapers):
+        try:
+            scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
+            handle = scraper.resolve_cdn(c)
+        except NotImplementedError:
+            continue
+        except Exception as e:
+            deps.events.append(
+                book_id=book.id, kind="error", scraper=s_name, message=f"resolve_cdn error: {e}"
+            )
+            continue
+        if not handle:
+            continue
+        deps.events.append(
+            book_id=book.id,
+            kind="scrape",
+            scraper=s_name,
+            message=f"resolved cdn: {handle.url[:80]}",
+        )
+        try:
+            result = download(
+                handle,
+                dest_dir=Path(deps.cfg.general.books_dir),
+                fallback_name=f"{book.title} - {book.author or 'unknown'}",
+                expected_md5=c.md5,
+            )
+        except DownloadError as e:
+            deps.events.append(
+                book_id=book.id, kind="download", scraper=s_name, message=f"download failed: {e}"
+            )
+            continue
+        deps.events.append(
+            book_id=book.id,
+            kind="download",
+            scraper=s_name,
+            message=f"downloaded {result.size} bytes -> {result.path.name}",
+        )
+        deps.books.set_status(
+            book.id,
+            "downloading",
+            md5=result.md5,
+            file_path=str(result.path),
+            format=result.path.suffix.lstrip("."),
+        )
+        return result.path
+    return None
+
+
+def process_one(deps: PipelineDeps, book: BookRow) -> str:
+    """Run the full pipeline on a single book. Returns final status."""
+    deps.books.set_status(book.id, "searching")
+    deps.books.increment_attempts(book.id)
+    deps.events.append(book_id=book.id, kind="state_change", message="-> searching")
+
+    candidates, _strat = _search_with_strategies(deps, book)
+    if not candidates:
+        deps.books.set_status(book.id, "failed", error="no candidates from any scraper")
+        return "failed"
+    scored = _score_and_persist(deps, book, candidates)
+    if not scored:
+        deps.books.set_status(book.id, "failed", error="all candidates hard-skipped (audio?)")
+        return "failed"
+    top = scored[0][0]
+    second = scored[1][0] if len(scored) > 1 else 0.0
+    decision = decide_auto_pick(
+        top=top,
+        second=second,
+        threshold=deps.cfg.general.auto_pick_threshold,
+        gap=deps.cfg.general.auto_pick_gap,
+        min_score_for_failure=deps.cfg.general.min_score_for_failure,
+    )
+    if decision == "failed":
+        deps.books.set_status(book.id, "failed", error=f"no plausible match (top={top:.1f})")
+        return "failed"
+    if decision == "needs_review":
+        deps.books.set_status(
+            book.id, "needs_review", error=f"low confidence top={top:.1f} second={second:.1f}"
+        )
+        deps.notifier.book_needs_review(book.title, book.author)
+        return "needs_review"
+    # auto-pick
+    picked_cand = scored[0][1]
+    file_path = _resolve_and_download(deps, book, picked_cand)
+    if not file_path:
+        deps.books.set_status(book.id, "failed", error="all scrapers failed to resolve/download")
+        return "failed"
+    # format routing
+    action = decide_format_action(file_path.suffix)
+    if action == "skip":
+        deps.books.set_status(book.id, "skipped", error=f"format unsupported: {file_path.suffix}")
+        return "skipped"
+    if action == "convert" and deps.cfg.calibre.enabled:
+        deps.books.set_status(book.id, "converting")
+        try:
+            cr = convert_to_epub(
+                file_path,
+                output_profile=deps.cfg.calibre.output_profile,
+                timeout_seconds=deps.cfg.calibre.conversion_timeout_seconds,
+            )
+            file_path = cr.path
+            deps.books.set_status(book.id, "converting", format="epub", file_path=str(file_path))
+        except ConvertError as e:
+            deps.books.set_status(book.id, "failed", error=f"convert failed: {e}")
+            return "failed"
+    deps.books.set_status(book.id, "sending")
+    try:
+        send_to_kindle(
+            attachment=file_path,
+            kindle=deps.cfg.kindle,
+            smtp=deps.cfg.smtp,
+            title=book.title,
+            author=book.author,
+        )
+    except KindleSendError as e:
+        deps.books.set_status(book.id, "failed", error=f"kindle send failed: {e}")
+        return "failed"
+    deps.books.set_status(book.id, "sent")
+    deps.events.append(book_id=book.id, kind="send", message="sent to kindle")
+    deps.notifier.book_sent(book.title, book.author, file_path.suffix.lstrip("."))
+    return "sent"
+
+
+def process_queue(deps: PipelineDeps) -> dict[str, int]:
+    """Walk every pending book; returns a tally by terminal status."""
+    deps.books.reset_zombies(stale_minutes=deps.cfg.general.zombie_stale_minutes)
+    tally = {"sent": 0, "failed": 0, "needs_review": 0, "skipped": 0}
+    for b in deps.books.pending(max_attempts=deps.cfg.general.max_attempts):
+        try:
+            st = process_one(deps, b)
+        except Exception as e:
+            log.exception("pipeline crashed on book %s", b.id)
+            deps.books.set_status(b.id, "failed", error=f"pipeline crash: {e}")
+            st = "failed"
+        tally[st] = tally.get(st, 0) + 1
+    return tally

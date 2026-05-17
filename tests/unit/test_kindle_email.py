@@ -50,13 +50,13 @@ def test_send_requires_recipient(tmp_path: Path):
         )
 
 
-def test_send_requires_smtp_user(tmp_path: Path):
+def test_send_requires_smtp_host(tmp_path: Path):
     f = tmp_path / "x.epub"
     f.write_bytes(b"x")
-    with pytest.raises(KindleSendError, match="SMTP"):
+    with pytest.raises(KindleSendError, match="SMTP host"):
         send_to_kindle(
             attachment=f,
             kindle=KindleCfg(recipient="me@kindle.com"),
-            smtp=SmtpCfg(user=""),
+            smtp=SmtpCfg(host=""),
             title="x",
         )
