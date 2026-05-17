@@ -35,6 +35,12 @@ class AddSource(BaseModel):
     poll_interval_minutes: int = 60
 
 
+class RescheduleJob(BaseModel):
+    minutes: int | None = None
+    hours: int | None = None
+    cron_hour: int | None = None  # for daily cron jobs (UTC hour)
+
+
 class BulkDelete(BaseModel):
     ids: list[int] | None = None
     status: str | None = None
@@ -225,6 +231,87 @@ def register(app: FastAPI) -> None:
             "running": bool(getattr(state, "_running", False)),
             "last_tally": getattr(state, "_last_tally", None),
         }
+
+    # ---------- schedule ----------
+
+    def _describe_trigger(trig) -> str:
+        t = type(trig).__name__
+        if t == "IntervalTrigger":
+            sec = int(trig.interval.total_seconds())
+            if sec % 3600 == 0:
+                return f"every {sec // 3600} hour(s)"
+            if sec % 60 == 0:
+                return f"every {sec // 60} min"
+            return f"every {sec} sec"
+        if t == "CronTrigger":
+            return f"cron: {trig}"
+        return repr(trig)
+
+    @router.get("/schedule/jobs")
+    def list_jobs(request: Request):
+        sched = getattr(request.app.state, "scheduler", None)
+        if sched is None:
+            return {"jobs": [], "scheduler_running": False}
+        jobs = []
+        for j in sched.get_jobs():
+            jobs.append(
+                {
+                    "id": j.id,
+                    "name": j.name or j.id,
+                    "trigger": _describe_trigger(j.trigger),
+                    "next_run_at": j.next_run_time.isoformat() if j.next_run_time else None,
+                    "paused": j.next_run_time is None,
+                }
+            )
+        return {"jobs": jobs, "scheduler_running": sched.running}
+
+    @router.post("/schedule/jobs/{job_id}/pause")
+    def pause_job(job_id: str, request: Request):
+        sched = request.app.state.scheduler
+        try:
+            sched.pause_job(job_id)
+        except Exception as e:
+            raise HTTPException(404, detail=str(e)) from e
+        return {"ok": True, "paused": True}
+
+    @router.post("/schedule/jobs/{job_id}/resume")
+    def resume_job(job_id: str, request: Request):
+        sched = request.app.state.scheduler
+        try:
+            sched.resume_job(job_id)
+        except Exception as e:
+            raise HTTPException(404, detail=str(e)) from e
+        return {"ok": True, "paused": False}
+
+    @router.post("/schedule/jobs/{job_id}/run")
+    def run_job(job_id: str, request: Request):
+        """Trigger a job to fire on the next scheduler tick."""
+        from datetime import datetime
+
+        sched = request.app.state.scheduler
+        try:
+            sched.modify_job(job_id, next_run_time=datetime.now(sched.timezone))
+        except Exception as e:
+            raise HTTPException(404, detail=str(e)) from e
+        return {"ok": True}
+
+    @router.post("/schedule/jobs/{job_id}/reschedule")
+    def reschedule_job(job_id: str, payload: RescheduleJob, request: Request):
+        sched = request.app.state.scheduler
+        try:
+            if payload.cron_hour is not None:
+                sched.reschedule_job(job_id, trigger="cron", hour=payload.cron_hour)
+            elif payload.hours is not None:
+                sched.reschedule_job(job_id, trigger="interval", hours=payload.hours)
+            elif payload.minutes is not None:
+                sched.reschedule_job(job_id, trigger="interval", minutes=payload.minutes)
+            else:
+                raise HTTPException(400, detail="provide minutes, hours, or cron_hour")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(404, detail=str(e)) from e
+        return {"ok": True}
 
     # ---------- sources ----------
 

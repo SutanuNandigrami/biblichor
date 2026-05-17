@@ -24,7 +24,7 @@ def client(tmp_path: Path):
     deps = PipelineDeps.build(cfg=cfg, db_path=db)
     cfg_path = tmp_path / "config.yaml"
     save_config(cfg, cfg_path)
-    app = create_app(deps=deps, config_path=cfg_path)
+    app = create_app(cfg=cfg, deps=deps, config_path=cfg_path)
     return TestClient(app), deps
 
 
