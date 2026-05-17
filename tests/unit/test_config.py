@@ -84,3 +84,42 @@ def test_secret_masking(cfg_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     cfg = load_config(cfg_path)
     masked = cfg.public_view()
     assert masked["smtp"]["password"] == "***"
+
+
+def test_save_persists_secrets_to_env_next_to_yaml(tmp_path, monkeypatch):
+    """save_config writes secrets to .env so they survive process restarts."""
+    monkeypatch.delenv("SMTP_PASS", raising=False)
+    monkeypatch.delenv("SMTP_USER", raising=False)
+    monkeypatch.delenv("KINDLE_EMAIL", raising=False)
+    yaml = tmp_path / "config.yaml"
+    yaml.write_text(YAML, encoding="utf-8")
+    from endless_library.config import load_config, save_config
+
+    cfg = load_config(yaml)
+    cfg.smtp.user = "alice@example.com"
+    cfg.smtp.password = "secret-app-pw"
+    cfg.kindle.recipient = "alice@kindle.com"
+    cfg.pushover.user_key = "uk-test"
+    save_config(cfg, yaml)
+    env_path = tmp_path / ".env"
+    assert env_path.exists()
+    env_text = env_path.read_text(encoding="utf-8")
+    assert "SMTP_PASS=secret-app-pw" in env_text
+    assert "SMTP_USER=alice@example.com" in env_text
+    assert "KINDLE_EMAIL=alice@kindle.com" in env_text
+    # yaml should NOT contain the password
+    assert "secret-app-pw" not in yaml.read_text(encoding="utf-8")
+
+
+def test_load_reads_env_next_to_yaml(tmp_path, monkeypatch):
+    """load_config picks up secrets from the .env file next to the yaml."""
+    monkeypatch.delenv("SMTP_PASS", raising=False)
+    yaml = tmp_path / "config.yaml"
+    yaml.write_text(YAML, encoding="utf-8")
+    env = tmp_path / ".env"
+    env.write_text("SMTP_PASS=loaded-from-env\nSMTP_USER=bob@example.com\n", encoding="utf-8")
+    from endless_library.config import load_config
+
+    cfg = load_config(yaml)
+    assert cfg.smtp.password == "loaded-from-env"
+    assert cfg.smtp.user == "bob@example.com"
