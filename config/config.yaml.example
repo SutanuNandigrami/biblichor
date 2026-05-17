@@ -53,10 +53,8 @@ scrapers:
   flaresolverr_url: http://flaresolverr:8191/v1
   annas_mirrors:
     - https://annas-archive.gl
-    - https://annas-archive.org
-    - https://annas-archive.se
-    - https://annas-archive.li
-    - https://annas-archive.gs
+    - https://annas-archive.pk
+    - https://annas-archive.gd
 
 scoring:
   isbn_match: 35
