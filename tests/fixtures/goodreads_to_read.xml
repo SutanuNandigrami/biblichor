@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>sutanu's to-read books on Goodreads</title>
+    <link>https://www.goodreads.com/review/list_rss/12345?shelf=to-read</link>
+    <description>sutanu's to-read</description>
+    <item>
+      <guid>review:9876543210</guid>
+      <pubDate>Mon, 13 Apr 2026 10:00:00 -0700</pubDate>
+      <title>The Pragmatic Programmer: 20th Anniversary Edition</title>
+      <book_id>54425426</book_id>
+      <book_image_url>x</book_image_url>
+      <book_small_image_url>x</book_small_image_url>
+      <book_medium_image_url>x</book_medium_image_url>
+      <book_large_image_url>x</book_large_image_url>
+      <book_description>...</book_description>
+      <author_name>David Thomas</author_name>
+      <isbn>0135957052</isbn>
+      <user_date_added>Mon, 13 Apr 2026 10:00:00 -0700</user_date_added>
+      <user_date_created>Mon, 13 Apr 2026 10:00:00 -0700</user_date_created>
+      <user_shelves>to-read</user_shelves>
+    </item>
+    <item>
+      <guid>review:1111111111</guid>
+      <pubDate>Tue, 14 Apr 2026 10:00:00 -0700</pubDate>
+      <title>Project Hail Mary</title>
+      <book_id>54493401</book_id>
+      <author_name>Andy Weir</author_name>
+      <isbn>0593135202</isbn>
+      <user_date_added>Tue, 14 Apr 2026 10:00:00 -0700</user_date_added>
+    </item>
+    <item>
+      <guid>review:2222222222</guid>
+      <pubDate>Wed, 15 Apr 2026 10:00:00 -0700</pubDate>
+      <title>Untitled Without ISBN</title>
+      <book_id>99999</book_id>
+      <author_name>Anon</author_name>
+      <isbn></isbn>
+    </item>
+  </channel>
+</rss>

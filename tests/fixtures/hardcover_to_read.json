@@ -1,0 +1,30 @@
+{
+  "data": {
+    "me": [
+      {
+        "user_books": [
+          {
+            "id": 555,
+            "updated_at": "2026-04-13T10:00:00Z",
+            "book": {
+              "id": 1001,
+              "title": "Sapiens: A Brief History of Humankind",
+              "contributions": [{"author": {"name": "Yuval Noah Harari"}}],
+              "editions": [{"isbn_13": "9780062316097"}]
+            }
+          },
+          {
+            "id": 556,
+            "updated_at": "2026-04-14T10:00:00Z",
+            "book": {
+              "id": 1002,
+              "title": "Educated",
+              "contributions": [{"author": {"name": "Tara Westover"}}],
+              "editions": []
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
