@@ -26,7 +26,7 @@ def test_url_has_book_ext(url, expected):
         ("2.3 MB", 2_411_724),
         ("450 KB", 460_800),
         ("1.2 GB", 1_288_490_188),
-        ("500 B", 500),
+        ("500 B", None),  # we now require KB/MB/GB; bare B is too noisy
         ("approx 2.3 MB total", 2_411_724),
         ("", None),
         ("free book", None),
