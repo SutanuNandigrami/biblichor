@@ -519,6 +519,119 @@ def register(app: FastAPI) -> None:
         deps.mirrors.delete(mid)
         return {"ok": True}
 
+    # ---------- scoring ----------
+
+    @router.get("/scoring")
+    def get_scoring(request: Request):
+        deps = request.app.state.deps
+        return deps.cfg.scoring.model_dump()
+
+    @router.post("/scoring")
+    def set_scoring(payload: dict, request: Request):
+        deps = request.app.state.deps
+        cfg = deps.cfg
+        for field, value in payload.items():
+            if hasattr(cfg.scoring, field):
+                setattr(cfg.scoring, field, value)
+        from endless_library.config import save_config
+
+        save_config(cfg, request.app.state.config_path)
+        return {"ok": True, "scoring": cfg.scoring.model_dump()}
+
+    @router.post("/scoring/reset")
+    def reset_scoring(request: Request):
+        from endless_library.config import ScoringCfg, save_config
+
+        deps = request.app.state.deps
+        deps.cfg.scoring = ScoringCfg(
+            isbn_match=35,
+            title_weight=25,
+            author_weight=15,
+            format_bonus={"epub": 10, "azw3": 9, "mobi": 8, "pdf": 5},
+            language_bonus=10,
+            filesize_min_bytes=200_000,
+            filesize_max_bytes=80 * 1024 * 1024,
+            scan_penalty=10,
+            audio_keywords=["audiobook", "audible", "mp3", "m4b"],
+        )
+        save_config(deps.cfg, request.app.state.config_path)
+        return {"ok": True, "scoring": deps.cfg.scoring.model_dump()}
+
+    @router.post("/scoring/preview")
+    def score_preview(payload: dict, request: Request):
+        """Re-score one book's candidates against either the proposed weights
+        (passed in `weights`) or the current config. Returns rankings."""
+        from endless_library.config import ScoringCfg
+        from endless_library.domain.models import Candidate, SearchQuery
+        from endless_library.domain.scoring import score_candidate
+
+        deps = request.app.state.deps
+        book_id = int(payload.get("book_id") or 0)
+        book = deps.books.get(book_id) if book_id else None
+        if not book:
+            raise HTTPException(404, "book not found")
+        # Build scoring cfg from payload override (partial allowed)
+        base = deps.cfg.scoring.model_dump()
+        for k, v in (payload.get("weights") or {}).items():
+            if k in base:
+                base[k] = v
+        scoring_cfg = ScoringCfg(**base)
+        q = SearchQuery(
+            title=book.title,
+            author=book.author,
+            isbn13=book.isbn13,
+            format_priority=tuple(deps.cfg.scrapers.format_priority),
+            language=deps.cfg.scrapers.language,
+        )
+        # Reconstruct candidates from DB
+        import json
+
+        out = []
+        for row in deps.cands.top_for_book(book_id, limit=10):
+            raw = json.loads(row.raw_json) if row.raw_json else {}
+            cand = Candidate(
+                provider=row.provider,
+                md5=row.md5,
+                title=row.title,
+                author=row.author,
+                language=row.language,
+                format=row.format,
+                filesize_bytes=row.filesize_bytes,
+                year=row.year,
+                publisher=row.publisher,
+                edition_hints=row.edition_hints or "",
+                detail_url=row.detail_url,
+                raw=raw,
+            )
+            isbn_match = bool(q.isbn13) and q.isbn13 in (raw.get("isbns") or [])
+            sb = score_candidate(cand, q, scoring_cfg, isbn13_match=isbn_match)
+            out.append(
+                {
+                    "id": row.id,
+                    "md5": row.md5,
+                    "title": row.title,
+                    "format": row.format,
+                    "filesize_bytes": row.filesize_bytes,
+                    "language": row.language,
+                    "isbn_match": isbn_match,
+                    "score": sb.total,
+                    "components": sb.components,
+                    "is_hard_skip": sb.is_hard_skip,
+                    "skip_reason": sb.skip_reason,
+                }
+            )
+        out.sort(key=lambda x: x["score"], reverse=True)
+        return {
+            "book": {
+                "id": book.id,
+                "title": book.title,
+                "isbn13": book.isbn13,
+                "author": book.author,
+            },
+            "candidates": out,
+            "weights": scoring_cfg.model_dump(),
+        }
+
     app.include_router(router)
 
     # ---------- WebSocket: live events ----------
