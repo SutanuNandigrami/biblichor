@@ -30,13 +30,18 @@
 </section>
 <section>
   <h2 class="font-semibold mb-2">Add source</h2>
+  <p class="text-xs text-slate-400 mb-2">
+    Goodreads identifier = <code>userid:shelf</code>. Find your userid in any of your bookshelf URLs:
+    <code>goodreads.com/review/list/<b>USERID</b>-name?shelf=to-read</code>.
+    Hardcover identifier = <code>me</code> with your API token (generate at <a class="underline" target="_blank" href="https://hardcover.app/account/api">hardcover.app/account/api</a>).
+  </p>
   <form method="post" action="/api/sources" class="flex flex-wrap gap-2 items-end">
     <select name="source" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
       <option value="goodreads">goodreads</option>
       <option value="hardcover">hardcover</option>
       <option value="manual">manual</option>
     </select>
-    <input name="identifier" placeholder="user_id:shelf  OR  me" required
+    <input name="identifier" placeholder="69278726:to-read   (or me for hardcover)" required
            class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
     <input name="token" placeholder="API token (hardcover only)"
            class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm w-72">
