@@ -31,6 +31,25 @@ def score_candidate(
             is_hard_skip=True,
             skip_reason="audio",
         )
+    # Hard-skip cheap derivative content: summaries, study guides, conversation
+    # starters (bbrown430-inspired filter).
+    derivative_terms = (
+        "summary",
+        "summaries",
+        "conversation starter",
+        "study guide",
+        "book club",
+        "a guide to",
+    )
+    blob = " ".join([(c.title or ""), (c.edition_hints or "")]).lower()
+    for term in derivative_terms:
+        if term in blob:
+            return ScoreBreakdown(
+                total=0.0,
+                components={"derivative_hard_skip": 0.0},
+                is_hard_skip=True,
+                skip_reason=f"derivative ({term})",
+            )
 
     # ISBN — caller is the authoritative source of truth via isbn13_match
     # Fallback: peek at raw["isbns"] list if present

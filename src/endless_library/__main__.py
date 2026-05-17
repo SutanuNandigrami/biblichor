@@ -68,6 +68,35 @@ def cmd_run(args):
         sched.shutdown()
 
 
+def cmd_send(args):
+    """Send an arbitrary file to Kindle via configured SMTP."""
+    from pathlib import Path as _Path
+
+    from endless_library.kindle import KindleSendError, send_to_kindle
+
+    config_path, _ = _resolve_paths(args)
+    cfg = load_config(config_path)
+    _setup_logging(cfg.general.log_level)
+    fp = _Path(args.path).expanduser()
+    if not fp.exists():
+        print(f"file not found: {fp}", file=sys.stderr)
+        return 1
+    title = args.title or fp.stem
+    try:
+        r = send_to_kindle(
+            attachment=fp,
+            kindle=cfg.kindle,
+            smtp=cfg.smtp,
+            title=title,
+            author=None,
+        )
+    except KindleSendError as e:
+        print(f"send failed: {e}", file=sys.stderr)
+        return 1
+    print(f"ok: {r.response}")
+    return 0
+
+
 def cmd_bench(args):
     config_path, db_path = _resolve_paths(args)
     cfg = load_config(config_path)
@@ -95,6 +124,11 @@ def main(argv: list[str] | None = None) -> int:
 
     s_status = sub.add_parser("status", help="Print queue summary")
     s_status.set_defaults(func=cmd_status)
+
+    s_send = sub.add_parser("send", help="Send an existing epub/file straight to Kindle")
+    s_send.add_argument("path", help="Path to the file to send")
+    s_send.add_argument("--title", default=None, help="Override subject/title")
+    s_send.set_defaults(func=cmd_send)
 
     s_bench = sub.add_parser("bench", help="Run scraper benchmark")
     s_bench.add_argument("--queries", default="bench/queries.yaml")

@@ -185,7 +185,13 @@ def register(app: FastAPI) -> None:
     @router.post("/sources")
     def add_source(payload: AddSource, request: Request):
         deps = request.app.state.deps
-        if payload.source not in ("goodreads", "hardcover", "manual"):
+        if payload.source not in (
+            "goodreads",
+            "hardcover",
+            "manual",
+            "goodreads_listopia",
+            "goodreads_series",
+        ):
             raise HTTPException(400, detail="unknown source")
         try:
             sid = deps.sources.add(

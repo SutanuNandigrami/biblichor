@@ -13,7 +13,12 @@ from endless_library.scrapers.rate_limit import TokenBucket
 
 log = logging.getLogger(__name__)
 
-LIBGEN_BASE = "https://libgen.li"
+LIBGEN_MIRRORS = (
+    "https://libgen.li",
+    "https://libgen.is",
+    "https://libgen.rs",
+    "https://libgen.st",
+)
 
 
 class LibgenCurl:
@@ -24,21 +29,30 @@ class LibgenCurl:
         self.cfg = cfg
         self.bucket = TokenBucket(capacity=6, period_seconds=60)
         self._http_get = http_get
+        # Use cfg.annas_mirrors if it has libgen entries, else hard-coded list
+        self._mirrors = list(LIBGEN_MIRRORS)
+        self._mirror_idx = 0
+        # Helper accessor
+        # (kept simple; mirror selection happens in search() and resolve_cdn())
 
     def search(self, query: SearchQuery) -> list[Candidate]:
         q = f"{query.title} {query.author or ''}".strip()
         url = (
-            f"{LIBGEN_BASE}/index.php?req={quote_plus(q)}"
+            f"{self._mirrors[self._mirror_idx]}/index.php?req={quote_plus(q)}"
             "&lg_topic=libgen&open=0&view=simple&res=25&phrase=1&column=def"
         )
         html = self._get(url)
         if not html:
             return []
-        return self._parse_results(html)
+        return self._parse_results(html, self._mirrors[self._mirror_idx])
 
     def resolve_cdn(self, candidate: Candidate) -> DownloadHandle | None:
         html = self._get(candidate.detail_url)
         if not html:
+            # All direct-page paths failed; try IPFS gateway from libgen.is
+            ipfs = self._try_ipfs_fallback(candidate.md5 or "")
+            if ipfs:
+                return DownloadHandle(url=ipfs, headers={}, expected_filename=None)
             return None
         soup = BeautifulSoup(html, "lxml")
         # libgen.li exposes "GET" or direct ads links
@@ -69,8 +83,20 @@ class LibgenCurl:
             log.warning("libgen curl error %s: %s", url, e)
             return None
 
-    @staticmethod
-    def _parse_results(html: str) -> list[Candidate]:
+    def _try_ipfs_fallback(self, md5: str) -> str | None:
+        """libgen.is exposes /ads.php?md5=... which usually offers an IPFS gateway URL."""
+        if not md5:
+            return None
+        for base in self._mirrors:
+            url = f"{base}/ads.php?md5={md5}"
+            html = self._get(url)
+            if not html:
+                continue
+            for m in re.finditer(r'(https?://[^"\'\s<>]+?/ipfs/[^"\'\s<>]+)', html, re.I):
+                return m.group(0)
+        return None
+
+    def _parse_results(self, html: str, base_url: str) -> list[Candidate]:
         soup = BeautifulSoup(html, "lxml")
         out: list[Candidate] = []
         for tr in soup.select("tr"):
@@ -97,7 +123,7 @@ class LibgenCurl:
                     year=None,
                     publisher=None,
                     edition_hints=block.lower()[:300],
-                    detail_url=urljoin(LIBGEN_BASE, href),
+                    detail_url=urljoin(base_url, href),
                 )
             )
             if len(out) >= 25:
