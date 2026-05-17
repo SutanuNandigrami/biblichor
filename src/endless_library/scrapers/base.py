@@ -47,7 +47,7 @@ def parse_filesize(text: str) -> int | None:
     """Parse strings like '2.3 MB', '450 KB', '1.2 GB' → bytes. None if unparseable."""
     if not text:
         return None
-    m = re.search(r"([\d.,]+)\s*(B|KB|MB|GB)", text, re.IGNORECASE)
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*(B|KB|MB|GB)\b", text, re.IGNORECASE)
     if not m:
         return None
     val = float(m.group(1).replace(",", ""))

@@ -116,29 +116,49 @@ class AnnasArchiveCurl:
     def _parse_search_results(self, html: str, fmt_hint: str) -> list[Candidate]:
         soup = BeautifulSoup(html, "lxml")
         out: list[Candidate] = []
-        # Anna's lists hits as anchors with href like /md5/<32hex>
-        for a in soup.select('a[href^="/md5/"]'):
+        seen: set[str] = set()
+        # `js-vim-focus` is Anna's per-result title anchor; one per row, no sidebar dupes.
+        for a in soup.select('a.js-vim-focus[href^="/md5/"]'):
             href = a.get("href", "")
             m = re.search(r"/md5/([a-f0-9]{32})", href)
             if not m:
                 continue
             md5 = m.group(1)
-            # Extract metadata from sibling text within the same result block
-            block = a.get_text(" ", strip=True)
-            # Heuristic: title likely a sub-anchor or first significant text run
-            title = None
-            t_el = a.find(["h3", "h2", "div"]) or a
-            if t_el:
-                title = t_el.get_text(" ", strip=True) or None
-            # Pull a metadata line if present
-            meta_text = ""
-            parent_block = a.parent.get_text(" ", strip=True) if a.parent else block
-            meta_text = parent_block
-            fmt = self._parse_format(meta_text) or fmt_hint
-            filesize = parse_filesize(meta_text)
-            language = self._parse_language(meta_text)
-            year = self._parse_year(meta_text)
-            edition_hints = meta_text.lower()
+            if md5 in seen:
+                continue
+            seen.add(md5)
+            title = a.get_text(" ", strip=True) or None
+            # The row container: nearest ancestor with class containing "border-b"
+            row = a
+            for _ in range(6):
+                row = row.parent
+                if row is None:
+                    break
+                if row.name == "div" and "border-b" in (row.get("class") or []):
+                    break
+            row_text = row.get_text(" ", strip=True) if row else ""
+            # Look for a filename-hint div above the title (contains "/<md5>.<ext>")
+            fmt = None
+            for sib in a.parent.children if a.parent else []:
+                sib_text = (
+                    getattr(sib, "get_text", lambda **_: "")(" ", strip=True)
+                    if hasattr(sib, "get_text")
+                    else ""
+                )
+                fm = re.search(
+                    r"\.(epub|pdf|mobi|azw3|djvu|fb2|cbz|cbr|doc|docx|rtf|txt|lit)\b",
+                    sib_text,
+                    re.I,
+                )
+                if fm:
+                    fmt = fm.group(1).lower()
+                    break
+            if not fmt:
+                fmt = self._parse_format(row_text) or fmt_hint
+            filesize = parse_filesize(row_text)
+            language = self._parse_language(row_text)
+            year = self._parse_year(row_text)
+            edition_hints = row_text.lower()[:400]
             out.append(
                 Candidate(
                     provider="annas",
@@ -152,7 +172,7 @@ class AnnasArchiveCurl:
                     publisher=None,
                     edition_hints=edition_hints,
                     detail_url=urljoin(self.mirrors.current, href),
-                    raw={"block_text": block[:400]},
+                    raw={"row_text": row_text[:400]},
                 )
             )
             if len(out) >= 25:
