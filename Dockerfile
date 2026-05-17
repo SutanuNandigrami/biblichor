@@ -36,4 +36,4 @@ ENV CONFIG_PATH=/config/config.yaml
 ENV LIBRARY_DB=/data/library.db
 
 EXPOSE 8080
-CMD ["uvicorn", "endless_library.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "endless_library.app:entry", "--factory", "--host", "0.0.0.0", "--port", "8080"]
