@@ -41,9 +41,19 @@ def _filename_from_handle(handle: DownloadHandle, fallback: str) -> str:
     return fallback
 
 
-def safe_filename(name: str) -> str:
+def safe_filename(name: str, *, max_length: int = 200) -> str:
+    """Sanitize a filename; preserve the extension when truncating."""
     name = re.sub(r"[^A-Za-z0-9._\- ]+", "_", name).strip()
-    return name[:200] or "book"
+    if not name:
+        return "book"
+    if len(name) <= max_length:
+        return name
+    # Preserve extension if present (e.g., .epub, .pdf, .azw3)
+    stem, dot, ext = name.rpartition(".")
+    if dot and 1 <= len(ext) <= 6 and ext.isalnum():
+        keep_for_stem = max_length - len(ext) - 1
+        return stem[:keep_for_stem].rstrip(" _-.") + "." + ext
+    return name[:max_length]
 
 
 def download(

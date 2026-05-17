@@ -47,10 +47,25 @@ def score_candidate(
         t_sim = fuzz.token_set_ratio(_normalize_title(c.title), _normalize_title(q.title)) / 100.0
     components["title_similarity"] = t_sim * cfg.title_weight
 
-    # Author
+    # Author (with row-text fallback when parser couldn't pull author cleanly)
     a_sim = 0.0
-    if c.author and q.author:
-        a_sim = fuzz.token_set_ratio(c.author.lower(), q.author.lower()) / 100.0
+    if q.author:
+        q_author_lc = q.author.lower()
+        if c.author:
+            a_sim = fuzz.token_set_ratio(c.author.lower(), q_author_lc) / 100.0
+        else:
+            haystack = " ".join(
+                [
+                    c.edition_hints or "",
+                    str((c.raw or {}).get("row_text") or ""),
+                ]
+            ).lower()
+            if haystack:
+                # token_set_ratio is good for "Angie Thomas" anywhere in a long string
+                a_sim = fuzz.partial_token_set_ratio(q_author_lc, haystack) / 100.0
+                # Don't credit weak partial matches (single-token coincidence)
+                if a_sim < 0.7:
+                    a_sim = 0.0
     components["author_similarity"] = a_sim * cfg.author_weight
 
     # Format bonus

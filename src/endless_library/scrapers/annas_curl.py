@@ -161,6 +161,7 @@ class AnnasArchiveCurl:
             language = self._parse_language(row_text)
             year = self._parse_year(row_text)
             edition_hints = row_text.lower()[:400]
+            isbns = self._extract_isbns(row_text)
             out.append(
                 Candidate(
                     provider="annas",
@@ -174,11 +175,42 @@ class AnnasArchiveCurl:
                     publisher=None,
                     edition_hints=edition_hints,
                     detail_url=urljoin(self.mirrors.current, href),
-                    raw={"row_text": row_text[:400]},
+                    raw={"row_text": row_text[:400], "isbns": isbns},
                 )
             )
             if len(out) >= 25:
                 break
+        return out
+
+    @staticmethod
+    def _extract_isbns(text: str) -> list[str]:
+        """Pull every plausible ISBN-13 (and ISBN-10, normalized to 13) from a string."""
+        import re as _re
+
+        found: list[str] = []
+        # ISBN-13: starts with 978 or 979, then 10 more digits. Allow hyphens.
+        for m in _re.finditer(r"\b(97[89][-\s]?(?:\d[-\s]?){9}\d)\b", text):
+            digits = "".join(c for c in m.group(1) if c.isdigit())
+            if len(digits) == 13:
+                found.append(digits)
+        # ISBN-10: 10 chars, last may be X. Convert to ISBN-13.
+        for m in _re.finditer(r"(?<!\d)((?:\d[-\s]?){9}[\dXx])(?!\d)", text):
+            raw = m.group(1)
+            cleaned = "".join(c for c in raw if c.isdigit() or c in "Xx")
+            if len(cleaned) != 10:
+                continue
+            body = "978" + cleaned[:9]
+            chk = (
+                10 - sum((1 if i % 2 == 0 else 3) * int(c) for i, c in enumerate(body)) % 10
+            ) % 10
+            found.append(body + str(chk))
+        # Dedup, preserve order
+        seen: set[str] = set()
+        out: list[str] = []
+        for x in found:
+            if x not in seen:
+                seen.add(x)
+                out.append(x)
         return out
 
     @staticmethod
