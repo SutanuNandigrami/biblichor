@@ -10,10 +10,18 @@ import { api } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 
 type Source = { id: number; source: string; identifier: string; enabled: boolean; poll_interval_minutes: number; last_polled_at: string | null; token: string | null }
+type SourceType = 'goodreads' | 'goodreads_listopia' | 'goodreads_series' | 'hardcover'
+
+const TYPE_OPTIONS: { value: SourceType; label: string }[] = [
+  { value: 'goodreads',          label: 'Goodreads shelf' },
+  { value: 'goodreads_listopia', label: 'Listopia' },
+  { value: 'goodreads_series',   label: 'Series' },
+  { value: 'hardcover',          label: 'Hardcover' },
+]
 
 const sources = ref<Source[]>([])
 const addOpen = ref(false)
-const newType = ref<'goodreads' | 'hardcover'>('goodreads')
+const newType = ref<SourceType>('goodreads')
 const newId = ref('')
 const newToken = ref('')
 const toast = useToast()
@@ -93,26 +101,48 @@ async function del(s: Source) {
     </Card>
     <Card v-else class="p-10 text-center">
       <Database class="w-8 h-8 mx-auto mb-3 opacity-50" />
-      <p class="text-muted-foreground">No sources configured. Add a Goodreads shelf or Hardcover list.</p>
+      <p class="text-muted-foreground">No sources configured. Add a Goodreads shelf, Listopia list, series, or Hardcover list.</p>
     </Card>
 
     <Drawer :open="addOpen" title="Add a source" @close="addOpen = false">
       <div class="space-y-4">
         <div>
           <label class="text-xs text-muted-foreground">Type</label>
-          <div class="flex gap-2 mt-1">
-            <Button :variant="newType === 'goodreads' ? 'default' : 'outline'" size="sm" @click="newType = 'goodreads'">Goodreads</Button>
-            <Button :variant="newType === 'hardcover' ? 'default' : 'outline'" size="sm" @click="newType = 'hardcover'">Hardcover</Button>
+          <div class="flex flex-wrap gap-2 mt-1">
+            <Button
+              v-for="opt in TYPE_OPTIONS" :key="opt.value"
+              :variant="newType === opt.value ? 'default' : 'outline'"
+              size="sm" @click="newType = opt.value">
+              {{ opt.label }}
+            </Button>
           </div>
         </div>
+
         <div v-if="newType === 'goodreads'">
           <label class="text-xs text-muted-foreground">Identifier: <code>userid:shelf</code></label>
           <Input v-model="newId" placeholder="69278726:to-read" />
           <p class="text-xs text-muted-foreground mt-1">
-            Find your user ID in any of your bookshelf URLs:
+            Find your user ID in any bookshelf URL:
             <code>goodreads.com/review/list/<b>USERID</b>-name?shelf=to-read</code>
           </p>
         </div>
+
+        <div v-else-if="newType === 'goodreads_listopia'">
+          <label class="text-xs text-muted-foreground">List URL, path, or ID</label>
+          <Input v-model="newId" placeholder="https://www.goodreads.com/list/show/112351.Best_YA_Romance" />
+          <p class="text-xs text-muted-foreground mt-1">
+            Paste the URL from <code>goodreads.com/list/show/<b>ID</b>.Name</code>, the path <code>/list/show/ID.Name</code>, or just the ID. Polls the whole list and queues every book.
+          </p>
+        </div>
+
+        <div v-else-if="newType === 'goodreads_series'">
+          <label class="text-xs text-muted-foreground">Series URL, path, or ID</label>
+          <Input v-model="newId" placeholder="https://www.goodreads.com/series/40395-mistborn" />
+          <p class="text-xs text-muted-foreground mt-1">
+            Paste the URL from <code>goodreads.com/series/<b>ID</b>-name</code>, the path, or just the ID. Only main-series books are queued (novellas like book 1.5 are skipped).
+          </p>
+        </div>
+
         <div v-else>
           <label class="text-xs text-muted-foreground">Identifier (use <code>me</code>)</label>
           <Input v-model="newId" placeholder="me" />
@@ -123,6 +153,7 @@ async function del(s: Source) {
             <a class="underline text-primary" href="https://hardcover.app/account/api" target="_blank">hardcover.app/account/api</a>.
           </p>
         </div>
+
         <div class="flex justify-end gap-2 pt-2">
           <Button variant="ghost" @click="addOpen = false">Cancel</Button>
           <Button @click="add">Add</Button>
