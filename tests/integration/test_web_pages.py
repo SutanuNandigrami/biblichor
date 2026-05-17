@@ -1,3 +1,5 @@
+"""SPA backend: JSON API + static SPA mount."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from endless_library.app import create_app
-from endless_library.config import Config
+from endless_library.config import Config, save_config
 from endless_library.pipeline import PipelineDeps
 
 
@@ -21,50 +23,42 @@ def client(tmp_path: Path):
     db = tmp_path / "library.db"
     deps = PipelineDeps.build(cfg=cfg, db_path=db)
     cfg_path = tmp_path / "config.yaml"
-    from endless_library.config import save_config
-
     save_config(cfg, cfg_path)
     app = create_app(deps=deps, config_path=cfg_path)
     return TestClient(app), deps
 
 
-def test_root_redirects_to_queue(client):
+def test_healthz(client):
     c, _ = client
-    r = c.get("/")
+    r = c.get("/api/healthz")
     assert r.status_code == 200
-    assert "refresh" in r.text.lower()
+    assert r.json()["ok"] is True
 
 
-def test_queue_page_renders(client):
-    c, _ = client
-    r = c.get("/queue")
-    assert r.status_code == 200
-    assert "endless-library" in r.text
-    assert "no books" in r.text
-
-
-def test_add_book_redirects_to_detail(client):
+def test_add_and_list_books(client):
     c, deps = client
-    r = c.post("/api/books/add", data={"title": "Test", "author": "A"}, follow_redirects=False)
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/book/")
-    assert deps.books.count() == 1
+    r = c.post("/api/books", json={"title": "Test", "author": "A"})
+    assert r.status_code == 200
+    bid = r.json()["id"]
+    r2 = c.get("/api/books")
+    assert r2.status_code == 200
+    titles = [b["title"] for b in r2.json()["books"]]
+    assert "Test" in titles
+    assert deps.books.get(bid) is not None
 
 
-def test_book_detail_renders(client):
+def test_get_book_detail(client):
     c, deps = client
     bid = deps.books.upsert(title="X", author="Y", isbn13=None, source="manual", source_id="m1")
-    r = c.get(f"/book/{bid}")
+    r = c.get(f"/api/books/{bid}")
     assert r.status_code == 200
-    assert "X" in r.text
+    body = r.json()
+    assert body["book"]["title"] == "X"
+    assert body["candidates"] == []
+    assert "events" in body
 
 
-def test_book_404_for_unknown(client):
-    c, _ = client
-    assert c.get("/book/99999").status_code == 404
-
-
-def test_retry_changes_status(client):
+def test_retry_book(client):
     c, deps = client
     bid = deps.books.upsert(title="X", author=None, isbn13=None, source="manual", source_id="m1")
     deps.books.set_status(bid, "searching")
@@ -74,72 +68,43 @@ def test_retry_changes_status(client):
     assert deps.books.get(bid).status == "queued"
 
 
-def test_sources_page_renders(client):
-    c, _ = client
-    r = c.get("/sources")
-    assert r.status_code == 200
-    assert "Sources" in r.text
-
-
 def test_add_source(client):
     c, deps = client
-    r = c.post(
-        "/api/sources",
-        data={"source": "goodreads", "identifier": "12345:to-read"},
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
+    r = c.post("/api/sources", json={"source": "goodreads", "identifier": "12345:to-read"})
+    assert r.status_code == 200
     assert len(deps.sources.list_all()) == 1
 
 
-def test_scrapers_page_renders(client):
+def test_list_scrapers(client):
     c, _ = client
-    r = c.get("/scrapers")
+    r = c.get("/api/scrapers")
     assert r.status_code == 200
-    assert "annas_curl" in r.text
+    body = r.json()
+    assert "annas_curl" in body["available"]
 
 
-def test_settings_page_renders(client):
-    c, _ = client
-    r = c.get("/settings")
-    assert r.status_code == 200
-    assert "SMTP" in r.text
-
-
-def test_settings_save_persists(client, tmp_path: Path):
+def test_settings_round_trip(client):
     c, deps = client
-    r = c.post(
-        "/api/settings",
-        data={
-            "poll_interval_minutes": 30,
-            "max_attempts": 2,
-            "kindle_recipient": "you@kindle.com",
-            "smtp_host": "smtp.example.com",
-            "smtp_port": 587,
-            "smtp_user": "u@example.com",
-            "smtp_password": "secret",
-            "auto_pick_threshold": 80,
-            "auto_pick_gap": 5,
-            "log_level": "INFO",
-        },
-    )
+    r = c.get("/api/settings")
     assert r.status_code == 200
-    # In-memory cfg updated
+    r2 = c.post("/api/settings", json={"poll_interval_minutes": 30, "smtp_password": "newpw"})
+    assert r2.status_code == 200
     assert deps.cfg.general.poll_interval_minutes == 30
-    assert deps.cfg.smtp.password == "secret"
+    assert deps.cfg.smtp.password == "newpw"
 
 
-def test_logs_page_renders(client):
-    c, deps = client
-    bid = deps.books.upsert(title="x", author=None, isbn13=None, source="manual", source_id="m1")
-    deps.events.append(book_id=bid, kind="state_change", message="hello")
-    r = c.get("/logs")
-    assert r.status_code == 200
-    assert "hello" in r.text
-
-
-def test_healthz(client):
+def test_cycle_status_initially_not_running(client):
     c, _ = client
-    r = c.get("/healthz")
+    r = c.get("/api/cycle/status")
     assert r.status_code == 200
-    assert r.json()["ok"] is True
+    body = r.json()
+    assert body["running"] is False
+
+
+def test_setup_status(client):
+    c, _ = client
+    r = c.get("/api/setup")
+    assert r.status_code == 200
+    body = r.json()
+    assert "sources_count" in body
+    assert "smtp_configured" in body
