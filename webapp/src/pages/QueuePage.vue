@@ -1,0 +1,176 @@
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from 'vue'
+import { Search, BookOpen, Plus } from 'lucide-vue-next'
+import { api } from '@/composables/useApi'
+import { useEventStream } from '@/composables/useWebSocket'
+import { useToast } from '@/composables/useToast'
+import Button from '@/components/ui/Button.vue'
+import Input from '@/components/ui/Input.vue'
+import Badge from '@/components/ui/Badge.vue'
+import StatusPill from '@/components/StatusPill.vue'
+import Drawer from '@/components/ui/Drawer.vue'
+import Card from '@/components/ui/Card.vue'
+
+type Book = {
+  id: number; title: string; author: string | null
+  source: string; status: string; format: string | null
+  attempts: number; updated_at: string; last_error: string | null
+  isbn13: string | null; file_path: string | null
+}
+
+const books = ref<Book[]>([])
+const total = ref(0)
+const query = ref('')
+const statusFilter = ref('')
+const addOpen = ref(false)
+const addTitle = ref(''); const addAuthor = ref(''); const addIsbn = ref('')
+const detailId = ref<number | null>(null)
+const toast = useToast()
+
+async function fetchBooks() {
+  const params = new URLSearchParams()
+  if (query.value) params.set('q', query.value)
+  if (statusFilter.value) params.set('status', statusFilter.value)
+  const r = await api<{ books: Book[]; total: number }>('/api/books?' + params)
+  books.value = r.books
+  total.value = r.total
+}
+onMounted(fetchBooks)
+watch([query, statusFilter], fetchBooks)
+
+// Refresh queue when WebSocket signals a state_change or new book event
+useEventStream((msg) => {
+  if (msg.type === 'event' && (msg.data.kind === 'state_change' || msg.data.kind === 'send')) {
+    fetchBooks().catch(() => {})
+  }
+})
+
+const statuses = computed(() => Array.from(new Set(books.value.map((b) => b.status))).sort())
+
+async function add() {
+  if (!addTitle.value.trim()) return
+  try {
+    await api<{ id: number }>('/api/books', {
+      method: 'POST',
+      body: JSON.stringify({ title: addTitle.value, author: addAuthor.value || null, isbn13: addIsbn.value || null }),
+    })
+    addTitle.value = addAuthor.value = addIsbn.value = ''
+    addOpen.value = false
+    await fetchBooks()
+    toast.success('Book added')
+  } catch (e: any) { toast.error('Add failed', String(e?.message ?? e)) }
+}
+
+async function retry(b: Book) {
+  try {
+    await api(`/api/books/${b.id}/retry`, { method: 'POST' })
+    toast.success(`Re-queued: ${b.title}`)
+    await fetchBooks()
+  } catch (e: any) { toast.error('Retry failed', String(e?.message ?? e)) }
+}
+
+async function del(b: Book) {
+  if (!confirm(`Delete "${b.title}"?`)) return
+  try {
+    await api(`/api/books/${b.id}/delete`, { method: 'POST' })
+    toast.success('Deleted')
+    await fetchBooks()
+  } catch (e: any) { toast.error('Delete failed', String(e?.message ?? e)) }
+}
+</script>
+
+<template>
+  <div class="p-6 space-y-4">
+    <div class="flex items-center gap-3">
+      <h1 class="text-2xl font-semibold tracking-tight">Queue</h1>
+      <Badge variant="muted">{{ total }} books</Badge>
+      <div class="flex-1"></div>
+      <Button variant="subtle" size="sm" @click="addOpen = true">
+        <Plus class="w-4 h-4" /> Add book
+      </Button>
+    </div>
+
+    <div class="flex gap-2">
+      <div class="relative flex-1 max-w-md">
+        <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input v-model="query" placeholder="Search title or author" class="pl-9" />
+      </div>
+      <select v-model="statusFilter"
+        class="h-9 px-3 rounded-md border border-input bg-background text-sm">
+        <option value="">All statuses</option>
+        <option v-for="s in statuses" :key="s">{{ s }}</option>
+      </select>
+    </div>
+
+    <Card class="overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="text-xs text-muted-foreground border-b border-border">
+          <tr class="text-left">
+            <th class="px-4 py-3">Title</th>
+            <th class="px-4 py-3">Author</th>
+            <th class="px-4 py-3">Source</th>
+            <th class="px-4 py-3">Status</th>
+            <th class="px-4 py-3">Format</th>
+            <th class="px-4 py-3">Attempts</th>
+            <th class="px-4 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="b in books" :key="b.id"
+              class="border-b border-border/60 last:border-0 hover:bg-accent/40 cursor-pointer"
+              @click="detailId = b.id">
+            <td class="px-4 py-3">
+              <div class="flex items-center gap-2">
+                <BookOpen class="w-4 h-4 text-muted-foreground" />
+                <span class="font-medium">{{ b.title }}</span>
+              </div>
+            </td>
+            <td class="px-4 py-3 text-muted-foreground">{{ b.author ?? '—' }}</td>
+            <td class="px-4 py-3 text-muted-foreground text-xs">{{ b.source }}</td>
+            <td class="px-4 py-3"><StatusPill :status="b.status" /></td>
+            <td class="px-4 py-3 text-muted-foreground">{{ b.format ?? '—' }}</td>
+            <td class="px-4 py-3 text-muted-foreground">{{ b.attempts }}</td>
+            <td class="px-4 py-3 text-right space-x-1" @click.stop>
+              <Button size="sm" variant="outline" @click="retry(b)">Retry</Button>
+              <Button size="sm" variant="ghost" @click="del(b)">Delete</Button>
+            </td>
+          </tr>
+          <tr v-if="!books.length">
+            <td colspan="7" class="px-4 py-12 text-center text-muted-foreground">
+              <BookOpen class="w-8 h-8 mx-auto mb-3 opacity-50" />
+              Nothing in the queue yet. Add a book or configure a source.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </Card>
+
+    <Drawer :open="addOpen" title="Add a book manually" @close="addOpen = false">
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-muted-foreground">Title</label>
+          <Input v-model="addTitle" placeholder="The Pragmatic Programmer" />
+        </div>
+        <div>
+          <label class="text-xs text-muted-foreground">Author (optional)</label>
+          <Input v-model="addAuthor" placeholder="Hunt, Thomas" />
+        </div>
+        <div>
+          <label class="text-xs text-muted-foreground">ISBN-13 (optional, dramatically improves match accuracy)</label>
+          <Input v-model="addIsbn" placeholder="9780135957059" />
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <Button variant="ghost" @click="addOpen = false">Cancel</Button>
+          <Button @click="add">Add</Button>
+        </div>
+      </div>
+    </Drawer>
+
+    <BookDetailDrawer v-if="detailId !== null" :id="detailId" @close="detailId = null; fetchBooks()" />
+  </div>
+</template>
+
+<script lang="ts">
+import BookDetailDrawer from '@/components/BookDetailDrawer.vue'
+export default { components: { BookDetailDrawer } }
+</script>
