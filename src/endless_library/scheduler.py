@@ -14,10 +14,18 @@ from endless_library.pipeline import (
     poll_sources,
     process_queue,
 )
+from endless_library.scrapers.annas_domains import (
+    cache_path as _wiki_cache_path,
+)
+from endless_library.scrapers.annas_domains import (
+    effective_mirrors,
+    update_cache_if_stale,
+)
 
 log = logging.getLogger(__name__)
 
 JOB_PROCESS = "process"
+JOB_MIRRORS = "mirrors_refresh"
 JOB_RETRY = "retry"
 JOB_SUMMARY = "summary"
 SOURCE_JOB_PREFIX = "poll:"  # full id: f"poll:{account_id}"
@@ -47,27 +55,73 @@ def _attach_system_jobs(sched: AsyncIOScheduler, cfg: Config, deps: PipelineDeps
         deps.notifier.daily_summary(sent=sent, failed=failed, needs_review=needs)
 
     sched.add_job(
-        _process_job, "interval",
+        _process_job,
+        "interval",
         minutes=cfg.general.process_interval_minutes,
-        id=JOB_PROCESS, name="Process the queue (search + download + send)",
-        replace_existing=True, max_instances=1,
+        id=JOB_PROCESS,
+        name="Process the queue (search + download + send)",
+        replace_existing=True,
+        max_instances=1,
     )
     sched.add_job(
-        _retry_job, "interval",
+        _retry_job,
+        "interval",
         hours=cfg.general.retry_interval_hours,
-        id=JOB_RETRY, name="Retry failed downloads",
-        replace_existing=True, max_instances=1,
+        id=JOB_RETRY,
+        name="Retry failed downloads",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    async def _mirrors_job():
+        cache = _wiki_cache_path(deps.db_path.parent)
+        await asyncio.to_thread(update_cache_if_stale, cache)
+        cached, _ = await asyncio.to_thread(
+            __import__(
+                "endless_library.scrapers.annas_domains", fromlist=["read_cache"]
+            ).read_cache,
+            cache,
+        )
+        deps.cfg.scrapers.annas_mirrors = effective_mirrors(deps.cfg.scrapers.annas_mirrors, cached)
+        log.info("annas mirrors after refresh: %s", deps.cfg.scrapers.annas_mirrors)
+
+    sched.add_job(
+        _mirrors_job,
+        "interval",
+        hours=cfg.general.mirror_refresh_hours,
+        id=JOB_MIRRORS,
+        name="Refresh Anna's Archive mirrors from Wikipedia",
+        replace_existing=True,
+        max_instances=1,
     )
     sched.add_job(
-        _summary_job, "cron", hour=cfg.general.daily_summary_hour_utc,
-        id=JOB_SUMMARY, name="Daily summary (Pushover)",
-        replace_existing=True, max_instances=1,
+        _summary_job,
+        "cron",
+        hour=cfg.general.daily_summary_hour_utc,
+        id=JOB_SUMMARY,
+        name="Daily summary (Pushover)",
+        replace_existing=True,
+        max_instances=1,
     )
 
+    # Seed annas_mirrors from any existing wiki cache file, synchronously,
+    # so the first scraper run already sees the merged list. A separate
+    # mirrors_refresh job (scheduled above) keeps it current.
+    try:
+        from endless_library.scrapers.annas_domains import read_cache
 
-def add_source_job(
-    sched: AsyncIOScheduler, deps: PipelineDeps, account: SourceAccountRow
-) -> None:
+        cache = _wiki_cache_path(deps.db_path.parent)
+        cached, _ = read_cache(cache)
+        if cached:
+            deps.cfg.scrapers.annas_mirrors = effective_mirrors(
+                deps.cfg.scrapers.annas_mirrors, cached
+            )
+            log.info("seeded annas mirrors from wiki cache: %s", deps.cfg.scrapers.annas_mirrors)
+    except Exception as e:  # pragma: no cover
+        log.warning("mirror seed from wiki cache failed: %s", e)
+
+
+def add_source_job(sched: AsyncIOScheduler, deps: PipelineDeps, account: SourceAccountRow) -> None:
     """Schedule a per-source poll job. Idempotent (replace_existing=True)."""
 
     aid = account.id
@@ -77,11 +131,13 @@ def add_source_job(
         await asyncio.to_thread(poll_source_account, deps, aid)
 
     sched.add_job(
-        _job, "interval",
+        _job,
+        "interval",
         minutes=max(1, account.poll_interval_minutes),
         id=source_job_id(aid),
         name=name,
-        replace_existing=True, max_instances=1,
+        replace_existing=True,
+        max_instances=1,
     )
 
 

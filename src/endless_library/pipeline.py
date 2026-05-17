@@ -105,7 +105,11 @@ def poll_sources(deps: PipelineDeps) -> int:
     total = 0
     for acct in deps.sources.list_enabled():
         total += poll_source_account(deps, acct.id)
-    log.info("poll_sources added %d new books across %d accounts", total, len(deps.sources.list_enabled()))
+    log.info(
+        "poll_sources added %d new books across %d accounts",
+        total,
+        len(deps.sources.list_enabled()),
+    )
     return total
 
 

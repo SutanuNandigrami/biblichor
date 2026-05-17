@@ -1,0 +1,192 @@
+"""Auto-discover Anna's Archive mirrors from Wikipedia's infobox.
+
+We hardcode three mirrors in config.yaml (annas-archive.gl/pk/gd) because
+those are the ones the project officially advertises. Anna's adds and
+retires mirrors as registrars/hosts get pressured, so the hardcoded list
+goes stale. Wikipedia's Anna's Archive page keeps an up-to-date list in
+its infobox `vcard` table — we fetch it every 6h and merge any new domains
+into the in-memory `cfg.scrapers.annas_mirrors` so future scraper builds
+see them.
+
+Failure modes are quiet on purpose: any fetch/parse error falls back to
+the cached list, and an empty cache falls back to the configured list.
+The hardcoded mirrors are always present.
+
+Adapted from zelestcarlyone/stacks (utils/domainupdater.py), trimmed to
+the parts we actually use.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+from collections.abc import Callable
+from pathlib import Path
+from urllib.parse import urlparse
+
+import httpx
+
+log = logging.getLogger(__name__)
+
+WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/Anna%27s_Archive"
+DEFAULT_UPDATE_INTERVAL_SECONDS = 6 * 3600
+CACHE_FILENAME = "wiki_annas_domains.json"
+
+_INFOBOX_TABLE_RE = re.compile(
+    rb'<table[^>]*class="[^"]*infobox vcard[^"]*"[^>]*>(.*?)(?:<h2|</table)',
+    re.DOTALL | re.IGNORECASE,
+)
+_URL_SPAN_RE = re.compile(
+    rb'<span[^>]*class="[^"]*url[^"]*"[^>]*>(.*?)</span>',
+    re.DOTALL | re.IGNORECASE,
+)
+_EXTERNAL_LINK_RE = re.compile(
+    rb'<a[^>]*class="[^"]*external text[^"]*"[^>]*href="([^"]+)"',
+    re.IGNORECASE,
+)
+
+
+def parse_domains_from_html(html: bytes | str) -> list[str]:
+    """Pull bare domains (annas-archive.gl etc.) from the Wikipedia infobox.
+
+    Returns [] if the infobox can't be located. Returns full URLs lowercased
+    to bare host (no scheme, no path).
+    """
+    if isinstance(html, str):
+        html = html.encode("utf-8", errors="replace")
+    table = _INFOBOX_TABLE_RE.search(html)
+    if not table:
+        return []
+    out: list[str] = []
+    for span in _URL_SPAN_RE.findall(table.group(0)):
+        for href in _EXTERNAL_LINK_RE.findall(span):
+            href_str = href.decode("utf-8", errors="replace").strip()
+            if "://" not in href_str:
+                href_str = "https:" + href_str
+            parsed = urlparse(href_str)
+            if parsed.netloc:
+                out.append(parsed.netloc.lower())
+    # Dedup preserving order
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for d in out:
+        if d not in seen:
+            seen.add(d)
+            deduped.append(d)
+    return deduped
+
+
+def fetch_wiki_domains(
+    *,
+    http_get: Callable[[str], tuple[int, bytes]] | None = None,
+    timeout: float = 10.0,
+) -> list[str]:
+    """Fetch and parse Anna's Archive Wikipedia infobox.
+
+    `http_get` is an optional dependency-injected callable returning
+    (status_code, body_bytes) — used by tests so we don't hit the network.
+    """
+    try:
+        if http_get is not None:
+            status, body = http_get(WIKIPEDIA_URL)
+        else:
+            r = httpx.get(
+                WIKIPEDIA_URL,
+                timeout=timeout,
+                follow_redirects=True,
+                headers={"User-Agent": "endless-library/0.1 (+wiki domain refresh)"},
+            )
+            status, body = r.status_code, r.content
+    except Exception as e:
+        log.warning("wiki domain fetch failed: %s", e)
+        return []
+    if status != 200:
+        log.warning("wiki returned status %s", status)
+        return []
+    domains = parse_domains_from_html(body)
+    if domains:
+        log.info("wiki domain refresh: %d domain(s): %s", len(domains), domains)
+    else:
+        log.warning("wiki domain refresh: parsed 0 domains (page layout changed?)")
+    return domains
+
+
+def cache_path(data_dir: Path | str) -> Path:
+    return Path(data_dir) / CACHE_FILENAME
+
+
+def read_cache(path: Path) -> tuple[list[str], float]:
+    """Returns (domains, timestamp). ([], 0) when the cache is missing/malformed."""
+    try:
+        with path.open() as f:
+            data = json.load(f)
+        return list(data.get("domains") or []), float(data.get("timestamp") or 0)
+    except FileNotFoundError:
+        return [], 0
+    except Exception as e:
+        log.warning("wiki cache unreadable (%s): %s", path, e)
+        return [], 0
+
+
+def write_cache(path: Path, domains: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w") as f:
+        json.dump({"domains": domains, "timestamp": time.time()}, f)
+    tmp.replace(path)
+
+
+def is_stale(timestamp: float, *, max_age_seconds: int = DEFAULT_UPDATE_INTERVAL_SECONDS) -> bool:
+    if timestamp <= 0:
+        return True
+    return (time.time() - timestamp) > max_age_seconds
+
+
+def update_cache_if_stale(
+    cache_file: Path,
+    *,
+    http_get: Callable[[str], tuple[int, bytes]] | None = None,
+    max_age_seconds: int = DEFAULT_UPDATE_INTERVAL_SECONDS,
+) -> list[str]:
+    """Refresh the wiki cache if stale; return whatever's in cache after."""
+    cached, ts = read_cache(cache_file)
+    if not is_stale(ts, max_age_seconds=max_age_seconds):
+        return cached
+    fresh = fetch_wiki_domains(http_get=http_get)
+    if fresh:
+        write_cache(cache_file, fresh)
+        return fresh
+    # Fetch failed: keep whatever we had (possibly stale) so we don't lose mirrors
+    return cached
+
+
+def _to_https_url(s: str) -> str:
+    s = s.strip()
+    if not s:
+        return ""
+    if "://" in s:
+        return s.rstrip("/")
+    return f"https://{s}".rstrip("/")
+
+
+def effective_mirrors(configured: list[str], cached: list[str]) -> list[str]:
+    """Merge configured (config.yaml) with cached (Wikipedia) mirrors.
+
+    Configured ordering wins (those are user-authoritative). Cached entries
+    not already present append at the end. Returns full https URLs, deduped
+    case-insensitively on host.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in [*configured, *cached]:
+        url = _to_https_url(raw)
+        if not url:
+            continue
+        host = urlparse(url).netloc.lower()
+        if host in seen:
+            continue
+        seen.add(host)
+        out.append(url)
+    return out

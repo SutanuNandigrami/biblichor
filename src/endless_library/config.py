@@ -12,6 +12,7 @@ class GeneralCfg(BaseModel):
     poll_interval_minutes: int = 60
     process_interval_minutes: int = 10
     retry_interval_hours: int = 6
+    mirror_refresh_hours: int = 6
     max_attempts: int = 5
     books_dir: str = "/data/books"
     log_level: str = "INFO"
