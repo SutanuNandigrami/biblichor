@@ -345,6 +345,76 @@ def cmd_backup(args):
     return 0
 
 
+def cmd_restore(args):
+    """Restore from a biblichor backup bundle (Phase 5b).
+
+    Accepts either a local archive path OR a Store key (with
+    --from-store) — the latter fetches the archive into a temp dir
+    first.
+    """
+    import tempfile
+
+    from endless_library.restore import RestoreError, restore as do_restore
+    from endless_library.storage.factory import build_store
+
+    config_path, db_path = _resolve_paths(args)
+    cfg = load_config(config_path)
+    _setup_logging(cfg.general.log_level)
+
+    if args.from_store:
+        store = build_store(cfg.storage, data_root=Path(cfg.general.books_dir))
+        tmpd = tempfile.mkdtemp(prefix="biblichor-restore-fetch-")
+        local_archive = Path(tmpd) / Path(args.from_store).name
+        print(f"fetching {args.from_store} from {store.name} ...")
+        store.get(args.from_store, local_archive)
+        archive = local_archive
+    elif args.archive:
+        archive = Path(args.archive).expanduser()
+    else:
+        print("must provide either an archive path or --from-store KEY", file=sys.stderr)
+        return 1
+
+    age_identity = Path(args.age_identity).expanduser() if args.age_identity else None
+
+    secrets_target = Path(args.secrets_target).expanduser() if args.secrets_target else None
+    library_target = Path(args.library_target).expanduser() if args.library_target else (
+        Path(cfg.general.books_dir) if cfg.general.books_dir else None
+    )
+
+    print(f"restoring {archive.name}")
+    print(f"  db_target:      {db_path}")
+    print(f"  config_target:  {config_path}")
+    print(f"  secrets_target: {secrets_target}")
+    print(f"  library_target: {library_target}")
+    if not args.yes:
+        confirm = input("proceed? [y/N] ").strip().lower()
+        if confirm != "y":
+            print("aborted")
+            return 1
+
+    try:
+        result = do_restore(
+            archive_path=archive,
+            db_target=db_path,
+            config_target=config_path,
+            secrets_target=secrets_target,
+            library_target=library_target,
+            age_identity=age_identity,
+            force=args.force,
+        )
+    except RestoreError as e:
+        print(f"restore failed: {e}", file=sys.stderr)
+        return 1
+    print()
+    print(f"manifest: biblichor={result.manifest.biblichor_version} "
+          f"schema={result.manifest.schema_version} "
+          f"created={result.manifest.created_at_utc}")
+    print(f"validated {result.files_validated} files")
+    print(f"db_restored={result.db_restored} cfg={result.config_restored} "
+          f"secrets={result.secrets_restored} lib={result.library_restored}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="endless-library", description="Self-hosted books -> kindle")
     p.add_argument("--config", help="Path to config.yaml")
@@ -370,6 +440,16 @@ def main(argv: list[str] | None = None) -> int:
     s_resend.add_argument("--format", help="Resend all sent books of this format (e.g. pdf)")
     s_resend.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
     s_resend.set_defaults(func=cmd_resend)
+
+    s_restore = sub.add_parser("restore", help="Restore from a backup bundle (Phase 5b)")
+    s_restore.add_argument("archive", nargs="?", default="", help="Local backup archive path")
+    s_restore.add_argument("--from-store", default="", help="Or fetch from the configured Store by this key")
+    s_restore.add_argument("--age-identity", default="", help="age private key file for .age archives")
+    s_restore.add_argument("--secrets-target", default="", help="Where to land .env (skip if empty)")
+    s_restore.add_argument("--library-target", default="", help="Where to land library (default: general.books_dir)")
+    s_restore.add_argument("--force", action="store_true", help="Override the live-newer guard")
+    s_restore.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
+    s_restore.set_defaults(func=cmd_restore)
 
     s_backup = sub.add_parser("backup", help="Create a disaster-recovery backup (Phase 5a)")
     s_backup.add_argument("--secrets", default="", help="Path to .env (defaults to none)")
