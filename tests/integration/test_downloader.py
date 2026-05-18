@@ -34,6 +34,14 @@ class _FakeClient:
     def __init__(self, resp: _FakeResp):
         self.resp = resp
 
+    def head(self, url: str, follow_redirects: bool = True):
+        # Pretend HEAD returns 200 with no redirect → _walk_redirects passes
+        # the URL straight through to our stream().
+        class _H:
+            status_code = 200
+            headers = {}
+        return _H()
+
     @contextmanager
     def stream(self, method: str, url: str):
         yield self.resp
