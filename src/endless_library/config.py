@@ -57,9 +57,18 @@ class SmtpCfg(BaseModel):
     starttls: bool = True
     user: str = ""
     password: str = ""
-    # Gmail outbound caps at ~25 MB total message (which is ~22 MB raw
-    # attachment after base64 overhead). Other providers: SES 40 MB, SendGrid 30 MB.
-    max_attachment_mb: int = 22
+    # SEMANTICS: encoded MIME size cap in MB, NOT raw attachment size.
+    # The pipeline rejects when `raw_bytes * 1.4 > max_attachment_mb`
+    # (1.4 = base64's 4/3 inflation + header/boundary overhead). So
+    # the effective raw ceiling is `max_attachment_mb / 1.4`.
+    #
+    # Gmail outbound is capped at 25 MB MIME-encoded -> we set 24 to
+    # keep a 1 MB safety margin. That yields a raw ceiling of 17.1 MB,
+    # which fits typical EPUBs/MOBIs and roughly 95%% of the queue.
+    # The previous default of 22 yielded only 15.7 MB raw - too tight.
+    # NOTE: Gmail's 50 MB number applies to *inbound*; outbound is 25.
+    # Other providers: SES 40 MB, SendGrid 30 MB. Kindle inbound: 50.
+    max_attachment_mb: int = 24
 
 
 class PushoverEventsCfg(BaseModel):
