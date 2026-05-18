@@ -150,6 +150,48 @@ Self-hosted automation that watches your reading lists, finds the books on Anna'
 
 ## Setup from scratch
 
+### The easy way — Docker Compose (recommended)
+
+One command, ~5 minutes, works on Linux / macOS / Windows (via WSL2):
+
+```bash
+git clone https://github.com/SutanuNandigrami/biblichor.git
+cd biblichor
+./deploy/bootstrap.sh
+```
+
+`bootstrap.sh` prompts you for three values (Gmail address, Gmail
+**App Password**, your `@kindle.com` send-to-kindle address), writes
+a `.env` file, pulls / builds the four services
+(biblichor + FlareSolverr + Calibre-Web, plus optional ClamAV),
+and polls `/healthz` until everything is green.
+
+When it's done you'll have:
+
+| URL | What it is |
+|---|---|
+| `http://localhost:8090` | The biblichor dashboard |
+| `http://localhost:8090/library` | The embedded Calibre-Web library (reverse-proxied) |
+| `http://localhost:8090/healthz` | Component-level health probe (used by docker healthcheck) |
+
+Re-run `./deploy/bootstrap.sh` anytime to reconfigure or refresh
+containers — it's idempotent and keeps your existing values as
+bracketed defaults.
+
+**Useful commands once running:**
+
+```bash
+docker compose -f deploy/compose.yml --env-file .env logs -f biblichor   # tail logs
+docker compose -f deploy/compose.yml --env-file .env restart biblichor   # restart
+docker compose -f deploy/compose.yml --env-file .env down                # stop everything
+```
+
+### The advanced way — native install on the host
+
+If you'd rather run biblichor as a systemd unit alongside FlareSolverr
+in Docker (the current claude-1 deployment), the original native
+recipe is below.
+
 ```bash
 # 1. Clone
 git clone https://github.com/SutanuNandigrami/biblichor.git
@@ -187,11 +229,11 @@ cp .env.example config/.env
 
 # 6. Whitelist your SMTP sender in your Amazon "Send to Kindle" approved list:
 #    https://www.amazon.com/hz/mycd/myx#/home/settings/payment
-#    → Personal Document Settings → Approved Personal Document E-mail List
+#    -> Personal Document Settings -> Approved Personal Document E-mail List
 #    Add the email you set as SMTP_USER.
 
 # 7. Start FlareSolverr + Calibre-Web via Docker (optional but recommended)
-docker compose up -d flaresolverr calibre-web
+docker compose -f deploy/compose.yml up -d flaresolverr calibre-web
 
 #    The first Calibre-Web start needs a tiny bit of UI setup. Open it in a
 #    browser at http://localhost:8083 (it's bound to 127.0.0.1 only — the
