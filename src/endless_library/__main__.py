@@ -205,7 +205,7 @@ def cmd_resend(args):
         return 1
 
     rows = con.execute(
-        f"SELECT id, title, author, series, isbn13, file_path, format FROM books WHERE {where}",
+        f"SELECT id, title, author, isbn13, file_path, format FROM books WHERE {where}",
         params,
     ).fetchall()
     if not rows:
@@ -234,7 +234,6 @@ def cmd_resend(args):
                 fp,
                 title=r["title"],
                 author=r["author"],
-                series=r["series"],
                 isbn=r["isbn13"],
             )
             print(f"[enrich] id={r['id']}: metadata written")
