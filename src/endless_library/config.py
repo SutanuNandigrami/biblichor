@@ -35,6 +35,11 @@ class GeneralCfg(BaseModel):
     # Latin queries with an ISBN can clear 60 easily (ISBN match alone is 35).
     # Non-Latin queries clear 40 only when the title actually matches.
     fallthrough_quality_floor: float = 60.0
+    # Phase 3c: after this many search rounds that yield no viable
+    # candidate (no scrapers returned, all hard-skipped, or top score
+    # below min_score_for_failure), park the book in `skipped` rather
+    # than keep cycling it through `failed`. 3 = generous default.
+    max_search_attempts_before_skip: int = 3
     fallthrough_quality_floor_non_latin: float = 40.0
     auto_pick_gap: float = 10.0
     min_score_for_failure: float = 40.0

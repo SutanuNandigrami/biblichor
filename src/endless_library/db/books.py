@@ -246,6 +246,21 @@ class BookRepo:
                 ("failed", error, book_id),
             )
 
+    def set_skipped(self, book_id: int, *, error: str) -> None:
+        """Park a book in status='skipped' as a terminal state without
+        bumping attempts. Phase 3c uses this when N consecutive search
+        rounds all yield zero viable candidates — the book is
+        effectively unfindable, so we stop retrying and let the user
+        retry manually (via /retry which clears state) or via a future
+        cycle if the mirrors change.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE books SET status = ?, last_error = ?, "
+                "updated_at = datetime('now') WHERE id = ?",
+                ("skipped", error, book_id),
+            )
+
     def increment_attempts(self, book_id: int) -> None:
         with self._connect() as conn:
             conn.execute(

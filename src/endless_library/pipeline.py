@@ -367,6 +367,27 @@ def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Pa
     return None
 
 
+def _search_fail_or_skip(deps: PipelineDeps, book: BookRow, error: str) -> str:
+    """Decide whether a search-step failure should bump attempts (failed)
+    or park the book terminally (skipped).
+
+    Once we've already failed `max_search_attempts_before_skip - 1`
+    times, this attempt would be the Nth — parking is the right call
+    so the queue doesn't keep cycling unfindable books.
+    """
+    threshold = deps.cfg.general.max_search_attempts_before_skip
+    if book.attempts + 1 >= threshold:
+        deps.books.set_skipped(book.id, error=f"{error} (parked after {threshold} attempts)")
+        deps.events.append(
+            book_id=book.id,
+            kind="state_change",
+            message=f"-> skipped (auto, {threshold} fruitless search rounds)",
+        )
+        return "skipped"
+    deps.books.set_failed(book.id, error=error)
+    return "failed"
+
+
 def process_one(deps: PipelineDeps, book: BookRow) -> str:
     """Run the full pipeline on a single book. Returns final status.
 
@@ -397,8 +418,7 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
 
     candidates, _strat = _search_with_strategies(deps, book)
     if not candidates:
-        deps.books.set_failed(book.id, error="no candidates from any scraper")
-        return "failed"
+        return _search_fail_or_skip(deps, book, "no candidates from any scraper")
     # Set a dynamic deliverable cap on the scoring config so candidates
     # that can't possibly be SMTPed get hard-skipped at score time
     # rather than wasted a download + convert cycle. We use 1/1.4 of
@@ -408,8 +428,7 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
     deps.cfg.scoring.deliverable_max_bytes = smtp_cap
     scored = _score_and_persist(deps, book, candidates)
     if not scored:
-        deps.books.set_failed(book.id, error="all candidates hard-skipped (audio?)")
-        return "failed"
+        return _search_fail_or_skip(deps, book, "all candidates hard-skipped (audio?)")
     top = scored[0][0]
     second = scored[1][0] if len(scored) > 1 else 0.0
     # Script-aware floor + auto-pick threshold. Bengali/Devanagari/CJK
@@ -448,8 +467,7 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
             ),
         )
     if decision == "failed":
-        deps.books.set_failed(book.id, error=f"no plausible match (top={top:.1f})")
-        return "failed"
+        return _search_fail_or_skip(deps, book, f"no plausible match (top={top:.1f})")
     if decision == "needs_review":
         deps.books.set_status(
             book.id, "needs_review", error=f"low confidence top={top:.1f} second={second:.1f}"
