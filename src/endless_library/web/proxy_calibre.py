@@ -179,12 +179,26 @@ def register(app: FastAPI) -> None:
         if any(t in content_type.lower() for t in ("text/html", "text/css")):
             body_out = _rewrite_html(body_out)
 
-        return Response(
+        # IMPORTANT: build the Response with a list of headers, not a dict.
+        # `dict(out_headers)` collapses duplicate keys — silently dropping
+        # all but the last Set-Cookie when Calibre-Web sets multiple
+        # cookies in a single response (which it does on login + admin
+        # config changes). Starlette accepts an iterable of (name, value)
+        # so we just hand it the list.
+        resp = Response(
             content=body_out,
             status_code=upstream.status_code,
-            headers=dict(out_headers),
             media_type=content_type or None,
         )
+        # Wipe the auto-populated content-type header (Response added it),
+        # then re-add ALL upstream headers — duplicates preserved.
+        from starlette.datastructures import MutableHeaders
+
+        h = MutableHeaders(headers={})
+        for k, v in out_headers:
+            h.append(k, v)
+        resp.raw_headers = list(h.raw)
+        return resp
 
     @app.get("/library")
     async def library_root(request: Request) -> Response:
