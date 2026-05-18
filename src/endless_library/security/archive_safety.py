@@ -47,8 +47,10 @@ ALLOWED_EXTENSIONS: frozenset[str] = frozenset(
     {
         ".epub",
         ".azw3",
+        ".azw",
         ".mobi",
         ".pdf",
+        ".kfx",  # Amazon Kindle-native (kindlebangla packs these for some titles)
         ".jpg",
         ".jpeg",
         ".png",
@@ -57,10 +59,21 @@ ALLOWED_EXTENSIONS: frozenset[str] = frozenset(
         ".ncx",
         ".xml",  # metadata
         ".txt",  # readme/note files inside the archive
+        ".cbz",
+        ".cbr",  # comic-book archives (we already gate nested archives)
     }
 )
 
-EBOOK_EXTENSIONS: tuple[str, ...] = (".epub", ".azw3", ".mobi", ".pdf")
+EBOOK_EXTENSIONS: tuple[str, ...] = (
+    ".epub",
+    ".azw3",
+    ".kfx",
+    ".azw",
+    ".mobi",
+    ".pdf",
+    ".cbz",
+    ".cbr",
+)
 
 # Refused outright: any nested archive
 NESTED_ARCHIVE_EXTENSIONS: frozenset[str] = frozenset(

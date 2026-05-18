@@ -4,7 +4,7 @@ from typing import Literal
 
 Action = Literal["send_native", "convert", "skip"]
 
-NATIVE = {"epub", "azw3", "mobi", "pdf", "txt"}
+NATIVE = {"epub", "azw3", "azw", "kfx", "mobi", "pdf", "txt"}
 CONVERTIBLE = {"djvu", "fb2", "cbz", "cbr", "lit", "rtf", "html", "doc", "docx"}
 
 
