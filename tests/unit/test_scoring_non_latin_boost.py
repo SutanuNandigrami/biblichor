@@ -97,7 +97,7 @@ def test_non_latin_match_boosted_vs_no_boost():
     c = _c()
 
     s_boost = score_candidate(c, q, _cfg(non_latin_title_multiplier=2.0))
-    s_no    = score_candidate(c, q, _cfg(non_latin_title_multiplier=1.0))
+    s_no = score_candidate(c, q, _cfg(non_latin_title_multiplier=1.0))
 
     assert s_boost.total > s_no.total
     # Boosted title component is at least ~1.9x of unboosted (small slack

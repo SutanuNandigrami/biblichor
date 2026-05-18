@@ -112,10 +112,13 @@ def test_author_strict_requires_every_token():
 
 
 def test_author_strict_credits_full_match():
-    assert _author_match_strict(
-        "narayan sanyal",
-        "narayan sanyal — collected works",
-    ) == 1.0
+    assert (
+        _author_match_strict(
+            "narayan sanyal",
+            "narayan sanyal — collected works",
+        )
+        == 1.0
+    )
 
 
 def test_author_strict_ignores_short_initials():

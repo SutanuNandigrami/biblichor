@@ -40,6 +40,7 @@ scrapers:
     - welib_curl
     - welib_playwright
     - libgen_curl
+    - archive_curl
   enabled:
     annas_curl: true
     annas_flaresolverr: true
@@ -48,6 +49,7 @@ scrapers:
     welib_curl: true
     welib_playwright: true
     libgen_curl: true
+    archive_curl: true
   format_priority: [epub, azw3, mobi, pdf]
   language: en
   request_delay_seconds: 6

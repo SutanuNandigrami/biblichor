@@ -7,6 +7,7 @@ from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
 from endless_library.scrapers.annas_curl import AnnasArchiveCurl
 from endless_library.scrapers.annas_flaresolverr import AnnasArchiveFlareSolverr
 from endless_library.scrapers.annas_playwright import AnnasArchivePlaywright
+from endless_library.scrapers.archive_curl import ArchiveOrgCurl
 from endless_library.scrapers.libgen_curl import LibgenCurl
 from endless_library.scrapers.welib_curl import WelibCurl
 from endless_library.scrapers.welib_playwright import WelibPlaywright
@@ -19,6 +20,7 @@ _REGISTRY = {
     "welib_curl": WelibCurl,
     "welib_playwright": WelibPlaywright,
     "libgen_curl": LibgenCurl,
+    "archive_curl": ArchiveOrgCurl,
 }
 
 
