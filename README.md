@@ -1,6 +1,11 @@
 # biblichor
 
-Self-hosted automation that watches your reading lists, finds the books on Anna's Archive (with Welib and LibGen fallbacks), converts them where needed, and emails them to your Kindle — with a Vue 3 dashboard, an embedded Calibre-Web library, and a scheduler you control from the browser.
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
+[![Vue 3](https://img.shields.io/badge/vue-3-42b883.svg)](https://vuejs.org/)
+[![FastAPI](https://img.shields.io/badge/fastapi-async-009688.svg)](https://fastapi.tiangolo.com/)
+[![Tests: 435](https://img.shields.io/badge/tests-435%20passing-brightgreen.svg)]()
+
+Self-hosted automation that watches your reading lists, finds the books on Anna's Archive (with Welib, LibGen, archive.org, and KindleBangla fallbacks), converts them where needed, and emails them to your Kindle — with a Vue 3 dashboard, an embedded Calibre-Web library, and a scheduler you control from the browser.
 
 > The Python package is named `endless_library` internally; the project / repo is `biblichor`. Both names refer to the same thing.
 
