@@ -9,6 +9,8 @@ Self-hosted automation that watches your reading lists, finds the books on Anna'
 
 > The Python package is named `endless_library` internally; the project / repo is `biblichor`. Both names refer to the same thing.
 
+![biblichor dashboard](docs/screenshots/dashboard.png)
+
 ---
 
 ## What it does
@@ -115,6 +117,23 @@ Self-hosted automation that watches your reading lists, finds the books on Anna'
 | **Storage** | SQLite WAL; 7 tables (books, candidates, events, source_accounts, bench_runs, mirrors, sources); idempotent ALTER migrations |
 | **Dashboard** | Vue 3 + Tailwind + shadcn-vue + Pinia + Vue Router + Lucide icons + WebSocket event stream |
 | **Deployment** | Native via systemd unit + uvicorn; FlareSolverr and Calibre-Web in Docker via compose |
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><b>Queue</b><br><img src="docs/screenshots/dashboard.png" alt="Queue"></td>
+    <td width="50%"><b>Sources</b><br><img src="docs/screenshots/sources.png" alt="Sources"></td>
+  </tr>
+  <tr>
+    <td><b>Scrapers</b><br><img src="docs/screenshots/scrapers.png" alt="Scrapers"></td>
+    <td><b>Mirrors (with bench)</b><br><img src="docs/screenshots/mirrors.png" alt="Mirrors"></td>
+  </tr>
+  <tr>
+    <td><b>Scoring config</b><br><img src="docs/screenshots/scoring.png" alt="Scoring"></td>
+    <td><b>Book detail (search trace + candidates)</b><br><img src="docs/screenshots/book-detail.png" alt="Book detail"></td>
+  </tr>
+</table>
 
 ## Prerequisites
 
