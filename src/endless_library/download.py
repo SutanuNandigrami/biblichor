@@ -67,19 +67,60 @@ def clean_book_filename(name: str) -> str:
     return (stem.strip() + "." + ext) if stem.strip() else name
 
 
+# Characters that genuinely break filesystems. The previous ASCII-only
+# regex `[^A-Za-z0-9._\- ]+` mangled Bengali / CJK / Cyrillic / emoji
+# titles into rows of underscores, leaving Kindle to fall back to the
+# broken filename for PDF metadata-less books.
+#
+#   /   \   : *   ?   "   <   >   |     -- path separators + Windows-reserved
+#   \x00-\x1f                            -- control chars (incl NUL)
+#
+# Everything else, including all printable Unicode letters/digits, is
+# preserved. Length cap is in BYTES (UTF-8), not characters, because
+# filesystem limits are byte-based (ext4: 255 bytes, NTFS: 255 chars
+# but Windows API accepts up to ~255 UTF-16 code units).
+_FILENAME_FORBIDDEN_RE = re.compile(r'[\x00-\x1f/\\:*?"<>|]')
+
+
 def safe_filename(name: str, *, max_length: int = 200) -> str:
-    """Sanitize a filename; preserve the extension when truncating."""
-    name = re.sub(r"[^A-Za-z0-9._\- ]+", "_", name).strip()
+    """Sanitize a filename while preserving Unicode letters.
+
+    - NFC-normalizes so combining-character variants don't blow up.
+    - Replaces only filesystem-hostile chars with `_` (path seps,
+      control chars, Windows-reserved punctuation).
+    - Truncates by UTF-8 byte length, never splitting a multi-byte
+      glyph.
+    - Preserves a recognized extension (.epub, .pdf, .azw3, etc.)
+      when truncating.
+    """
+    import unicodedata
+
+    name = unicodedata.normalize("NFC", name or "")
+    name = _FILENAME_FORBIDDEN_RE.sub("_", name)
+    # Collapse runs of whitespace + underscores into single space for tidiness
+    name = re.sub(r"[ \t\n\r_]{2,}", " ", name).strip(" ._-")
     if not name:
         return "book"
-    if len(name) <= max_length:
+    encoded = name.encode("utf-8")
+    if len(encoded) <= max_length:
         return name
-    # Preserve extension if present (e.g., .epub, .pdf, .azw3)
+    # Preserve extension if present and short
     stem, dot, ext = name.rpartition(".")
     if dot and 1 <= len(ext) <= 6 and ext.isalnum():
-        keep_for_stem = max_length - len(ext) - 1
-        return stem[:keep_for_stem].rstrip(" _-.") + "." + ext
-    return name[:max_length]
+        keep = max_length - len(ext) - 1
+        stem_b = stem.encode("utf-8")[:keep]
+        # Trim trailing partial multi-byte sequence
+        while stem_b and (stem_b[-1] & 0xC0) == 0x80:
+            stem_b = stem_b[:-1]
+        truncated_stem = stem_b.decode("utf-8", errors="ignore").rstrip(" _-.")
+        if not truncated_stem:
+            return "book." + ext
+        return truncated_stem + "." + ext
+    # No extension — just byte-truncate
+    cut_b = encoded[:max_length]
+    while cut_b and (cut_b[-1] & 0xC0) == 0x80:
+        cut_b = cut_b[:-1]
+    return cut_b.decode("utf-8", errors="ignore")
 
 
 _MAX_REDIRECTS = 5

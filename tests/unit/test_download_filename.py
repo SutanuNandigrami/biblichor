@@ -5,7 +5,12 @@ from endless_library.download import _filename_from_handle, safe_filename
 
 
 def test_safe_filename_strips_dangerous():
-    assert safe_filename("../etc/passwd").startswith(".._etc")
+    out = safe_filename("../etc/passwd")
+    # Path-traversal prefix is now stripped entirely (stricter than
+    # the pre-Unicode-safe version which kept the leading "..").
+    assert not out.startswith("..")
+    assert "/" not in out
+    assert "etc" in out and "passwd" in out
     assert "/" not in safe_filename("a/b/c")
     assert safe_filename("") == "book"
 
