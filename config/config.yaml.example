@@ -1,15 +1,23 @@
 general:
   poll_interval_minutes: 60
+  process_interval_minutes: 10
+  retry_interval_hours: 6
+  mirror_refresh_hours: 6
+  retention_hour_utc: 3
+  retention_keep_events: 50000
+  retention_keep_events_days: 90
+  retention_keep_bench_per_scraper: 200
   max_attempts: 5
   books_dir: /data/books
   log_level: INFO
   daily_summary_hour_utc: 14
   timezone: Asia/Kolkata
   auto_pick_threshold: 70
+  auto_pick_threshold_non_latin: 45
   auto_pick_gap: 10
   min_score_for_failure: 40
+  min_score_for_failure_non_latin: 25
   zombie_stale_minutes: 30
-
 kindle:
   recipient: ""
   subject: "{title}"
@@ -19,7 +27,7 @@ smtp:
   host: smtp.gmail.com
   port: 587
   starttls: true
-
+  max_attachment_mb: 22
 pushover:
   enabled: false
   events:
@@ -71,6 +79,7 @@ scoring:
   filesize_min_bytes: 200000
   filesize_max_bytes: 83886080
   scan_penalty: 10
+  non_latin_title_multiplier: 2.0
   audio_keywords: [audiobook, audible, mp3, m4b]
 
 security:

@@ -308,27 +308,35 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
     if not candidates:
         deps.books.set_status(book.id, "failed", error="no candidates from any scraper")
         return "failed"
+    # Set a dynamic deliverable cap on the scoring config so candidates
+    # that can't possibly be SMTPed get hard-skipped at score time
+    # rather than wasted a download + convert cycle. We use 1/1.4 of
+    # the raw cap to account for base64 overhead (Gmail caps the
+    # *encoded* message size).
+    smtp_cap = int(deps.cfg.smtp.max_attachment_mb * 1024 * 1024 / 1.4)
+    deps.cfg.scoring.deliverable_max_bytes = smtp_cap
     scored = _score_and_persist(deps, book, candidates)
     if not scored:
         deps.books.set_status(book.id, "failed", error="all candidates hard-skipped (audio?)")
         return "failed"
     top = scored[0][0]
     second = scored[1][0] if len(scored) > 1 else 0.0
-    # Script-aware failure floor: non-Latin queries can't easily clear
-    # the Latin 40-point floor because they have no ISBN, no clean author
-    # parse, and shorter token sets in rapidfuzz. Use the (lower) non-Latin
-    # floor when the queried title is non-Latin.
+    # Script-aware floor + auto-pick threshold. Bengali/Devanagari/CJK
+    # queries without ISBN bottom out near 40 and top out near 65-70 —
+    # both ends are too tight for the Latin defaults.
     from endless_library.domain.scoring import _is_non_latin
 
-    cfg_score = deps.cfg.general
+    cfg_g = deps.cfg.general
     if _is_non_latin(book.title or ""):
-        floor = cfg_score.min_score_for_failure_non_latin
+        floor = cfg_g.min_score_for_failure_non_latin
+        threshold = cfg_g.auto_pick_threshold_non_latin
     else:
-        floor = cfg_score.min_score_for_failure
+        floor = cfg_g.min_score_for_failure
+        threshold = cfg_g.auto_pick_threshold
     decision = decide_auto_pick(
         top=top,
         second=second,
-        threshold=deps.cfg.general.auto_pick_threshold,
+        threshold=threshold,
         gap=deps.cfg.general.auto_pick_gap,
         min_score_for_failure=floor,
     )

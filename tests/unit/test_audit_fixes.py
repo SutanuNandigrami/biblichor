@@ -113,7 +113,10 @@ def test_smtp_errors_dict_still_handled(tmp_path):
     """The non-exception 'errors' return from aiosmtplib.send is still surfaced."""
     msg = _build_dummy_msg(tmp_path)
     smtp = SmtpCfg(host="x.example.com", port=587, user="u", password="p")
-    with patch("aiosmtplib.send", return_value=({"r": "bad"}, "ok")), pytest.raises(KindleSendError, match="SMTP errors"):
+    with (
+        patch("aiosmtplib.send", return_value=({"r": "bad"}, "ok")),
+        pytest.raises(KindleSendError, match="SMTP errors"),
+    ):
         asyncio.run(_send_smtp(msg, smtp=smtp))
 
 

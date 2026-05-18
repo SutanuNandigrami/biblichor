@@ -144,7 +144,25 @@ def score_candidate(
                 skip_reason="script_mismatch",
             )
 
-    # ISBN — caller is the authoritative source of truth via isbn13_match
+    # Oversize hard-skip (when deliverable_max_bytes is set). Picker is
+    # cheaper than the download + AV + convert cycle that would later
+    # fail with "too large for SMTP". The candidate is correct in
+    # content; it just won't fit through the configured SMTP path.
+    if (
+        cfg.deliverable_max_bytes is not None
+        and c.filesize_bytes is not None
+        and c.filesize_bytes > cfg.deliverable_max_bytes
+    ):
+        mb = c.filesize_bytes // (1024 * 1024)
+        cap_mb = cfg.deliverable_max_bytes // (1024 * 1024)
+        return ScoreBreakdown(
+            total=0.0,
+            components={"oversize_hard_skip": 0.0},
+            is_hard_skip=True,
+            skip_reason=f"oversize ({mb}MB > {cap_mb}MB cap)",
+        )
+
+        # ISBN — caller is the authoritative source of truth via isbn13_match
     # Fallback: peek at raw["isbns"] list if present
     if isbn13_match is None:
         isbns = (c.raw or {}).get("isbns") or []

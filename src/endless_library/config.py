@@ -23,6 +23,12 @@ class GeneralCfg(BaseModel):
     daily_summary_hour_utc: int = 14
     timezone: str = "UTC"
     auto_pick_threshold: float = 70.0
+    # Bengali/Devanagari/CJK queries without ISBN top out empirically
+    # at score 65-70 because rapidfuzz can't ride a 10x boost on already-
+    # high token overlap. A separate, lower auto-pick threshold lets
+    # non-Latin titles auto-pick at score 45 (the empirical confident-
+    # match floor on the existing queue).
+    auto_pick_threshold_non_latin: float = 45.0
     auto_pick_gap: float = 10.0
     min_score_for_failure: float = 40.0
     # Lower failure floor for non-Latin queries. rapidfuzz on
@@ -103,6 +109,11 @@ class ScoringCfg(BaseModel):
     # Devanagari/CJK title carry past the 70-pt auto-pick threshold
     # with a normal format+language+filesize bonus stack.
     non_latin_title_multiplier: float = 2.0
+    # If set, candidates whose filesize_bytes exceeds this hard-skip
+    # with reason='oversize'. Pipeline sets this dynamically from
+    # cfg.smtp.max_attachment_mb so the picker naturally avoids
+    # candidates that couldn't be delivered as-is anyway.
+    deliverable_max_bytes: int | None = None
 
 
 class SecurityCfg(BaseModel):
