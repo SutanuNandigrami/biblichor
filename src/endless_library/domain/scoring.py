@@ -235,5 +235,10 @@ def score_candidate(
     )
 
     total = sum(components.values())
-    total = max(0.0, min(100.0, total))
+    # No upper clamp: the score is a monotonic ranking signal, not a
+    # percentage. With non_latin_title_multiplier=2.0 + ISBN + author +
+    # format + language + filesize, a perfect candidate easily exceeds
+    # 100. Clamping there silently flattens distinguishability between
+    # two great candidates and breaks auto_pick_gap.
+    total = max(0.0, total)
     return ScoreBreakdown(total=total, components=components, is_hard_skip=False)

@@ -112,9 +112,12 @@ class ScoringCfg(BaseModel):
     # extract the non-Latin substrings before fuzz-matching (handles
     # transliterated candidates like 'Kantai Kantai 6 (কাঁটায় কাঁটায়-৬)')
     # and multiply the resulting title_similarity component by this
-    # value. Default 1.6 — empirically lets a near-perfect Bengali/
-    # Devanagari/CJK title carry past the 70-pt auto-pick threshold
-    # with a normal format+language+filesize bonus stack.
+    # value. Default 2.0 — empirically lets a near-perfect Bengali/
+    # Devanagari/CJK title carry past the (lower) non-Latin auto-pick
+    # threshold of 45 with a normal format+language+filesize bonus stack.
+    # With multiplier=2.0 + ISBN match + author match, scores can
+    # exceed 100 raw — that's fine, the score is monotonic for the
+    # picker, not a percentage.
     non_latin_title_multiplier: float = 2.0
     # If set, candidates whose filesize_bytes exceeds this hard-skip
     # with reason='oversize'. Pipeline sets this dynamically from

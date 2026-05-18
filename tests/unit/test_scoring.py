@@ -96,6 +96,9 @@ def test_scan_penalty():
     assert s.components["scan_penalty"] == -10
 
 
-def test_total_clamped_to_0_100():
+def test_total_floored_at_zero():
+    # The upper clamp was removed (scores can now exceed 100 with the non-Latin
+    # multiplier + ISBN + author + format + language + filesize stack); the
+    # lower floor at 0 stays so heavy penalties don't produce negative totals.
     s = score_candidate(_c(filesize_bytes=10), _q(), _cfg())
-    assert 0.0 <= s.total <= 100.0
+    assert s.total >= 0.0

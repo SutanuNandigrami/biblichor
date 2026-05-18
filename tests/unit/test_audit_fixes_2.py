@@ -171,7 +171,9 @@ def test_prune_uses_wal_checkpoint_not_vacuum(tmp_path: Path):
     import inspect
 
     src = inspect.getsource(EventRepo.prune)
-    assert "PRAGMA wal_checkpoint" in src and src.count("VACUUM") <= 2  # mentions only in the comment explaining the swap
+    assert (
+        "PRAGMA wal_checkpoint" in src and src.count("VACUUM") <= 2
+    )  # mentions only in the comment explaining the swap
     assert "wal_checkpoint" in src
 
 
