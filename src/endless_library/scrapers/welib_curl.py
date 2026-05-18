@@ -124,7 +124,45 @@ class WelibCurl:
                 fs.destroy_session(self._session_id)
                 self._session_id = None
 
+    def _try_fast_download(self, md5: str) -> DownloadHandle | None:
+        """When auth cookies are configured AND the account is a welib
+        donor-member, /fast_download/<md5>/0/0 returns a page containing
+        the direct CDN URL. Non-members see "Become a member" and we
+        gracefully bail out so the regular slow_download / IPFS chain
+        takes over.
+        """
+        if not self._auth_cookies:
+            return None
+        html = self._get(f"{WELIB_BASE}/fast_download/{md5}/0/0")
+        if not html:
+            return None
+        # Membership wall — log once at INFO so the user sees this in /logs
+        # then move on.
+        if "Become a member to use fast downloads" in html:
+            log.info("welib: /fast_download/ requires donor membership — falling back")
+            return None
+        # Members: the direct CDN URL is in the page; reuse the same regex
+        # we use for md5-page extraction.
+        m = _META_REFRESH_RE.search(html)
+        if m and _is_book_payload_url(m.group(1)):
+            log.info("welib: fast_download via meta-refresh")
+            return DownloadHandle(url=m.group(1), headers={}, expected_filename=None)
+        for cm in _WELIB_CDN_RE.finditer(html):
+            url = cm.group(0)
+            if _is_book_payload_url(url):
+                log.info("welib: fast_download via direct welib-CDN link")
+                return DownloadHandle(url=url, headers={}, expected_filename=None)
+        # Page rendered but no usable URL found — surprising, log + fall through
+        log.info("welib: /fast_download/ returned page with no usable URL")
+        return None
+
     def _resolve_with_session(self, candidate: Candidate) -> DownloadHandle | None:
+        # 0) /fast_download/ — donor-members only. Cheap to try, silently
+        #    falls through for free accounts (incl. anonymous).
+        fast = self._try_fast_download(candidate.md5)
+        if fast is not None:
+            return fast
+
         # 1) /ipfs_downloads/md5:<md5> lists ~40 gateway URLs for the CID;
         #    iterate, HEAD-probe each, first 2xx wins.
         listing = self._get(f"{WELIB_BASE}/ipfs_downloads/md5:{candidate.md5}")

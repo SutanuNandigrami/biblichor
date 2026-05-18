@@ -86,10 +86,22 @@ class FlareSolverr:
 
     # ---------- request ----------
 
-    def get(self, url: str, *, session: str | None = None) -> FlareSolverrResponse:
+    def get(
+        self,
+        url: str,
+        *,
+        session: str | None = None,
+        cookies: list[dict] | None = None,
+    ) -> FlareSolverrResponse:
+        """`cookies` is a list of {name, value, domain?} dicts merged
+        alongside the Cloudflare-clearance cookies FlareSolverr manages
+        on its own, so callers can pass user-auth cookies for logged-in
+        flows (e.g. welib auth-cookie injection — task #38)."""
         payload: dict = {"cmd": "request.get", "url": url, "maxTimeout": self.max_timeout_ms}
         if session:
             payload["session"] = session
+        if cookies:
+            payload["cookies"] = cookies
         with self._factory() as c:
             r = c.post(self.endpoint, json=payload)
             r.raise_for_status()
