@@ -18,11 +18,12 @@ general:
   min_score_for_failure: 40
   min_score_for_failure_non_latin: 25
   zombie_stale_minutes: 30
+  fallthrough_quality_floor: 60
+  fallthrough_quality_floor_non_latin: 40
 kindle:
-  recipient: ""
-  subject: "{title}"
+  recipient: ''
+  subject: '{title}'
   attachment_max_mb: 50
-
 smtp:
   host: smtp.gmail.com
   port: 587
@@ -34,22 +35,20 @@ pushover:
     book_sent: true
     book_needs_review: true
     cycle_summary: true
-
 calibre:
   enabled: true
   output_profile: kindle_pw3
   conversion_timeout_seconds: 300
-
 scrapers:
   order:
-    - annas_curl
-    - annas_flaresolverr
-    - annas_cloakbrowser
-    - welib_curl
-    - welib_playwright
-    - libgen_curl
-    - archive_curl
-    - kindlebangla_curl
+  - annas_curl
+  - annas_flaresolverr
+  - annas_cloakbrowser
+  - welib_curl
+  - welib_playwright
+  - libgen_curl
+  - archive_curl
+  - kindlebangla_curl
   enabled:
     annas_curl: true
     annas_flaresolverr: true
@@ -60,32 +59,39 @@ scrapers:
     libgen_curl: true
     archive_curl: true
     kindlebangla_curl: true
-  format_priority: [epub, azw3, mobi, pdf]
+  format_priority:
+  - epub
+  - azw3
+  - mobi
+  - pdf
   language: en
   request_delay_seconds: 6
   slow_download_timeout_seconds: 180
   flaresolverr_url: http://flaresolverr:8191/v1
   annas_mirrors:
-    - https://annas-archive.gl
-    - https://annas-archive.pk
-    - https://annas-archive.gd
-
+  - https://annas-archive.gl
+  - https://annas-archive.pk
+  - https://annas-archive.gd
 scoring:
   isbn_match: 35
   title_weight: 25
   author_weight: 15
-  format_bonus: { epub: 10, azw3: 9, mobi: 8, pdf: 5 }
+  format_bonus:
+    epub: 10
+    azw3: 9
+    mobi: 8
+    pdf: 5
   language_bonus: 10
   filesize_min_bytes: 200000
   filesize_max_bytes: 83886080
   scan_penalty: 10
   non_latin_title_multiplier: 2.0
-  audio_keywords: [audiobook, audible, mp3, m4b]
-
+  audio_keywords:
+  - audiobook
+  - audible
+  - mp3
+  - m4b
 security:
-  # When false (default), ClamAV is run if installed but absence is OK.
-  # When true, the pipeline refuses to unpack archives unless clamscan
-  # is on PATH. Install: sudo apt install clamav clamav-daemon
   require_clamav: false
   max_archive_size_mb: 200
   max_extracted_size_mb: 500

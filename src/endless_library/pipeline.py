@@ -118,12 +118,13 @@ def poll_sources(deps: PipelineDeps) -> int:
 # ----- queue processing -----
 
 
-def _search_with_strategies(
-    deps: PipelineDeps,
-    book: BookRow,
-) -> tuple[list[Candidate], str | None]:
-    """Try each enabled scraper strategy until one returns candidates.
-    Returns (candidates, strategy_name_or_None)."""
+def _peek_top_score(deps: PipelineDeps, book: BookRow, cands: list[Candidate]) -> float:
+    """Probe-score the candidates against this book to decide chain fallthrough.
+
+    Cheap: scoring doesn\'t hit the network. We re-score in _score_and_persist
+    later when we\'re committing to the final pick; this peek tells us whether
+    the current scraper\'s results are good enough to stop searching.
+    """
     sq = SearchQuery(
         title=book.title,
         author=book.author,
@@ -131,6 +132,50 @@ def _search_with_strategies(
         format_priority=tuple(deps.cfg.scrapers.format_priority),
         language=deps.cfg.scrapers.language,
     )
+    top = 0.0
+    for c in cands:
+        isbn_match = bool(book.isbn13) and book.isbn13 in (c.raw.get("isbns") or [])
+        s = score_candidate(c, sq, deps.cfg.scoring, isbn13_match=isbn_match)
+        if not s.is_hard_skip and s.total > top:
+            top = s.total
+    return top
+
+
+def _search_with_strategies(
+    deps: PipelineDeps,
+    book: BookRow,
+) -> tuple[list[Candidate], str | None]:
+    """Quality-gated scraper chain.
+
+    Old behaviour: return at the first scraper that returns ANY candidate.
+    That starved welib/libgen/archive when Anna\'s returned 25 garbage
+    candidates (low title overlap, no ISBN match) for books Anna\'s
+    doesn\'t actually have.
+
+    New behaviour: try each enabled scraper in order, peek-score what it
+    returns, and ONLY stop early when the best candidate clears a quality
+    floor. Otherwise accumulate, continue, and let the final scoring step
+    pick across the union. Floor differs by script class (Latin needs 60,
+    non-Latin 40 — empirical numbers from the live queue).
+    """
+    from endless_library.domain.scoring import _is_non_latin
+
+    sq = SearchQuery(
+        title=book.title,
+        author=book.author,
+        isbn13=book.isbn13,
+        format_priority=tuple(deps.cfg.scrapers.format_priority),
+        language=deps.cfg.scrapers.language,
+    )
+    is_non_latin = _is_non_latin(book.title or "")
+    floor = (
+        deps.cfg.general.fallthrough_quality_floor_non_latin
+        if is_non_latin
+        else deps.cfg.general.fallthrough_quality_floor
+    )
+    pool: list[Candidate] = []
+    seen_md5: set[str] = set()
+    last_strategy: str | None = None
     for s_name in scrapers_registry.enabled_order_for_query(deps.cfg.scrapers, book.title or ""):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
@@ -145,16 +190,44 @@ def _search_with_strategies(
                 message=f"search error: {e}",
             )
             continue
-        if cands:
+        if not cands:
+            continue
+
+        # Dedup by md5 against what we already have
+        new_cands = [c for c in cands if (c.md5 or "") not in seen_md5 or not c.md5]
+        for c in new_cands:
+            if c.md5:
+                seen_md5.add(c.md5)
+        pool.extend(new_cands)
+        last_strategy = s_name
+
+        peek_top = _peek_top_score(deps, book, new_cands)
+        if peek_top >= floor:
             deps.events.append(
                 book_id=book.id,
                 kind="scrape",
                 scraper=s_name,
-                message=f"got {len(cands)} candidates",
+                message=f"got {len(cands)} candidates (top={peek_top:.1f} ≥ floor {floor:.0f}); stopping chain",
             )
             deps.books.mark_stage(book.id, "searched")
-            return cands, s_name
-    return [], None
+            return pool, s_name
+
+        deps.events.append(
+            book_id=book.id,
+            kind="scrape",
+            scraper=s_name,
+            message=f"got {len(cands)} candidates (top={peek_top:.1f} < floor {floor:.0f}); falling through",
+        )
+
+    if pool:
+        deps.books.mark_stage(book.id, "searched")
+        deps.events.append(
+            book_id=book.id,
+            kind="scrape",
+            scraper=last_strategy,
+            message=f"chain exhausted; using union of {len(pool)} candidates",
+        )
+    return pool, last_strategy
 
 
 def _score_and_persist(deps: PipelineDeps, book: BookRow, candidates: list[Candidate]):

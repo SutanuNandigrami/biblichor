@@ -29,6 +29,13 @@ class GeneralCfg(BaseModel):
     # non-Latin titles auto-pick at score 45 (the empirical confident-
     # match floor on the existing queue).
     auto_pick_threshold_non_latin: float = 45.0
+    # Quality floor for scraper-chain fallthrough. If the BEST candidate from
+    # the current scraper is below this floor, keep going to the next scraper
+    # rather than stopping at the first one to return ANY results.
+    # Latin queries with an ISBN can clear 60 easily (ISBN match alone is 35).
+    # Non-Latin queries clear 40 only when the title actually matches.
+    fallthrough_quality_floor: float = 60.0
+    fallthrough_quality_floor_non_latin: float = 40.0
     auto_pick_gap: float = 10.0
     min_score_for_failure: float = 40.0
     # Lower failure floor for non-Latin queries. rapidfuzz on
