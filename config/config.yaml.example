@@ -72,3 +72,12 @@ scoring:
   filesize_max_bytes: 83886080
   scan_penalty: 10
   audio_keywords: [audiobook, audible, mp3, m4b]
+
+security:
+  # When false (default), ClamAV is run if installed but absence is OK.
+  # When true, the pipeline refuses to unpack archives unless clamscan
+  # is on PATH. Install: sudo apt install clamav clamav-daemon
+  require_clamav: false
+  max_archive_size_mb: 200
+  max_extracted_size_mb: 500
+  max_members: 50

@@ -63,8 +63,30 @@ def _fake_slow_ready_html() -> str:
 
 
 def _epub_bytes() -> bytes:
-    # Minimal ZIP/EPUB; calibre won't run because we skip conversion for native epub
-    return b"PK\x03\x04" + b"\x00" * 1024
+    """Return a minimal but VALID EPUB bytes blob.
+
+    Our new security/unpack layer (commit f10e485++) uses the embedded
+    `mimetype` member to distinguish a bare EPUB from a ZIP wrapper that
+    needs unpacking. A 4-byte PK header without a real central directory
+    is rejected as a malformed archive — exactly what we want in
+    production, but the fixture needs to look like a real EPUB.
+    """
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        # mimetype must be stored uncompressed per EPUB spec
+        z.writestr(
+            zipfile.ZipInfo("mimetype", date_time=(2020, 1, 1, 0, 0, 0)),
+            "application/epub+zip",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        z.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0"/>',
+        )
+    return buf.getvalue()
 
 
 def _make_cfg(books_dir: Path, smtp_port: int) -> Config:

@@ -88,6 +88,20 @@ class ScoringCfg(BaseModel):
     non_latin_title_multiplier: float = 2.0
 
 
+class SecurityCfg(BaseModel):
+    """Hygiene + AV scanning of downloaded archives.
+
+    Defaults are pragmatic for first-run (ClamAV optional, allow archives
+    after hygiene passes). Flip require_clamav: true once you've installed
+    `clamav` to enforce signature scanning.
+    """
+
+    require_clamav: bool = False
+    max_archive_size_mb: int = 200
+    max_extracted_size_mb: int = 500
+    max_members: int = 50
+
+
 class Config(BaseModel):
     general: GeneralCfg = GeneralCfg()
     kindle: KindleCfg = KindleCfg()
@@ -96,6 +110,7 @@ class Config(BaseModel):
     calibre: CalibreCfg = CalibreCfg()
     scrapers: ScrapersCfg = ScrapersCfg()
     scoring: ScoringCfg = ScoringCfg()
+    security: SecurityCfg = SecurityCfg()
 
     def public_view(self) -> dict:
         d = self.model_dump()

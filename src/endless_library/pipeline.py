@@ -22,6 +22,8 @@ from endless_library.download import DownloadError, download
 from endless_library.kindle import KindleSendError, send_to_kindle
 from endless_library.notifier import Notifier
 from endless_library.scrapers import registry as scrapers_registry
+from endless_library.security.archive_safety import SafetyLimits
+from endless_library.security.unpack import UnpackError, unpack_if_archive
 from endless_library.sources import registry as sources_registry
 
 log = logging.getLogger(__name__)
@@ -129,9 +131,7 @@ def _search_with_strategies(
         format_priority=tuple(deps.cfg.scrapers.format_priority),
         language=deps.cfg.scrapers.language,
     )
-    for s_name in scrapers_registry.enabled_order_for_query(
-        deps.cfg.scrapers, book.title or ""
-    ):
+    for s_name in scrapers_registry.enabled_order_for_query(deps.cfg.scrapers, book.title or ""):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
             cands = scraper.search(sq)
@@ -195,9 +195,7 @@ def _score_and_persist(deps: PipelineDeps, book: BookRow, candidates: list[Candi
 
 def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Path | None:
     """Find a scraper that can resolve this candidate's CDN URL and stream the file down."""
-    for s_name in scrapers_registry.enabled_order_for_query(
-        deps.cfg.scrapers, book.title or ""
-    ):
+    for s_name in scrapers_registry.enabled_order_for_query(deps.cfg.scrapers, book.title or ""):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
             handle = scraper.resolve_cdn(c)
@@ -234,16 +232,46 @@ def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Pa
             scraper=s_name,
             message=f"downloaded {result.size} bytes -> {result.path.name}",
         )
+        # Hygiene + optional AV on archive-wrapped downloads (kindlebangla's
+        # single-file Drive cases ship the .epub inside a .rar). Bare ebooks
+        # pass through unchanged after a direct AV scan.
+        try:
+            limits = SafetyLimits(
+                max_archive_size_mb=deps.cfg.security.max_archive_size_mb,
+                max_extracted_size_mb=deps.cfg.security.max_extracted_size_mb,
+                max_members=deps.cfg.security.max_members,
+            )
+            unpacked = unpack_if_archive(
+                result.path,
+                limits=limits,
+                require_clamav=deps.cfg.security.require_clamav,
+            )
+        except UnpackError as e:
+            deps.events.append(
+                book_id=book.id,
+                kind="error",
+                scraper=s_name,
+                message=f"unpack/AV rejected: {e}",
+            )
+            continue
+        if unpacked.was_archive:
+            deps.events.append(
+                book_id=book.id,
+                kind="convert",
+                scraper=s_name,
+                message=f"unpacked archive -> {unpacked.path.name}",
+            )
+        final_path = unpacked.path
         deps.books.set_status(
             book.id,
             "downloading",
             md5=result.md5,
-            file_path=str(result.path),
-            format=result.path.suffix.lstrip("."),
-            file_size=result.size,
+            file_path=str(final_path),
+            format=final_path.suffix.lstrip("."),
+            file_size=final_path.stat().st_size,
         )
         deps.books.mark_stage(book.id, "downloaded")
-        return result.path
+        return final_path
     return None
 
 

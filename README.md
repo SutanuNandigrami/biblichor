@@ -274,6 +274,58 @@ python -m endless_library bench [--quick]
 | Calibre-Web thumbnails missing | Old SPA build | Rebuild: `cd webapp && npm run build` then restart |
 | Scheduler jobs don't fire | systemd unit was running an old build | `sudo systemctl restart biblichor` — the scheduler starts inside FastAPI's lifespan |
 
+## Security
+
+### Archive hygiene + AV scanning
+
+Some sources (notably `kindlebangla.com` for ~30% of its catalog) deliver the ebook inside a RAR or ZIP wrapper rather than as a bare `.epub`. We unpack these, but only after passing every member through a strict hygiene gate:
+
+| Check | What it blocks |
+|---|---|
+| Magic byte detection | Files claiming to be archives that aren't (RAR or ZIP only) |
+| Compressed size cap (default 200 MB) | Bandwidth/disk hoses |
+| Extension whitelist | `.epub`/`.azw3`/`.mobi`/`.pdf`/`.jpg`/`.opf` and a few siblings only — everything else (`.exe`, `.sh`, `.lnk`, `.so`, ...) is fatal |
+| Path traversal | Members containing `..` or starting with `/` are fatal |
+| Nested archives | Refused outright (no RAR-in-RAR, ZIP-in-ZIP) |
+| Zip-bomb protection | Total uncompressed size capped (default 500 MB) |
+| Single ebook contract | Must contain exactly one of `.epub`/`.azw3`/`.mobi`/`.pdf`; multiple ebooks or zero is fatal |
+
+These rules are **always on**; nothing in `config.yaml` disables them. The pipeline marks the book `failed` with the reason recorded in events.
+
+### Optional ClamAV scan
+
+After hygiene passes, the unpacked ebook is handed to `clamscan` if it's installed. By default ClamAV is treated as optional — its absence is a loud warning, not a failure. Toggle `security.require_clamav: true` in `config/config.yaml` to make it mandatory.
+
+```bash
+# Install
+sudo apt install clamav clamav-daemon
+sudo freshclam                # download signature DB (first time only)
+sudo systemctl enable --now clamav-freshclam   # daily auto-update
+
+# Then in config/config.yaml:
+security:
+  require_clamav: true
+```
+
+| Pipeline behavior | `require_clamav=false` | `require_clamav=true` |
+|---|---|---|
+| ClamAV not installed | ⚠ Warn, allow after hygiene pass | ✗ Fail every archive |
+| ClamAV reports clean | ✓ Allow | ✓ Allow |
+| ClamAV reports infected | ✗ Fail | ✗ Fail |
+| ClamAV errors / times out | ✗ Fail | ✗ Fail |
+
+Bare `.epub`/`.pdf` downloads (the common case) are also scanned by ClamAV when installed — the hygiene checks only apply to archives.
+
+### Settings to tune
+
+```yaml
+security:
+  require_clamav: false        # flip to true after installing clamav
+  max_archive_size_mb: 200     # cap on the compressed wrapper
+  max_extracted_size_mb: 500   # cap on total uncompressed size (zip-bomb guard)
+  max_members: 50              # cap on number of entries in an archive
+```
+
 ## Operational notes
 
 - **Data layout**: everything goes under `data/`:
