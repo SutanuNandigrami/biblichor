@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 
 from endless_library.config import ScrapersCfg
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
+from endless_library.domain.scoring import _is_non_latin as _query_is_non_latin
 from endless_library.scrapers.base import ANNAS_CDN_REGEX, parse_filesize, url_has_book_ext
 from endless_library.scrapers.rate_limit import MirrorRotator, TokenBucket
 
@@ -50,12 +51,16 @@ class AnnasArchiveCurl:
     def search(self, query: SearchQuery) -> list[Candidate]:
         candidates: list[Candidate] = []
         for fmt in query.format_priority:
-            params = {
+            # If the query title is non-Latin (Bengali/CJK/Devanagari/...),
+            # drop the lang hint so Anna's doesn't pad results with English
+            # fallbacks.
+            params: dict[str, str] = {
                 "q": f"{query.title} {query.author or ''}".strip(),
                 "ext": fmt,
-                "lang": query.language,
                 "sort": "",
             }
+            if not _query_is_non_latin(query.title or ""):
+                params["lang"] = query.language
             qs = "&".join(f"{k}={quote_plus(str(v))}" for k, v in params.items())
             url = f"{self.mirrors.current}/search?{qs}"
             html = self._get(url)

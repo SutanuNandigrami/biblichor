@@ -15,6 +15,63 @@ def _has_audio_marker(c: Candidate, audio_keywords: list[str]) -> bool:
     return any(k in blob for k in audio_keywords)
 
 
+def _is_non_latin(s: str) -> bool:
+    """True iff `s` contains any Bengali, Devanagari, CJK, Arabic, Hebrew,
+    Cyrillic, Greek, Korean, Thai, etc — i.e. anything that wouldn't share
+    a single rapidfuzz token with a pure-ASCII Latin title.
+
+    We pick this up via Unicode block ranges rather than `unicodedata.script`
+    so we don't need an extra dep. Each tuple is (lo, hi) inclusive.
+    """
+    for ch in s:
+        cp = ord(ch)
+        # Latin Extended-A/B and accented Latin still count as "Latin-ish"
+        if cp < 0x0250 or 0x1E00 <= cp <= 0x1EFF:
+            continue
+        # Anything in these blocks is definitely non-Latin script
+        if (
+            0x0370 <= cp <= 0x03FF       # Greek
+            or 0x0400 <= cp <= 0x052F    # Cyrillic
+            or 0x0590 <= cp <= 0x05FF    # Hebrew
+            or 0x0600 <= cp <= 0x06FF    # Arabic
+            or 0x0900 <= cp <= 0x097F    # Devanagari
+            or 0x0980 <= cp <= 0x09FF    # Bengali
+            or 0x0A00 <= cp <= 0x0A7F    # Gurmukhi
+            or 0x0A80 <= cp <= 0x0AFF    # Gujarati
+            or 0x0B00 <= cp <= 0x0B7F    # Oriya
+            or 0x0B80 <= cp <= 0x0BFF    # Tamil
+            or 0x0C00 <= cp <= 0x0C7F    # Telugu
+            or 0x0C80 <= cp <= 0x0CFF    # Kannada
+            or 0x0D00 <= cp <= 0x0D7F    # Malayalam
+            or 0x0E00 <= cp <= 0x0E7F    # Thai
+            or 0x0F00 <= cp <= 0x0FFF    # Tibetan
+            or 0x1100 <= cp <= 0x11FF    # Hangul Jamo
+            or 0x3040 <= cp <= 0x309F    # Hiragana
+            or 0x30A0 <= cp <= 0x30FF    # Katakana
+            or 0x3400 <= cp <= 0x4DBF    # CJK Ext A
+            or 0x4E00 <= cp <= 0x9FFF    # CJK Unified
+            or 0xAC00 <= cp <= 0xD7AF    # Hangul Syllables
+        ):
+            return True
+    return False
+
+
+def _author_match_strict(q_author_lc: str, haystack: str) -> float:
+    """Author fallback when the candidate row has no parsed author.
+
+    The previous heuristic used `partial_token_set_ratio(q_author, haystack)`
+    with a 0.7 floor, which spuriously credited a single shared surname like
+    "Narayan" against any Indian book mentioning "narayan". Now we require
+    every meaningful (>2-char) token of the queried author to appear in the
+    haystack — full last+first match or full last+initial — or zero credit.
+    """
+    q_tokens = [t for t in q_author_lc.split() if len(t) > 2]
+    if not q_tokens:
+        return 0.0
+    hits = sum(1 for t in q_tokens if t in haystack)
+    return 1.0 if hits == len(q_tokens) else 0.0
+
+
 def score_candidate(
     c: Candidate,
     q: SearchQuery,
@@ -51,6 +108,21 @@ def score_candidate(
                 skip_reason=f"derivative ({term})",
             )
 
+    # Script-mismatch hard-skip. If the queried title is in a non-Latin
+    # script (Bengali, Devanagari, CJK, etc) and the candidate title contains
+    # no non-Latin glyphs, the candidate cannot possibly be the book — Anna's
+    # just returned an English fallback because we hinted lang=en.
+    if q.title and c.title:
+        q_non_latin = _is_non_latin(q.title)
+        c_non_latin = _is_non_latin(c.title)
+        if q_non_latin != c_non_latin:
+            return ScoreBreakdown(
+                total=0.0,
+                components={"script_mismatch_hard_skip": 0.0},
+                is_hard_skip=True,
+                skip_reason="script_mismatch",
+            )
+
     # ISBN — caller is the authoritative source of truth via isbn13_match
     # Fallback: peek at raw["isbns"] list if present
     if isbn13_match is None:
@@ -79,12 +151,7 @@ def score_candidate(
                     str((c.raw or {}).get("row_text") or ""),
                 ]
             ).lower()
-            if haystack:
-                # token_set_ratio is good for "Angie Thomas" anywhere in a long string
-                a_sim = fuzz.partial_token_set_ratio(q_author_lc, haystack) / 100.0
-                # Don't credit weak partial matches (single-token coincidence)
-                if a_sim < 0.7:
-                    a_sim = 0.0
+            a_sim = _author_match_strict(q_author_lc, haystack)
     components["author_similarity"] = a_sim * cfg.author_weight
 
     # Format bonus
