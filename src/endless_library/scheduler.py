@@ -4,6 +4,7 @@ import asyncio
 import logging
 from pathlib import Path
 
+from apscheduler.events import EVENT_JOB_ERROR, JobExecutionEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from endless_library.config import Config
@@ -176,12 +177,51 @@ def _attach_source_jobs(sched: AsyncIOScheduler, deps: PipelineDeps) -> None:
         add_source_job(sched, deps, acct)
 
 
+def _attach_error_listener(sched: AsyncIOScheduler, deps: PipelineDeps) -> None:
+    """Surface uncaught job exceptions. Without this, APScheduler logs to
+    its own DEBUG logger and the next cycle just runs — operators have
+    no idea anything broke.
+
+    The listener:
+      - emits a log.exception with full traceback
+      - writes a global event row (kind="error", book_id=None) so
+        /api/events shows it in the dashboard
+      - sends a Pushover ping at high priority if pushover is configured
+    """
+
+    def on_job_error(event: JobExecutionEvent) -> None:
+        exc = event.exception
+        job_id = event.job_id
+        log.exception("scheduler job %s crashed", job_id, exc_info=exc)
+        try:
+            deps.events.append(
+                book_id=None,
+                kind="error",
+                scraper=None,
+                message=f"scheduler job {job_id} crashed: {type(exc).__name__}: {exc}",
+            )
+        except Exception:
+            log.exception("failed to record scheduler error event")
+        try:
+            deps.notifier._send(
+                title=f"Scheduler job failed: {job_id}",
+                message=f"{type(exc).__name__}: {exc}",
+                priority=1,
+            )
+        except Exception:
+            # Notifier failures are non-fatal; we already have log + event
+            log.debug("notifier could not deliver scheduler-error alert", exc_info=True)
+
+    sched.add_listener(on_job_error, EVENT_JOB_ERROR)
+
+
 def build_scheduler(cfg: Config, db_path: Path) -> tuple[AsyncIOScheduler, PipelineDeps]:
     """Build deps + scheduler. Kept for the CLI `endless-library run` entrypoint."""
     deps = PipelineDeps.build(cfg=cfg, db_path=db_path)
     sched = AsyncIOScheduler(timezone=cfg.general.timezone)
     _attach_system_jobs(sched, cfg, deps)
     _attach_source_jobs(sched, deps)
+    _attach_error_listener(sched, deps)
     return sched, deps
 
 
@@ -190,6 +230,7 @@ def build_scheduler_with_deps(cfg: Config, deps: PipelineDeps) -> AsyncIOSchedul
     sched = AsyncIOScheduler(timezone=cfg.general.timezone)
     _attach_system_jobs(sched, cfg, deps)
     _attach_source_jobs(sched, deps)
+    _attach_error_listener(sched, deps)
     return sched
 
 
