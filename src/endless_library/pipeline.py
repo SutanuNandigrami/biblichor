@@ -526,7 +526,11 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
                 return "failed"
     deps.books.set_status(book.id, "sending")
     # Enrich epub/azw3 metadata so Kindle sees real author/series/tags.
-    if deps.cfg.calibre.enabled and file_path.suffix.lower() in {".epub", ".azw3", ".mobi"}:
+    # PDFs included: ebook-meta writes the PDF /Info dict which Kindle
+    # reads for display. Without this, Bengali/CJK PDFs from Anna's
+    # Archive show up on Kindle with whatever transliterated junk was
+    # in the original file (often filename-derived "Foo -- Bar / Unknown").
+    if deps.cfg.calibre.enabled and file_path.suffix.lower() in {".epub", ".azw3", ".mobi", ".pdf"}:
         from endless_library.convert import enrich_metadata
 
         tags = (book.tags or "").split(",") if book.tags else None
