@@ -30,30 +30,51 @@ def _is_non_latin(s: str) -> bool:
             continue
         # Anything in these blocks is definitely non-Latin script
         if (
-            0x0370 <= cp <= 0x03FF       # Greek
-            or 0x0400 <= cp <= 0x052F    # Cyrillic
-            or 0x0590 <= cp <= 0x05FF    # Hebrew
-            or 0x0600 <= cp <= 0x06FF    # Arabic
-            or 0x0900 <= cp <= 0x097F    # Devanagari
-            or 0x0980 <= cp <= 0x09FF    # Bengali
-            or 0x0A00 <= cp <= 0x0A7F    # Gurmukhi
-            or 0x0A80 <= cp <= 0x0AFF    # Gujarati
-            or 0x0B00 <= cp <= 0x0B7F    # Oriya
-            or 0x0B80 <= cp <= 0x0BFF    # Tamil
-            or 0x0C00 <= cp <= 0x0C7F    # Telugu
-            or 0x0C80 <= cp <= 0x0CFF    # Kannada
-            or 0x0D00 <= cp <= 0x0D7F    # Malayalam
-            or 0x0E00 <= cp <= 0x0E7F    # Thai
-            or 0x0F00 <= cp <= 0x0FFF    # Tibetan
-            or 0x1100 <= cp <= 0x11FF    # Hangul Jamo
-            or 0x3040 <= cp <= 0x309F    # Hiragana
-            or 0x30A0 <= cp <= 0x30FF    # Katakana
-            or 0x3400 <= cp <= 0x4DBF    # CJK Ext A
-            or 0x4E00 <= cp <= 0x9FFF    # CJK Unified
-            or 0xAC00 <= cp <= 0xD7AF    # Hangul Syllables
+            0x0370 <= cp <= 0x03FF  # Greek
+            or 0x0400 <= cp <= 0x052F  # Cyrillic
+            or 0x0590 <= cp <= 0x05FF  # Hebrew
+            or 0x0600 <= cp <= 0x06FF  # Arabic
+            or 0x0900 <= cp <= 0x097F  # Devanagari
+            or 0x0980 <= cp <= 0x09FF  # Bengali
+            or 0x0A00 <= cp <= 0x0A7F  # Gurmukhi
+            or 0x0A80 <= cp <= 0x0AFF  # Gujarati
+            or 0x0B00 <= cp <= 0x0B7F  # Oriya
+            or 0x0B80 <= cp <= 0x0BFF  # Tamil
+            or 0x0C00 <= cp <= 0x0C7F  # Telugu
+            or 0x0C80 <= cp <= 0x0CFF  # Kannada
+            or 0x0D00 <= cp <= 0x0D7F  # Malayalam
+            or 0x0E00 <= cp <= 0x0E7F  # Thai
+            or 0x0F00 <= cp <= 0x0FFF  # Tibetan
+            or 0x1100 <= cp <= 0x11FF  # Hangul Jamo
+            or 0x3040 <= cp <= 0x309F  # Hiragana
+            or 0x30A0 <= cp <= 0x30FF  # Katakana
+            or 0x3400 <= cp <= 0x4DBF  # CJK Ext A
+            or 0x4E00 <= cp <= 0x9FFF  # CJK Unified
+            or 0xAC00 <= cp <= 0xD7AF  # Hangul Syllables
         ):
             return True
     return False
+
+
+def _non_latin_substring(s: str) -> str:
+    """Pull just the non-Latin glyphs (plus whitespace and digits) out of `s`.
+
+    `Kantai Kantai 6 (কাঁটায় কাঁটায়-৬)` → ` 6  কাঁটায় কাঁটায়-৬ `.
+    Used to neutralize transliteration noise before fuzz-matching same-script
+    titles — rapidfuzz then sees Bengali-vs-Bengali only.
+    """
+    out: list[str] = []
+    for ch in s:
+        cp = ord(ch)
+        # Keep whitespace, digits, and obvious punctuation that titles share
+        if ch.isspace() or ch in "-–—_·:.0123456789":  # noqa: RUF001
+            out.append(ch)
+            continue
+        # Skip pure Latin (incl. accented Latin) — that's the transliteration
+        if cp < 0x0250 or 0x1E00 <= cp <= 0x1EFF:
+            continue
+        out.append(ch)
+    return "".join(out).strip()
 
 
 def _author_match_strict(q_author_lc: str, haystack: str) -> float:
@@ -134,9 +155,25 @@ def score_candidate(
 
     # Title
     t_sim = 0.0
+    title_weight_eff = cfg.title_weight
     if c.title and q.title:
-        t_sim = fuzz.token_set_ratio(_normalize_title(c.title), _normalize_title(q.title)) / 100.0
-    components["title_similarity"] = t_sim * cfg.title_weight
+        t_norm_q = _normalize_title(q.title)
+        t_norm_c = _normalize_title(c.title)
+        t_sim = fuzz.token_set_ratio(t_norm_c, t_norm_q) / 100.0
+
+        # If both sides have non-Latin glyphs, also try the non-Latin
+        # substring of each — this neutralizes transliteration padding on
+        # the candidate side (e.g. "Kantai Kantai 6 (কাঁটায় কাঁটায়-৬)"
+        # vs "কাঁটায়-কাঁটায় ৬") and gives us a more honest similarity
+        # score. We take the max of the two ratios.
+        if _is_non_latin(q.title) and _is_non_latin(c.title):
+            sub_q = _non_latin_substring(t_norm_q)
+            sub_c = _non_latin_substring(t_norm_c)
+            if sub_q and sub_c:
+                t_sim_sub = fuzz.token_set_ratio(sub_c, sub_q) / 100.0
+                t_sim = max(t_sim, t_sim_sub)
+            title_weight_eff = cfg.title_weight * cfg.non_latin_title_multiplier
+    components["title_similarity"] = t_sim * title_weight_eff
 
     # Author (with row-text fallback when parser couldn't pull author cleanly)
     a_sim = 0.0

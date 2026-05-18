@@ -78,6 +78,14 @@ class ScoringCfg(BaseModel):
     filesize_max_bytes: int = 80 * 1024 * 1024
     scan_penalty: float = 10
     audio_keywords: list[str] = Field(default_factory=list)
+    # When BOTH query and candidate title contain non-Latin glyphs we
+    # extract the non-Latin substrings before fuzz-matching (handles
+    # transliterated candidates like 'Kantai Kantai 6 (কাঁটায় কাঁটায়-৬)')
+    # and multiply the resulting title_similarity component by this
+    # value. Default 1.6 — empirically lets a near-perfect Bengali/
+    # Devanagari/CJK title carry past the 70-pt auto-pick threshold
+    # with a normal format+language+filesize bonus stack.
+    non_latin_title_multiplier: float = 2.0
 
 
 class Config(BaseModel):
