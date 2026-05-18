@@ -168,11 +168,23 @@ def _search_with_strategies(
         language=deps.cfg.scrapers.language,
     )
     is_non_latin = _is_non_latin(book.title or "")
-    floor = (
+    configured_floor = (
         deps.cfg.general.fallthrough_quality_floor_non_latin
         if is_non_latin
         else deps.cfg.general.fallthrough_quality_floor
     )
+    threshold = (
+        deps.cfg.general.auto_pick_threshold_non_latin
+        if is_non_latin
+        else deps.cfg.general.auto_pick_threshold
+    )
+    # Invariant: never stop the chain below the auto-pick threshold.
+    # If the best candidate from the first scraper is only good enough
+    # for needs_review, we keep going in case a later scraper (welib /
+    # libgen / archive / kindlebangla) has the actual book. Without
+    # this, annas returning top=65 with threshold=70 short-circuited
+    # the chain and dumped the book straight into needs_review.
+    floor = max(configured_floor, threshold)
     pool: list[Candidate] = []
     seen_md5: set[str] = set()
     last_strategy: str | None = None
