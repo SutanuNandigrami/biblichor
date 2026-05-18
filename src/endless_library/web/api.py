@@ -68,6 +68,17 @@ class SettingsPatch(BaseModel):
     welib_auth_cookie: str | None = None
 
 
+def _candidate_mirror(detail_url: str | None) -> str | None:
+    """Extract bare host (annas-archive.gl, libgen.li, www.kindlebangla.com)
+    from the candidate's detail_url so the SPA can show which specific
+    mirror served the result."""
+    if not detail_url:
+        return None
+    from urllib.parse import urlparse
+
+    return urlparse(detail_url).netloc or None
+
+
 def register(app: FastAPI) -> None:
     router = APIRouter(prefix="/api")
 
@@ -113,7 +124,11 @@ def register(app: FastAPI) -> None:
         book = deps.books.get(book_id)
         if not book:
             raise HTTPException(404)
-        candidates = [asdict(c) for c in deps.cands.top_for_book(book_id, limit=10)]
+        candidates = []
+        for c in deps.cands.top_for_book(book_id, limit=10):
+            d = asdict(c)
+            d["mirror"] = _candidate_mirror(c.detail_url)
+            candidates.append(d)
         events = [
             {**asdict(e), "meta": e.meta} for e in deps.events.recent_for_book(book_id, limit=200)
         ]

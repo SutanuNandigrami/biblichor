@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '@/composables/useApi'
 import Drawer from '@/components/ui/Drawer.vue'
 import Button from '@/components/ui/Button.vue'
@@ -22,6 +22,7 @@ type Candidate = {
   id: number; provider: string; md5: string | null; title: string | null
   format: string | null; filesize_bytes: number | null; language: string | null
   score: number | null; year: number | null; edition_hints: string | null
+  mirror: string | null; detail_url: string | null
 }
 type Event = {
   id: number; ts: string; kind: string; scraper: string | null; message: string
@@ -31,6 +32,11 @@ type Event = {
 const book = ref<Book | null>(null)
 const candidates = ref<Candidate[]>([])
 const events = ref<Event[]>([])
+const scrapeTrace = computed(() =>
+  events.value
+    .filter((e) => e.scraper && (e.kind === 'scrape' || e.kind === 'error'))
+    .slice(0, 15)
+)
 
 async function load() {
   const r = await api<{ book: Book; candidates: Candidate[]; events: Event[] }>(`/api/books/${props.id}`)
@@ -94,12 +100,32 @@ function size(b?: number | null) {
       </section>
 
       <section>
+        <h3 class="text-sm font-semibold mb-2">Search trace</h3>
+        <p class="text-xs text-muted-foreground mb-2">
+          Scrapers try in order; the first one to return candidates wins. Within a scraper,
+          mirror rotation is failover-only (other mirrors only get tried if the first fails).
+        </p>
+        <Card class="overflow-hidden mb-4">
+          <table class="w-full text-xs">
+            <tbody>
+              <tr v-for="ev in scrapeTrace" :key="ev.id" class="border-t border-border/40">
+                <td class="px-3 py-2 text-muted-foreground w-20">{{ ev.ts.slice(11,19) }}</td>
+                <td class="px-3 py-2 font-mono">{{ ev.scraper ?? '—' }}</td>
+                <td class="px-3 py-2">{{ ev.message }}</td>
+              </tr>
+              <tr v-if="!scrapeTrace.length">
+                <td class="px-3 py-2 text-muted-foreground" colspan="3">No scraper events yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </Card>
         <h3 class="text-sm font-semibold mb-2">Candidates</h3>
         <Card v-if="candidates.length" class="overflow-hidden">
           <table class="w-full text-xs">
             <thead class="text-muted-foreground">
               <tr class="text-left">
                 <th class="px-3 py-2">Score</th>
+                <th class="px-3 py-2">Source</th>
                 <th class="px-3 py-2">Title</th>
                 <th class="px-3 py-2">Fmt</th>
                 <th class="px-3 py-2">Size</th>
@@ -109,6 +135,12 @@ function size(b?: number | null) {
             <tbody>
               <tr v-for="c in candidates" :key="c.id" class="border-t border-border/40">
                 <td class="px-3 py-2 font-mono">{{ c.score?.toFixed(1) ?? '—' }}</td>
+                <td class="px-3 py-2 text-xs">
+                  <div class="font-medium">{{ c.provider }}</div>
+                  <a v-if="c.detail_url" :href="c.detail_url" target="_blank" rel="noopener"
+                     class="text-muted-foreground hover:text-primary underline-offset-2 hover:underline truncate inline-block max-w-[14ch]">{{ c.mirror ?? c.detail_url }}</a>
+                  <span v-else class="text-muted-foreground">{{ c.mirror ?? '—' }}</span>
+                </td>
                 <td class="px-3 py-2 truncate max-w-xs">{{ c.title ?? c.md5 }}</td>
                 <td class="px-3 py-2 text-muted-foreground">{{ c.format ?? '—' }}</td>
                 <td class="px-3 py-2 text-muted-foreground">{{ size(c.filesize_bytes) }}</td>
