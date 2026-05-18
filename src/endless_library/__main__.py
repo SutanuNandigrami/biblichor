@@ -307,6 +307,44 @@ def cmd_storage_migrate(args):
     return 1 if result.failed else 0
 
 
+def cmd_backup(args):
+    """Create a backup bundle and push it via the configured Store
+    (Phase 5a)."""
+    from endless_library.backup import BackupError, make_backup
+    from endless_library.storage.factory import build_store
+
+    config_path, db_path = _resolve_paths(args)
+    cfg = load_config(config_path)
+    _setup_logging(cfg.general.log_level)
+
+    secrets_path = Path(args.secrets) if args.secrets else None
+    library_dir = Path(args.library) if args.library else Path(cfg.general.books_dir)
+    if not library_dir.exists():
+        library_dir = None  # treat absent library as "config-only backup"
+
+    store = build_store(cfg.storage, data_root=Path(cfg.general.books_dir))
+    recipient = args.age_recipient or os.environ.get("BIBLICHOR_AGE_RECIPIENT") or ""
+
+    try:
+        result = make_backup(
+            db_path=db_path,
+            config_path=config_path,
+            secrets_path=secrets_path,
+            library_dir=library_dir,
+            store=store,
+            age_recipient=recipient if recipient else None,
+            remote_prefix=args.prefix or "backups",
+        )
+    except BackupError as e:
+        print(f"backup failed: {e}", file=sys.stderr)
+        return 1
+
+    print(f"backup ok: {result.remote_key} ({result.bytes_written:,} bytes)")
+    print(f"  encrypted: {result.manifest.encrypted}")
+    print(f"  files: {len(result.manifest.file_checksums)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="endless-library", description="Self-hosted books -> kindle")
     p.add_argument("--config", help="Path to config.yaml")
@@ -332,6 +370,13 @@ def main(argv: list[str] | None = None) -> int:
     s_resend.add_argument("--format", help="Resend all sent books of this format (e.g. pdf)")
     s_resend.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
     s_resend.set_defaults(func=cmd_resend)
+
+    s_backup = sub.add_parser("backup", help="Create a disaster-recovery backup (Phase 5a)")
+    s_backup.add_argument("--secrets", default="", help="Path to .env (defaults to none)")
+    s_backup.add_argument("--library", default="", help="Override library dir (default: general.books_dir)")
+    s_backup.add_argument("--age-recipient", default="", help="age public key for encryption")
+    s_backup.add_argument("--prefix", default="backups", help="Remote key prefix")
+    s_backup.set_defaults(func=cmd_backup)
 
     s_storage = sub.add_parser("storage", help="Storage management commands (Phase 4c)")
     sub_storage = s_storage.add_subparsers(dest="storage_cmd")
