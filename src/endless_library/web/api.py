@@ -121,14 +121,56 @@ def register(app: FastAPI) -> None:
 
     @router.get("/books/{book_id}")
     def get_book(book_id: int, request: Request):
+        """Book detail. Computes score_breakdown for each candidate
+        on-the-fly so the drawer's score-explainer UI has the full
+        component-level scoring (ISBN/title/author/format/lang/filesize)
+        without persisting them in the candidates table."""
+        from endless_library.domain.models import Candidate, SearchQuery
+        from endless_library.domain.scoring import score_candidate
+
         deps = request.app.state.deps
         book = deps.books.get(book_id)
         if not book:
             raise HTTPException(404)
+        # Reusable SearchQuery for breakdown recomputation
+        sq = SearchQuery(
+            title=book.title,
+            author=book.author,
+            isbn13=book.isbn13,
+            format_priority=tuple(deps.cfg.scrapers.format_priority),
+            language=deps.cfg.scrapers.language,
+        )
         candidates = []
         for c in deps.cands.top_for_book(book_id, limit=10):
             d = asdict(c)
             d["mirror"] = _candidate_mirror(c.detail_url)
+            # Recompute breakdown from the persisted candidate row
+            try:
+                raw = json.loads(c.raw_json) if c.raw_json else {}
+                cand = Candidate(
+                    provider=c.provider,
+                    md5=c.md5,
+                    title=c.title,
+                    author=c.author,
+                    language=c.language,
+                    format=c.format,
+                    filesize_bytes=c.filesize_bytes,
+                    year=c.year,
+                    publisher=c.publisher,
+                    edition_hints=c.edition_hints or "",
+                    detail_url=c.detail_url,
+                    raw=raw,
+                )
+                isbn_match = bool(sq.isbn13) and sq.isbn13 in (raw.get("isbns") or [])
+                sb = score_candidate(cand, sq, deps.cfg.scoring, isbn13_match=isbn_match)
+                d["score_breakdown"] = {
+                    "components": sb.components,
+                    "is_hard_skip": sb.is_hard_skip,
+                    "skip_reason": sb.skip_reason,
+                }
+            except Exception as e:
+                # Don't fail the detail endpoint on score recomputation
+                d["score_breakdown"] = {"error": f"{type(e).__name__}: {e}"}
             candidates.append(d)
         events = [
             {**asdict(e), "meta": e.meta} for e in deps.events.recent_for_book(book_id, limit=200)

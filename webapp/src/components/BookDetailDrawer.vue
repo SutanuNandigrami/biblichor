@@ -18,11 +18,18 @@ type Book = {
   file_path: string | null; last_error: string | null; updated_at: string
   source: string; sent_at: string | null; md5: string | null
 }
+type ScoreBreakdown = {
+  components?: Record<string, number>
+  is_hard_skip?: boolean
+  skip_reason?: string | null
+  error?: string
+}
 type Candidate = {
   id: number; provider: string; md5: string | null; title: string | null
   format: string | null; filesize_bytes: number | null; language: string | null
   score: number | null; year: number | null; edition_hints: string | null
   mirror: string | null; detail_url: string | null
+  score_breakdown?: ScoreBreakdown
 }
 type Event = {
   id: number; ts: string; kind: string; scraper: string | null; message: string
@@ -32,6 +39,28 @@ type Event = {
 const book = ref<Book | null>(null)
 const candidates = ref<Candidate[]>([])
 const events = ref<Event[]>([])
+const expandedRow = ref<number | null>(null)
+function toggleRow(id: number) {
+  expandedRow.value = expandedRow.value === id ? null : id
+}
+function fmtComponent(name: string, value: number): { label: string; weight: number } {
+  // Display names mapping for the breakdown rows
+  const labels: Record<string, string> = {
+    isbn_match: 'ISBN13 match',
+    isbn13_matched: 'ISBN13 matched (flag)',
+    title_similarity: 'Title similarity (weighted)',
+    title_similarity_raw: 'Title similarity (raw 0-1)',
+    author_similarity: 'Author similarity',
+    format_bonus: 'Format bonus',
+    language_bonus: 'Language bonus',
+    filesize_penalty: 'Filesize penalty',
+    filesize_bonus: 'Filesize bonus',
+    scan_penalty: 'Scan/OCR penalty',
+    audio_penalty: 'Audio penalty',
+    derivative_penalty: 'Derivative-content penalty',
+  }
+  return { label: labels[name] ?? name, weight: value }
+}
 const scrapeTrace = computed(() =>
   events.value
     .filter((e) => e.scraper && (e.kind === 'scrape' || e.kind === 'error'))
@@ -133,21 +162,52 @@ function size(b?: number | null) {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="c in candidates" :key="c.id" class="border-t border-border/40">
-                <td class="px-3 py-2 font-mono">{{ c.score?.toFixed(1) ?? '—' }}</td>
-                <td class="px-3 py-2 text-xs">
-                  <div class="font-medium">{{ c.provider }}</div>
-                  <a v-if="c.detail_url" :href="c.detail_url" target="_blank" rel="noopener"
-                     class="text-muted-foreground hover:text-primary underline-offset-2 hover:underline truncate inline-block max-w-[14ch]">{{ c.mirror ?? c.detail_url }}</a>
-                  <span v-else class="text-muted-foreground">{{ c.mirror ?? '—' }}</span>
-                </td>
-                <td class="px-3 py-2 truncate max-w-xs">{{ c.title ?? c.md5 }}</td>
-                <td class="px-3 py-2 text-muted-foreground">{{ c.format ?? '—' }}</td>
-                <td class="px-3 py-2 text-muted-foreground">{{ size(c.filesize_bytes) }}</td>
-                <td class="px-3 py-2 text-right">
-                  <Button size="sm" variant="outline" @click="pick(c)">Pick</Button>
-                </td>
-              </tr>
+              <template v-for="c in candidates" :key="c.id">
+                <tr class="border-t border-border/40 hover:bg-accent/30 cursor-pointer"
+                    @click="toggleRow(c.id)">
+                  <td class="px-3 py-2 font-mono">
+                    <span class="mr-1 text-muted-foreground">{{ expandedRow === c.id ? '▾' : '▸' }}</span>
+                    {{ c.score?.toFixed(1) ?? '—' }}
+                  </td>
+                  <td class="px-3 py-2 text-xs">
+                    <div class="font-medium">{{ c.provider }}</div>
+                    <a v-if="c.detail_url" :href="c.detail_url" target="_blank" rel="noopener" @click.stop
+                       class="text-muted-foreground hover:text-primary underline-offset-2 hover:underline truncate inline-block max-w-[14ch]">{{ c.mirror ?? c.detail_url }}</a>
+                    <span v-else class="text-muted-foreground">{{ c.mirror ?? '—' }}</span>
+                  </td>
+                  <td class="px-3 py-2 truncate max-w-xs">{{ c.title ?? c.md5 }}</td>
+                  <td class="px-3 py-2 text-muted-foreground">{{ c.format ?? '—' }}</td>
+                  <td class="px-3 py-2 text-muted-foreground">{{ size(c.filesize_bytes) }}</td>
+                  <td class="px-3 py-2 text-right" @click.stop>
+                    <Button size="sm" variant="outline" @click="pick(c)">Pick</Button>
+                  </td>
+                </tr>
+                <tr v-if="expandedRow === c.id" class="bg-muted/40 border-t border-border/40">
+                  <td :colspan="6" class="px-4 py-3">
+                    <div class="text-xs text-muted-foreground mb-2">Score breakdown</div>
+                    <div v-if="c.score_breakdown?.error" class="text-xs text-destructive font-mono">
+                      {{ c.score_breakdown.error }}
+                    </div>
+                    <div v-else-if="c.score_breakdown?.is_hard_skip" class="text-xs">
+                      <Badge variant="danger">Hard-skipped</Badge>
+                      <span class="ml-2 text-muted-foreground">{{ c.score_breakdown.skip_reason }}</span>
+                    </div>
+                    <table v-else-if="c.score_breakdown?.components" class="w-full text-xs">
+                      <tbody>
+                        <tr v-for="(value, key) in c.score_breakdown.components" :key="key"
+                            class="border-b border-border/20 last:border-0">
+                          <td class="py-1 pr-3 text-muted-foreground">{{ fmtComponent(String(key), value).label }}</td>
+                          <td class="py-1 text-right font-mono"
+                              :class="value < 0 ? 'text-destructive' : value > 0 ? 'text-emerald-500' : 'text-muted-foreground'">
+                            {{ value >= 0 ? '+' : '' }}{{ value.toFixed(2) }}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div v-else class="text-xs text-muted-foreground">No breakdown available.</div>
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </Card>
