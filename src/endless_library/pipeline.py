@@ -129,7 +129,9 @@ def _search_with_strategies(
         format_priority=tuple(deps.cfg.scrapers.format_priority),
         language=deps.cfg.scrapers.language,
     )
-    for s_name in scrapers_registry.enabled_order(deps.cfg.scrapers):
+    for s_name in scrapers_registry.enabled_order_for_query(
+        deps.cfg.scrapers, book.title or ""
+    ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
             cands = scraper.search(sq)
@@ -193,7 +195,9 @@ def _score_and_persist(deps: PipelineDeps, book: BookRow, candidates: list[Candi
 
 def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Path | None:
     """Find a scraper that can resolve this candidate's CDN URL and stream the file down."""
-    for s_name in scrapers_registry.enabled_order(deps.cfg.scrapers):
+    for s_name in scrapers_registry.enabled_order_for_query(
+        deps.cfg.scrapers, book.title or ""
+    ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
             handle = scraper.resolve_cdn(c)
