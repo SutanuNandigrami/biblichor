@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from endless_library.bench import format_table, load_queries, run_bench
 from endless_library.config import save_config
 from endless_library.db.schema import connect
+from endless_library.url_safety import UnsafeUrlError, assert_safe_url
 
 log = logging.getLogger(__name__)
 
@@ -748,6 +749,13 @@ def register(app: FastAPI) -> None:
         url = (payload.get("url") or "").strip()
         if not kind or not url:
             raise HTTPException(400, "kind + url required")
+        # SSRF guard: reject loopback / link-local / RFC1918 / non-http schemes
+        # before storing OR probing. assert_safe_url resolves DNS, so a
+        # public hostname that resolves to 127.0.0.1 is also caught.
+        try:
+            assert_safe_url(url)
+        except UnsafeUrlError as e:
+            raise HTTPException(400, f"unsafe mirror URL: {e}") from e
         try:
             mid = deps.mirrors.add(kind=kind, url=url, label=payload.get("label"))
         except Exception as e:

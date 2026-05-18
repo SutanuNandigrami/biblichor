@@ -28,6 +28,24 @@ def _is_cf_walled_host(url: str) -> bool:
 
 
 def probe_http(url: str, *, timeout: float = 8.0) -> ProbeResult:
+    """HEAD probe with timing. Falls back to GET if the server rejects HEAD.
+
+    Refuses to fetch URLs that resolve to private/loopback/link-local
+    addresses so a malicious DB row (or a typo) can\'t turn the probe
+    into an SSRF tool.
+    """
+    from endless_library.url_safety import UnsafeUrlError, assert_safe_url
+
+    try:
+        assert_safe_url(url)
+    except UnsafeUrlError as e:
+        return ProbeResult(
+            url=url,
+            ok=False,
+            status=None,
+            latency_ms=0,
+            error=f"refused unsafe URL: {e}",
+        )
     """HEAD probe with timing. Falls back to GET if the server rejects HEAD."""
     if _is_cf_walled_host(url):
         return _probe_via_flaresolverr(url, timeout=timeout)

@@ -83,25 +83,48 @@ class BookRepo:
         # uniqueness still holds via UNIQUE(source, goodreads_id).
         col = "hardcover_id" if source == "hardcover" else "goodreads_id"
         with self._connect() as conn:
-            # 1. ISBN-level dedup (cross-source)
-            if isbn13:
-                row = conn.execute("SELECT id FROM books WHERE isbn13 = ?", (isbn13,)).fetchone()
-                if row:
-                    return int(row["id"])
-            # 2. Source-specific dedup
-            existing = conn.execute(
-                f"SELECT id FROM books WHERE source = ? AND {col} = ?", (source, source_id)
-            ).fetchone()
-            if existing:
-                return int(existing["id"])
-            cur = conn.execute(
-                f"""
-                INSERT INTO books (title, author, isbn13, {col}, source, source_added_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (title, author, isbn13, source_id, source, source_added_at),
-            )
-            return int(cur.lastrowid)
+            # Race-safe upsert: take an IMMEDIATE write lock so concurrent
+            # poll jobs can't both miss the dedup row and double-insert.
+            # The partial UNIQUE index on isbn13 catches anything that
+            # slips past (e.g. our own retry on transient errors).
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                # 1. ISBN-level dedup (cross-source)
+                if isbn13:
+                    row = conn.execute(
+                        "SELECT id FROM books WHERE isbn13 = ?", (isbn13,)
+                    ).fetchone()
+                    if row:
+                        conn.execute("COMMIT")
+                        return int(row["id"])
+                # 2. Source-specific dedup
+                existing = conn.execute(
+                    f"SELECT id FROM books WHERE source = ? AND {col} = ?",
+                    (source, source_id),
+                ).fetchone()
+                if existing:
+                    conn.execute("COMMIT")
+                    return int(existing["id"])
+                cur = conn.execute(
+                    f"""
+                    INSERT INTO books (title, author, isbn13, {col}, source, source_added_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (title, author, isbn13, source_id, source, source_added_at),
+                )
+                new_id = int(cur.lastrowid)
+                conn.execute("COMMIT")
+                return new_id
+            except Exception:
+                conn.execute("ROLLBACK")
+                # If we lost the race, look up the row that won
+                if isbn13:
+                    row = conn.execute(
+                        "SELECT id FROM books WHERE isbn13 = ?", (isbn13,)
+                    ).fetchone()
+                    if row:
+                        return int(row["id"])
+                raise
 
     def get(self, book_id: int) -> BookRow | None:
         with self._connect() as conn:

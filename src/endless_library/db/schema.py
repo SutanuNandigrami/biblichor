@@ -132,6 +132,14 @@ def init_db(db_path: Path | str) -> None:
     with connect(db_path) as conn:
         conn.executescript(SCHEMA_SQL)
         _migrate(conn)
+        # Partial UNIQUE index on isbn13 — defense in depth alongside the
+        # BEGIN IMMEDIATE wrap of BookRepo.upsert. If two concurrent poll
+        # jobs race past the SELECT, the second INSERT trips this index and
+        # the caller's except path looks up the row that won.
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_books_isbn13 "
+            "ON books(isbn13) WHERE isbn13 IS NOT NULL"
+        )
 
 
 def _migrate(conn) -> None:

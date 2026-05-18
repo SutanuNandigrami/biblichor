@@ -99,5 +99,8 @@ class EventRepo:
                     (excess,),
                 )
                 deleted += r2.rowcount or 0
-            conn.execute("VACUUM")
+            # PRAGMA wal_checkpoint(TRUNCATE) reclaims WAL space without
+            # taking the EXCLUSIVE lock VACUUM would hold for many seconds.
+            # Writers (pipeline.set_status / events.append) keep working.
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return deleted
