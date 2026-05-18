@@ -14,10 +14,14 @@ from endless_library.scrapers.rate_limit import TokenBucket
 log = logging.getLogger(__name__)
 
 LIBGEN_MIRRORS = (
+    # Live mirrors per shadowlibraries.github.io/DirectDownloads/libgen/
+    # Verified reachable 2026-05-18. The .is/.rs/.st mirrors have been flaky
+    # for a year — dropped from the rotation.
     "https://libgen.li",
-    "https://libgen.is",
-    "https://libgen.rs",
-    "https://libgen.st",
+    "https://libgen.gl",
+    "https://libgen.la",
+    "https://libgen.vg",
+    "https://libgen.bz",
 )
 
 
