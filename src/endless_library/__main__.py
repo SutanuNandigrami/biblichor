@@ -109,6 +109,163 @@ def cmd_bench(args):
     print(format_table(outcomes))
 
 
+def cmd_repair_filenames(args):
+    """Rename on-disk files using the Unicode-safe safe_filename so
+    titles in Bengali / CJK / Cyrillic survive (Phase X.iii).
+
+    Idempotent: re-running on already-fixed files is a no-op."""
+    import sqlite3
+
+    from endless_library.download import safe_filename
+
+    config_path, db_path = _resolve_paths(args)
+    cfg = load_config(config_path)
+    _setup_logging(cfg.general.log_level)
+
+    con = sqlite3.connect(str(db_path))
+    con.row_factory = sqlite3.Row
+    rows = con.execute(
+        "SELECT id, title, author, file_path, format FROM books "
+        "WHERE file_path IS NOT NULL "
+        "AND status IN ('sent','sending','downloading','converting','needs_review','failed')"
+    ).fetchall()
+
+    renamed, skipped, missing = 0, 0, 0
+    for r in rows:
+        fp = Path(r["file_path"])
+        if not fp.exists():
+            missing += 1
+            continue
+        ext = fp.suffix.lstrip(".")
+        # Re-derive a clean filename from the DB title + author
+        title = (r["title"] or "").strip()
+        author = (r["author"] or "").strip()
+        if author:
+            new_name = safe_filename(f"{title} -- {author}.{ext}")
+        else:
+            new_name = safe_filename(f"{title}.{ext}")
+        new_path = fp.parent / new_name
+        if new_path == fp:
+            skipped += 1
+            continue
+        if new_path.exists():
+            # Disambiguate with id suffix
+            stem = new_name[: -len(ext) - 1]
+            new_path = fp.parent / f"{stem} ({r['id']}).{ext}"
+            if new_path.exists():
+                print(f"[skip] id={r['id']}: target exists: {new_path}")
+                skipped += 1
+                continue
+        action = "would rename" if args.dry_run else "renaming"
+        print(f"[{action}] id={r['id']}")
+        print(f"  from: {fp.name}")
+        print(f"  to:   {new_path.name}")
+        if not args.dry_run:
+            fp.rename(new_path)
+            con.execute(
+                "UPDATE books SET file_path = ?, updated_at = datetime('now') WHERE id = ?",
+                (str(new_path), r["id"]),
+            )
+            con.commit()
+            renamed += 1
+    print()
+    print(f"summary: renamed={renamed} skipped={skipped} missing_file={missing} total={len(rows)}")
+    return 0
+
+
+def cmd_resend(args):
+    """Re-enrich metadata + resend selected books to Kindle (Phase X.iv).
+
+    Use case: previously sent PDFs whose embedded metadata was broken
+    (transliterated or filename-derived). The enrich step writes the
+    DB'\''s correct title/author into the file via Calibre'\''s
+    ebook-meta; then we re-send via the configured SMTP.
+    """
+    import sqlite3
+
+    from endless_library.convert import ConvertError, enrich_metadata
+    from endless_library.kindle import KindleSendError, send_to_kindle
+
+    config_path, db_path = _resolve_paths(args)
+    cfg = load_config(config_path)
+    _setup_logging(cfg.general.log_level)
+    con = sqlite3.connect(str(db_path))
+    con.row_factory = sqlite3.Row
+
+    if args.book_ids:
+        ids = [int(x) for x in args.book_ids.split(",")]
+        placeholders = ",".join(["?"] * len(ids))
+        where = f"id IN ({placeholders})"
+        params = ids
+    elif args.format:
+        where = "format = ? AND status = 'sent' AND file_path IS NOT NULL"
+        params = [args.format]
+    else:
+        print("must provide --book-ids or --format", file=sys.stderr)
+        return 1
+
+    rows = con.execute(
+        f"SELECT id, title, author, series, isbn13, file_path, format FROM books WHERE {where}",
+        params,
+    ).fetchall()
+    if not rows:
+        print("no books match")
+        return 1
+
+    print(f"will re-enrich + resend {len(rows)} book(s):")
+    for r in rows:
+        print(f"  id={r['id']} {r['title']!r} [{r['format']}]")
+    if not args.yes:
+        confirm = input("proceed? [y/N] ").strip().lower()
+        if confirm != "y":
+            print("aborted")
+            return 0
+
+    ok, failed = 0, 0
+    for r in rows:
+        fp = Path(r["file_path"])
+        if not fp.exists():
+            print(f"[skip] id={r['id']}: file missing: {fp}")
+            failed += 1
+            continue
+        # 1. Re-enrich metadata in place
+        try:
+            enrich_metadata(
+                fp,
+                title=r["title"],
+                author=r["author"],
+                series=r["series"],
+                isbn=r["isbn13"],
+            )
+            print(f"[enrich] id={r['id']}: metadata written")
+        except ConvertError as e:
+            print(f"[enrich-fail] id={r['id']}: {e}", file=sys.stderr)
+            # Don'''t bail on enrich failure for the resend
+        # 2. Send to Kindle
+        try:
+            res = send_to_kindle(
+                attachment=fp,
+                kindle=cfg.kindle,
+                smtp=cfg.smtp,
+                title=r["title"],
+                author=r["author"],
+            )
+            print(f"[sent]   id={r['id']}: {res.response}")
+            con.execute(
+                "UPDATE books SET sent_at = datetime('now'), "
+                "updated_at = datetime('now') WHERE id = ?",
+                (r["id"],),
+            )
+            con.commit()
+            ok += 1
+        except KindleSendError as e:
+            print(f"[send-fail] id={r['id']}: {e}", file=sys.stderr)
+            failed += 1
+    print()
+    print(f"summary: sent={ok} failed={failed} total={len(rows)}")
+    return 0 if failed == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="endless-library", description="Self-hosted books -> kindle")
     p.add_argument("--config", help="Path to config.yaml")
@@ -124,6 +281,16 @@ def main(argv: list[str] | None = None) -> int:
 
     s_status = sub.add_parser("status", help="Print queue summary")
     s_status.set_defaults(func=cmd_status)
+
+    s_repair = sub.add_parser("repair-filenames", help="Re-derive on-disk filenames with Unicode-safe sanitization (Phase X.iii)")
+    s_repair.add_argument("--dry-run", action="store_true", help="Print what would change, don't rename")
+    s_repair.set_defaults(func=cmd_repair_filenames)
+
+    s_resend = sub.add_parser("resend", help="Re-enrich metadata + resend to Kindle (Phase X.iv)")
+    s_resend.add_argument("--book-ids", help="Comma-separated book IDs to resend")
+    s_resend.add_argument("--format", help="Resend all sent books of this format (e.g. pdf)")
+    s_resend.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+    s_resend.set_defaults(func=cmd_resend)
 
     s_send = sub.add_parser("send", help="Send an existing epub/file straight to Kindle")
     s_send.add_argument("path", help="Path to the file to send")
