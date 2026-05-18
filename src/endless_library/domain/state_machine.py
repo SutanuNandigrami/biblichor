@@ -26,16 +26,26 @@ STATES: tuple[State, ...] = (
     "failed",
 )
 
+# Source of truth for valid book-status transitions. Verified against
+# pipeline.process_one + pipeline._process_from_downloaded + the
+# /books/{id}/retry reset-to-queued path. Kept in sync with the actual
+# transitions the pipeline performs (not aspirational).
 _LEGAL: dict[str, set[str]] = {
     "queued": {"searching"},
-    "searching": {"needs_review", "downloading", "failed"},
-    "needs_review": {"downloading", "skipped"},
+    # search can land in any of these depending on candidate quality
+    "searching": {"needs_review", "downloading", "failed", "skipped"},
+    # retry button resets to queued for a fresh search
+    "needs_review": {"downloading", "skipped", "queued"},
     "downloading": {"converting", "sending", "failed"},
     "converting": {"sending", "failed"},
-    "sending": {"sent", "failed"},
-    "failed": {"searching", "skipped"},
-    "sent": set(),
-    "skipped": set(),
+    # `sending → downloading` is the PDF→EPUB rescue path swapping the file
+    # `sending → needs_review` is the SMTP size guard rejecting an oversize
+    #   candidate at the last stage
+    "sending": {"sent", "failed", "needs_review", "downloading"},
+    "failed": {"searching", "skipped", "queued"},
+    # Both terminal states can be re-queued by the retry button
+    "sent": {"queued"},
+    "skipped": {"queued"},
 }
 
 

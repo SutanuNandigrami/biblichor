@@ -29,9 +29,7 @@ class SearchQuery:
 class Candidate:
     """A search result before it's stored in the DB."""
 
-    provider: Literal[
-        "annas", "welib", "libgen", "archive", "kindlebangla", "ebanglalibrary", "zlib"
-    ]
+    provider: Literal["annas", "welib", "libgen", "archive", "kindlebangla"]
     md5: str | None
     title: str | None
     author: str | None
