@@ -29,10 +29,37 @@ def client(tmp_path: Path):
 
 
 def test_healthz(client):
-    c, _ = client
-    r = c.get("/api/healthz")
-    assert r.status_code == 200
-    assert r.json()["ok"] is True
+    """healthz moved from /api/healthz to /healthz (root) and now
+    requires the scheduler to be running. Use the TestClient lifespan
+    context so the scheduler actually starts."""
+    from fastapi.testclient import TestClient
+
+    _, deps = client
+    # Rebuild a client inside a `with` so FastAPI lifespan fires
+    from endless_library.app import create_app
+    from endless_library.config import Config, save_config
+    cfg = Config()
+    cfg.scrapers.order = ["annas_curl"]
+    cfg.scrapers.enabled = {"annas_curl": True}
+    cfg.scrapers.annas_mirrors = ["https://annas-archive.gl"]
+    cfg.smtp.host = "127.0.0.1"
+    cfg.kindle.recipient = "me@kindle.com"
+    # reuse the same deps + db so we don't reinit
+    cfg_path = deps.db_path.parent / "config.yaml"
+    save_config(cfg, cfg_path)
+    app = create_app(cfg=cfg, deps=deps, config_path=cfg_path)
+
+    with TestClient(app) as tc:
+        # root /healthz returns 200 with the new component map
+        # (NOTE: /api/healthz no longer routes here; the SPA fallback
+        # catches unrouted /api/* with HTML 200 - that's a separate quirk.)
+        r = tc.get("/healthz")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True
+        assert body["db"] is True
+        assert body["scrapers"] >= 1
+        assert body["scheduler"] is True
 
 
 def test_add_and_list_books(client):

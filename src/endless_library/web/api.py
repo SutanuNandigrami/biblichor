@@ -679,17 +679,56 @@ def register(app: FastAPI) -> None:
         request.app.state.last_smtp_probe = result
         return {"ok": result.startswith("OK"), "result": result}
 
-    # ---------- healthz ----------
+    # ---------- healthz (root-level, no /api prefix) ----------
 
-    @router.get("/healthz")
+    @app.get("/healthz")
     def healthz(request: Request):
+        """Standard health probe. Returns 200 if every component is
+        healthy, 503 if anything is down (so docker/k8s/bootstrap.sh
+        can wait until the service is actually ready)."""
+        from fastapi.responses import JSONResponse
+
         deps = request.app.state.deps
-        queue = len(deps.books.pending(max_attempts=10_000))
+        components: dict[str, object] = {}
+        ok = True
+
         try:
-            db_size = Path(deps.db_path).stat().st_size
+            with connect(deps.db_path) as conn:
+                conn.execute("SELECT 1").fetchone()
+            components["db"] = True
+        except Exception as e:
+            components["db"] = f"down: {type(e).__name__}"
+            ok = False
+
+        try:
+            from endless_library.scrapers import registry as r
+
+            components["scrapers"] = len(r.available())
+        except Exception as e:
+            components["scrapers"] = f"down: {type(e).__name__}: {e}"
+            ok = False
+
+        sched = getattr(request.app.state, "scheduler", None)
+        running = bool(sched and getattr(sched, "running", False))
+        components["scheduler"] = running
+        if not running:
+            ok = False
+
+        try:
+            queue_size = len(deps.books.pending(max_attempts=10_000))
+            components["queue_size"] = queue_size
         except Exception:
-            db_size = 0
-        return {"ok": True, "queue_size": queue, "db_size_bytes": db_size}
+            components["queue_size"] = None
+
+        try:
+            components["db_size_bytes"] = Path(deps.db_path).stat().st_size
+        except Exception:
+            components["db_size_bytes"] = 0
+
+        body = {"ok": ok, **components}
+        if not ok:
+            return JSONResponse(status_code=503, content=body)
+        return body
 
     # ---------- mirrors ----------
 
