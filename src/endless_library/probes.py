@@ -72,8 +72,22 @@ CURATED_MIRRORS: tuple[dict, ...] = (
     {"kind": "annas", "url": "https://annas-archive.pk", "label": "Anna's Archive (.pk)"},
     {"kind": "annas", "url": "https://annas-archive.gd", "label": "Anna's Archive (.gd)"},
     {"kind": "welib", "url": "https://welib.org", "label": "Welib"},
+    # LibGen rotation per shadowlibraries.github.io/DirectDownloads/libgen
+    # — .is/.rs/.st have been flaky for over a year; replaced with the live set.
     {"kind": "libgen", "url": "https://libgen.li", "label": "LibGen.li"},
-    {"kind": "libgen", "url": "https://libgen.is", "label": "LibGen.is"},
+    {"kind": "libgen", "url": "https://libgen.gl", "label": "LibGen.gl"},
+    {"kind": "libgen", "url": "https://libgen.la", "label": "LibGen.la"},
+    {"kind": "libgen", "url": "https://libgen.vg", "label": "LibGen.vg"},
+    {"kind": "libgen", "url": "https://libgen.bz", "label": "LibGen.bz"},
+)
+
+
+# Historical defaults we want auto-disabled (NOT deleted — user may have
+# re-enabled one knowingly). Anything in CURATED_MIRRORS overrides this.
+LEGACY_CURATED: tuple[str, ...] = (
+    "https://libgen.is",
+    "https://libgen.rs",
+    "https://libgen.st",
 )
 
 

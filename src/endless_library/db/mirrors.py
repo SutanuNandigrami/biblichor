@@ -47,11 +47,24 @@ class MirrorRepo:
         self.db_path = Path(db_path)
 
     def seed_curated(self) -> int:
-        """Insert any curated mirror not already present. Returns insert count."""
-        from endless_library.probes import CURATED_MIRRORS
+        """Refresh the curated mirror set.
 
+        - Every entry in CURATED_MIRRORS that isn't already in the DB
+          gets INSERTed. Existing rows are not touched (the user may
+          have disabled them or renamed the label).
+        - Any URL in LEGACY_CURATED that IS in the DB and isn't in the
+          current CURATED_MIRRORS list gets auto-disabled (enabled=0).
+          We never DELETE — the user can re-enable from the Mirrors
+          page if a legacy URL comes back.
+
+        Returns the number of new inserts.
+        """
+        from endless_library.probes import CURATED_MIRRORS, LEGACY_CURATED
+
+        current_urls = {e["url"] for e in CURATED_MIRRORS}
         inserted = 0
         with connect(self.db_path) as conn:
+            # Insert anything new
             for entry in CURATED_MIRRORS:
                 row = conn.execute(
                     "SELECT id FROM mirrors WHERE url = ?", (entry["url"],)
@@ -63,6 +76,14 @@ class MirrorRepo:
                     (entry["kind"], entry["url"], entry["label"]),
                 )
                 inserted += 1
+            # Auto-disable legacy URLs we have retired
+            for legacy_url in LEGACY_CURATED:
+                if legacy_url in current_urls:
+                    continue  # somehow still in the curated list, leave alone
+                conn.execute(
+                    "UPDATE mirrors SET enabled = 0 WHERE url = ? AND enabled = 1",
+                    (legacy_url,),
+                )
         return inserted
 
     def list_all(self, *, kind: str | None = None) -> list[MirrorRow]:
