@@ -325,6 +325,26 @@ def cmd_backup(args):
     store = build_store(cfg.storage, data_root=Path(cfg.general.books_dir))
     recipient = args.age_recipient or os.environ.get("BIBLICHOR_AGE_RECIPIENT") or ""
 
+    # Phase 5c: if no recipient was passed, auto-generate (or load) the
+    # local recovery key. Unencrypted backups are still possible via
+    # --no-encrypt (which the user must explicitly set).
+    if not recipient and not args.no_encrypt:
+        from endless_library.recovery_key import (
+            RecoveryKeyError, ensure_recovery_key, print_warning,
+        )
+
+        secrets_dir = Path(cfg.general.books_dir).parent / "secrets"
+        try:
+            rk = ensure_recovery_key(secrets_dir)
+        except RecoveryKeyError as e:
+            print(f"recovery key setup failed: {e}", file=sys.stderr)
+            print("  use --no-encrypt to produce an unencrypted backup, or", file=sys.stderr)
+            print("  install `age` (apt: age, brew: age)", file=sys.stderr)
+            return 1
+        recipient = rk.public_key
+        if rk.just_generated:
+            print_warning(rk)
+
     try:
         result = make_backup(
             db_path=db_path,
@@ -415,6 +435,36 @@ def cmd_restore(args):
     return 0
 
 
+def cmd_backup_key(args):
+    """Show or initialize the biblichor recovery key (Phase 5c)."""
+    from endless_library.recovery_key import (
+        RecoveryKeyError, ensure_recovery_key, print_warning,
+    )
+
+    config_path, _ = _resolve_paths(args)
+    cfg = load_config(config_path)
+    _setup_logging(cfg.general.log_level)
+
+    secrets_dir = Path(cfg.general.books_dir).parent / "secrets"
+    try:
+        rk = ensure_recovery_key(secrets_dir)
+    except RecoveryKeyError as e:
+        print(f"recovery key setup failed: {e}", file=sys.stderr)
+        return 1
+
+    if rk.just_generated:
+        print_warning(rk)
+    else:
+        print(f"recovery key already exists at {rk.private_key_path}")
+        print(f"public key:  {rk.public_key}")
+    if args.show_private:
+        print()
+        print("--- BEGIN PRIVATE KEY ---")
+        print(rk.private_key_path.read_text().rstrip())
+        print("--- END PRIVATE KEY ---")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="endless-library", description="Self-hosted books -> kindle")
     p.add_argument("--config", help="Path to config.yaml")
@@ -456,7 +506,12 @@ def main(argv: list[str] | None = None) -> int:
     s_backup.add_argument("--library", default="", help="Override library dir (default: general.books_dir)")
     s_backup.add_argument("--age-recipient", default="", help="age public key for encryption")
     s_backup.add_argument("--prefix", default="backups", help="Remote key prefix")
+    s_backup.add_argument("--no-encrypt", action="store_true", help="Produce unencrypted backup (NOT recommended for non-local stores)")
     s_backup.set_defaults(func=cmd_backup)
+
+    s_backup_key = sub.add_parser("backup-key", help="Show or initialize the recovery key (Phase 5c)")
+    s_backup_key.add_argument("--show-private", action="store_true", help="Print the private key (for transfer to a password manager)")
+    s_backup_key.set_defaults(func=cmd_backup_key)
 
     s_storage = sub.add_parser("storage", help="Storage management commands (Phase 4c)")
     sub_storage = s_storage.add_subparsers(dest="storage_cmd")
