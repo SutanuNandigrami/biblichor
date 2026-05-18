@@ -64,18 +64,28 @@ def decide_auto_pick(
     gap: float,
     min_score_for_failure: float = 40.0,
     high_confidence_bonus: float = 10.0,
+    top_isbn_matched: bool = False,
+    top_title_similarity: float = 0.0,
+    isbn_title_override_min_similarity: float = 0.92,
 ) -> AutoPickDecision:
     """Decide whether the top-scored candidate is good enough to auto-pick.
 
     - Below min_score_for_failure: nothing plausibly matches; fail outright.
+    - ISBN13 + title override: if the top candidate has an ISBN13 match
+      AND title similarity is at/above the override threshold (default
+      0.92), auto-pick regardless of total score. This catches the
+      common case where the bonuses landed low (e.g. an unusual
+      filesize, missing format hint) but the *identity* signals are
+      both strong. Cheap and reduces manual review load.
     - At/above threshold with the required gap over #2: auto-pick.
-    - High-confidence (>= threshold + high_confidence_bonus): auto-pick even
-      with no gap. Multiple high-scoring candidates are usually duplicate
-      uploads of the same book; Anna's relevance order picks the right one.
+    - High-confidence (>= threshold + high_confidence_bonus): auto-pick
+      even with no gap.
     - Anything else: surface for manual review.
     """
     if top < min_score_for_failure:
         return "failed"
+    if top_isbn_matched and top_title_similarity >= isbn_title_override_min_similarity:
+        return "auto"
     if top >= threshold + high_confidence_bonus:
         return "auto"
     if top >= threshold and (top - second) >= gap:

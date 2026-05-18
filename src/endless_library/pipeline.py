@@ -16,6 +16,7 @@ from endless_library.db.schema import init_db
 from endless_library.db.sources import SourceAccountRepo
 from endless_library.domain.format_router import decide_format_action
 from endless_library.domain.models import Candidate, SearchQuery
+from endless_library.domain.models import ScoreBreakdown
 from endless_library.domain.scoring import score_candidate
 from endless_library.domain.state_machine import decide_auto_pick
 from endless_library.download import DownloadError, download
@@ -243,8 +244,14 @@ def _search_with_strategies(
 
 
 def _score_and_persist(deps: PipelineDeps, book: BookRow, candidates: list[Candidate]):
+    """Return (total_score, candidate, score_breakdown) tuples, sorted high to low.
+
+    Carrying the breakdown lets the caller read identity signals
+    (isbn13_matched, title_similarity_raw) for the ISBN+title auto-pick
+    override rule introduced in Phase 3b.
+    """
     deps.cands.clear_for_book(book.id)
-    scored: list[tuple[float, Candidate]] = []
+    scored: list[tuple[float, Candidate, ScoreBreakdown]] = []
     for c in candidates:
         isbn_match = bool(book.isbn13) and book.isbn13 in (c.raw.get("isbns") or [])
         sq = SearchQuery(
@@ -273,7 +280,7 @@ def _score_and_persist(deps: PipelineDeps, book: BookRow, candidates: list[Candi
             detail_url=c.detail_url,
             raw_json=json.dumps(c.raw or {}),
         )
-        scored.append((sb.total, c))
+        scored.append((sb.total, c, sb))
     scored.sort(key=lambda x: x[0], reverse=True)
     return scored
 
@@ -417,13 +424,29 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
     else:
         floor = cfg_g.min_score_for_failure
         threshold = cfg_g.auto_pick_threshold
+    # Phase 3b: feed identity signals from the top candidate's breakdown
+    # into decide_auto_pick so it can override on rock-solid ISBN+title.
+    top_breakdown = scored[0][2]
+    top_isbn_matched = top_breakdown.components.get("isbn13_matched", 0.0) >= 1.0
+    top_title_sim = top_breakdown.components.get("title_similarity_raw", 0.0)
     decision = decide_auto_pick(
         top=top,
         second=second,
         threshold=threshold,
         gap=deps.cfg.general.auto_pick_gap,
         min_score_for_failure=floor,
+        top_isbn_matched=top_isbn_matched,
+        top_title_similarity=top_title_sim,
     )
+    if decision == "auto" and top < threshold:
+        deps.events.append(
+            book_id=book.id,
+            kind="auto_pick",
+            message=(
+                f"override: ISBN match + title similarity "
+                f"{top_title_sim:.2f} >= 0.92 (total={top:.1f})"
+            ),
+        )
     if decision == "failed":
         deps.books.set_failed(book.id, error=f"no plausible match (top={top:.1f})")
         return "failed"

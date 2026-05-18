@@ -170,6 +170,9 @@ def score_candidate(
     else:
         isbn_hit = isbn13_match
     components["isbn_match"] = cfg.isbn_match if isbn_hit else 0.0
+    # Boolean record for the auto-pick override rule (Phase 3b):
+    # stored as 1.0/0.0 since components is dict[str, float].
+    components["isbn13_matched"] = 1.0 if isbn_hit else 0.0
 
     # Title
     t_sim = 0.0
@@ -192,6 +195,8 @@ def score_candidate(
                 t_sim = max(t_sim, t_sim_sub)
             title_weight_eff = cfg.title_weight * cfg.non_latin_title_multiplier
     components["title_similarity"] = t_sim * title_weight_eff
+    # Unweighted similarity (0..1) for the ISBN+title override rule.
+    components["title_similarity_raw"] = t_sim
 
     # Author (with row-text fallback when parser couldn't pull author cleanly)
     a_sim = 0.0
