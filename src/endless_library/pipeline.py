@@ -614,6 +614,43 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
                 message=f"PDF->EPUB rescue failed: {e}",
             )
 
+    # If still oversize after the EPUB rescue (e.g. scanned PDFs where
+    # the EPUB ends up the same size as the source), try the dedicated
+    # compressor: ocrmypdf --optimize 3 for PDFs, pngquant+jpegoptim
+    # for EPUBs. See compress.try_compress for the ladder.
+    if inflated > cap_bytes:
+        try:
+            from endless_library.compress import try_compress
+
+            compressed = try_compress(file_path, target_bytes=cap_bytes)
+        except Exception as e:
+            compressed = None
+            deps.events.append(
+                book_id=book.id,
+                kind="error",
+                message=f"compress step crashed (non-fatal): {e}",
+            )
+        if compressed is not None:
+            old_bytes = raw_bytes
+            file_path = compressed
+            raw_bytes = file_path.stat().st_size
+            inflated = int(raw_bytes * 1.4)
+            deps.books.set_status(
+                book.id,
+                "downloading",
+                file_path=str(file_path),
+                format=file_path.suffix.lstrip("."),
+                file_size=raw_bytes,
+            )
+            deps.events.append(
+                book_id=book.id,
+                kind="compress",
+                message=(
+                    f"compressed {file_path.suffix.lstrip('.')} "
+                    f"{old_bytes // 1_048_576}MB -> {raw_bytes // 1_048_576}MB for SMTP fit"
+                ),
+            )
+
     if inflated > cap_bytes:
         msg = (
             f"too large for SMTP: {raw_bytes // 1_048_576}MB raw "

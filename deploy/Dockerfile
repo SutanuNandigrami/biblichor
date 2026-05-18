@@ -25,11 +25,41 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Calibre (ebook-convert, ebook-meta, calibredb) + unrar for .rar archives.
 # Use the no-recommends + the official Calibre tarball would be smaller,
 # but apt-get pulls a working setup with one line. Image ends up ~1.1 GB.
+# Calibre for ebook conversion + ocrmypdf stack for last-resort
+# compression of oversize scanned PDFs (Bengali / CJK / image-heavy
+# books that don't fit Gmail's 25 MB outbound envelope via the
+# normal PDF->EPUB rescue). See endless_library.compress.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     calibre \
     unrar \
     curl \
     ca-certificates \
+    ocrmypdf \
+    pngquant \
+    jpegoptim \
+    qpdf \
+    mupdf-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# jbig2enc isn't packaged for Debian — build it from source. It's
+# ~80 KB final binary; gives ocrmypdf the bilevel-image compression
+# path that yields most of the size reduction on scanned books.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    autoconf \
+    libtool \
+    automake \
+    libleptonica-dev \
+    git \
+    && git clone --depth 1 https://github.com/agl/jbig2enc.git /tmp/jbig2enc \
+    && cd /tmp/jbig2enc \
+    && ./autogen.sh \
+    && ./configure \
+    && make -j$(nproc) \
+    && make install \
+    && cd / && rm -rf /tmp/jbig2enc \
+    && apt-get purge -y build-essential autoconf libtool automake git \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
