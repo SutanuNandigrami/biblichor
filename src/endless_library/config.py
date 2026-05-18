@@ -66,6 +66,12 @@ class ScrapersCfg(BaseModel):
     slow_download_timeout_seconds: int = 180
     flaresolverr_url: str = "http://flaresolverr:8191/v1"
     annas_mirrors: list[str] = Field(default_factory=list)
+    # Optional Welib auth cookie. Paste as the literal Cookie: header value
+    # the browser would send after logging into welib.org
+    # (e.g. 'session_id=abc; user_id=42'). Stored as a secret in .env, never
+    # committed to config.yaml. Injected into both FlareSolverr and Playwright
+    # so /fast_download/ works without the slow-download countdown.
+    welib_auth_cookie: str | None = None
 
 
 class ScoringCfg(BaseModel):
@@ -120,6 +126,8 @@ class Config(BaseModel):
             d["pushover"]["user_key"] = "***"
         if d["pushover"]["app_token"]:
             d["pushover"]["app_token"] = "***"
+        if d.get("scrapers", {}).get("welib_auth_cookie"):
+            d["scrapers"]["welib_auth_cookie"] = "***"
         return d
 
 
@@ -142,6 +150,8 @@ def _apply_env_overrides(data: dict) -> dict:
         data["pushover"]["user_key"] = v
     if v := os.getenv("PUSHOVER_APP_TOKEN"):
         data["pushover"]["app_token"] = v
+    if v := os.getenv("WELIB_AUTH_COOKIE"):
+        data.setdefault("scrapers", {})["welib_auth_cookie"] = v
     return data
 
 
@@ -153,6 +163,7 @@ _ENV_KEYS = (
     ("KINDLE_EMAIL", "kindle", "recipient"),
     ("PUSHOVER_USER_KEY", "pushover", "user_key"),
     ("PUSHOVER_APP_TOKEN", "pushover", "app_token"),
+    ("WELIB_AUTH_COOKIE", "scrapers", "welib_auth_cookie"),
 )
 
 
@@ -213,6 +224,7 @@ def save_config(cfg: Config, path: Path | str, *, env_path: Path | str | None = 
     data["smtp"]["password"] = ""
     data["pushover"]["user_key"] = ""
     data["pushover"]["app_token"] = ""
+    data.setdefault("scrapers", {})["welib_auth_cookie"] = None
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     os.replace(tmp, p)

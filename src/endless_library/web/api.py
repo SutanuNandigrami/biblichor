@@ -65,6 +65,7 @@ class SettingsPatch(BaseModel):
     pushover_enabled: bool | None = None
     pushover_user_key: str | None = None
     pushover_app_token: str | None = None
+    welib_auth_cookie: str | None = None
 
 
 def register(app: FastAPI) -> None:
@@ -540,6 +541,14 @@ def register(app: FastAPI) -> None:
             and p["pushover_app_token"] != "***"
         ):
             cfg.pushover.app_token = p["pushover_app_token"].strip()
+        if (
+            "welib_auth_cookie" in p
+            and p["welib_auth_cookie"] is not None
+            and p["welib_auth_cookie"] != "***"
+        ):
+            # "" means user wants to clear it
+            value = p["welib_auth_cookie"].strip()
+            cfg.scrapers.welib_auth_cookie = value or None
         save_config(cfg, request.app.state.config_path)
         return {"ok": True, "cfg": cfg.public_view()}
 

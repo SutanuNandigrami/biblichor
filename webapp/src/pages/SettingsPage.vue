@@ -22,6 +22,7 @@ const form = reactive({
   pushover_enabled: false,
   pushover_user_key: '',
   pushover_app_token: '',
+  welib_auth_cookie: '',
 })
 const saving = ref(false)
 const testingSmtp = ref(false)
@@ -45,6 +46,7 @@ async function load() {
   form.pushover_enabled      = cfg.pushover.enabled
   form.pushover_user_key     = ''
   form.pushover_app_token    = ''
+  form.welib_auth_cookie     = ''
 }
 onMounted(load)
 
@@ -56,6 +58,8 @@ async function save() {
     if (!body.smtp_password) delete body.smtp_password
     if (!body.pushover_user_key) delete body.pushover_user_key
     if (!body.pushover_app_token) delete body.pushover_app_token
+    // welib_auth_cookie: empty string sent through means "clear it", undefined skipped
+    if (body.welib_auth_cookie === '') delete body.welib_auth_cookie
     await api('/api/settings', { method: 'POST', body: JSON.stringify(body) })
     toast.success('Settings saved')
     form.smtp_password = ''
@@ -168,6 +172,21 @@ async function testPushover() {
           {{ pushoverResult.ok ? '✓' : '✗' }} {{ pushoverResult.msg }}
         </Badge>
       </div>
+    </Card>
+
+    <Card class="p-5">
+      <h2 class="font-semibold mb-4">Welib auth cookie (optional)</h2>
+      <p class="text-xs text-muted-foreground mb-3">
+        Paste the literal <code>Cookie:</code> header value from your browser
+        after signing in to <code>welib.org</code> — open devtools → Application → Cookies,
+        select all rows, "Copy with name=value;…". With this set, welib uses
+        <code>/fast_download/</code> instead of the slow-countdown anonymous path.
+        Stored only in <code>.env</code>, never in <code>config.yaml</code>.
+      </p>
+      <Input
+        v-model="form.welib_auth_cookie"
+        placeholder="(unchanged) e.g. session_id=abc; user_id=42"
+      />
     </Card>
 
     <Card class="p-5">

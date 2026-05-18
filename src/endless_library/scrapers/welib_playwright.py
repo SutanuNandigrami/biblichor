@@ -18,6 +18,7 @@ import time
 
 from endless_library.config import ScrapersCfg
 from endless_library.domain.models import Candidate, DownloadHandle
+from endless_library.scrapers.welib_cookies import parse_cookie_string
 from endless_library.scrapers.welib_curl import (
     WelibCurl,
     _is_book_payload_url,
@@ -125,10 +126,16 @@ class WelibPlaywright(WelibCurl):
                 viewport={"width": 1280, "height": 800},
                 locale="en-US",
             )
-            if cf_cookies:
+            auth_cookies = parse_cookie_string(getattr(self.cfg, "welib_auth_cookie", None) or "")
+            if cf_cookies or auth_cookies:
                 try:
-                    context.add_cookies(_fs_cookies_to_playwright(cf_cookies))
-                    log.info("welib-pw: injected %d CF cookies", len(cf_cookies))
+                    cookies = _fs_cookies_to_playwright(cf_cookies) + auth_cookies
+                    context.add_cookies(cookies)
+                    log.info(
+                        "welib-pw: injected %d CF + %d auth cookies",
+                        len(cf_cookies),
+                        len(auth_cookies),
+                    )
                 except Exception as e:
                     log.warning("welib-pw cookie inject failed: %s", e)
             page = context.new_page()

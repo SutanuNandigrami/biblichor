@@ -26,6 +26,7 @@ from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.flaresolverr import FlareSolverr, FlareSolverrError
 from endless_library.scrapers.base import BOOK_EXTENSIONS, parse_filesize
 from endless_library.scrapers.rate_limit import TokenBucket
+from endless_library.scrapers.welib_cookies import parse_cookie_string
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +88,9 @@ class WelibCurl:
         self._http_get = http_get
         self._fs = flaresolverr
         self._session_id: str | None = None
+        self._auth_cookies: list[dict] = parse_cookie_string(
+            getattr(cfg, "welib_auth_cookie", None) or "",
+        )
 
     def search(self, query: SearchQuery) -> list[Candidate]:
         q = f"{query.title} {query.author or ''}".strip()
@@ -166,7 +170,7 @@ class WelibCurl:
             fs = FlareSolverr(self.cfg.flaresolverr_url, max_timeout_ms=60_000)
             self._fs = fs
         try:
-            r = fs.get(url, session=self._session_id)
+            r = fs.get(url, session=self._session_id, cookies=self._auth_cookies or None)
         except FlareSolverrError as e:
             log.warning("welib FS error %s: %s", url, e)
             return None
