@@ -125,10 +125,15 @@ def register(app: FastAPI) -> None:
 
     @router.post("/books/{book_id}/retry")
     def retry(book_id: int, request: Request):
+        """Full reset → re-queued. Clears stage timestamps + on-disk
+        file reference + picked candidate so the next pipeline cycle
+        actually re-searches instead of resuming a stale download.
+        """
         deps = request.app.state.deps
         if not deps.books.get(book_id):
             raise HTTPException(404)
-        deps.books.set_status(book_id, "queued", error=None)
+        deps.books.reset_for_research(book_id)
+        deps.cands.clear_for_book(book_id)
         deps.events.append(
             book_id=book_id, kind="state_change", message="manually re-queued from dashboard"
         )

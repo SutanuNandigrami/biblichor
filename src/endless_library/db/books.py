@@ -225,6 +225,32 @@ class BookRepo:
             ).fetchall()
         return [BookRow.from_row(r) for r in rows]
 
+    def reset_for_research(self, book_id: int) -> None:
+        """Full reset for a re-search: clears every stage timestamp,
+        on-disk file reference, picked candidate, attempts, and last_error.
+        The actual file on disk is left untouched (the new search may
+        re-pick the same md5 and a fresh download is wasted bandwidth).
+        """
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE books SET "
+                "  status = 'queued', "
+                "  attempts = 0, "
+                "  last_error = NULL, "
+                "  picked_candidate_id = NULL, "
+                "  searched_at = NULL, "
+                "  downloaded_at = NULL, "
+                "  converted_at = NULL, "
+                "  sent_at = NULL, "
+                "  file_path = NULL, "
+                "  md5 = NULL, "
+                "  format = NULL, "
+                "  file_size = NULL, "
+                "  updated_at = datetime('now') "
+                "WHERE id = ?",
+                (book_id,),
+            )
+
     def reset_zombies(self, *, stale_minutes: int) -> int:
         in_flight = ",".join(f"'{s}'" for s in _IN_FLIGHT)
         with self._connect() as conn:
