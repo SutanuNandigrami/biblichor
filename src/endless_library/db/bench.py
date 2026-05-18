@@ -75,3 +75,21 @@ class BenchRunRepo:
                     "SELECT * FROM bench_runs ORDER BY id DESC LIMIT ?", (limit,)
                 ).fetchall()
         return [BenchRunRow.from_row(r) for r in rows]
+
+    def prune(self, *, keep_per_scraper: int = 200) -> int:
+        """Keep only the most recent `keep_per_scraper` rows per scraper.
+        Returns rows deleted.
+        """
+        deleted = 0
+        with connect(self.db_path) as conn:
+            scrapers = [r[0] for r in conn.execute("SELECT DISTINCT scraper FROM bench_runs")]
+            for sc in scrapers:
+                r = conn.execute(
+                    "DELETE FROM bench_runs WHERE scraper = ? AND id IN ("
+                    "  SELECT id FROM bench_runs WHERE scraper = ? "
+                    "  ORDER BY id DESC LIMIT -1 OFFSET ?"
+                    ")",
+                    (sc, sc, keep_per_scraper),
+                )
+                deleted += r.rowcount or 0
+        return deleted

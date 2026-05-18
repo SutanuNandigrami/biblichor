@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 
 JOB_PROCESS = "process"
 JOB_MIRRORS = "mirrors_refresh"
+JOB_RETENTION = "retention"
 JOB_RETRY = "retry"
 JOB_SUMMARY = "summary"
 SOURCE_JOB_PREFIX = "poll:"  # full id: f"poll:{account_id}"
@@ -104,6 +105,27 @@ def _attach_system_jobs(sched: AsyncIOScheduler, cfg: Config, deps: PipelineDeps
         max_instances=1,
     )
 
+    async def _retention_job():
+        """Daily DB prune: trim events to ~90 days / 50K rows, cap
+        bench history at 200 rows per scraper. Vacuums the DB at the
+        end so disk usage actually shrinks.
+        """
+        deps.events.prune(
+            keep_rows=cfg.general.retention_keep_events,
+            keep_days=cfg.general.retention_keep_events_days,
+        )
+        deps.bench.prune(keep_per_scraper=cfg.general.retention_keep_bench_per_scraper)
+
+    sched.add_job(
+        _retention_job,
+        "cron",
+        hour=cfg.general.retention_hour_utc,
+        id=JOB_RETENTION,
+        name="DB retention (prune events + bench history)",
+        replace_existing=True,
+        max_instances=1,
+    )
+
     # Seed annas_mirrors from any existing wiki cache file, synchronously,
     # so the first scraper run already sees the merged list. A separate
     # mirrors_refresh job (scheduled above) keeps it current.
@@ -174,6 +196,7 @@ def build_scheduler_with_deps(cfg: Config, deps: PipelineDeps) -> AsyncIOSchedul
 # Re-export for convenience
 __all__ = [
     "JOB_PROCESS",
+    "JOB_RETENTION",
     "JOB_RETRY",
     "JOB_SUMMARY",
     "SOURCE_JOB_PREFIX",

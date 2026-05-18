@@ -93,13 +93,19 @@ def _probe_via_flaresolverr(url: str, *, timeout: float) -> ProbeResult:
     except FlareSolverrError as e:
         ms = int((_time.monotonic() - started) * 1000)
         return ProbeResult(
-            url=url, ok=False, status=None, latency_ms=ms,
+            url=url,
+            ok=False,
+            status=None,
+            latency_ms=ms,
             error=f"flaresolverr unavailable: {e}",
         )
     except Exception as e:
         ms = int((_time.monotonic() - started) * 1000)
         return ProbeResult(
-            url=url, ok=False, status=None, latency_ms=ms,
+            url=url,
+            ok=False,
+            status=None,
+            latency_ms=ms,
             error=f"probe-via-FS crashed: {e}",
         )
     ms = int((_time.monotonic() - started) * 1000)

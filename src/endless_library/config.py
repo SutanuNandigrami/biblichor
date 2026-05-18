@@ -13,6 +13,10 @@ class GeneralCfg(BaseModel):
     process_interval_minutes: int = 10
     retry_interval_hours: int = 6
     mirror_refresh_hours: int = 6
+    retention_hour_utc: int = 3  # daily DB prune (events + bench history)
+    retention_keep_events: int = 50_000  # max rows to keep in `events`
+    retention_keep_events_days: int = 90  # OR drop older than this, whichever cuts more
+    retention_keep_bench_per_scraper: int = 200
     max_attempts: int = 5
     books_dir: str = "/data/books"
     log_level: str = "INFO"
@@ -43,6 +47,7 @@ class SmtpCfg(BaseModel):
     # Gmail outbound caps at ~25 MB total message (which is ~22 MB raw
     # attachment after base64 overhead). Other providers: SES 40 MB, SendGrid 30 MB.
     max_attachment_mb: int = 22
+
 
 class PushoverEventsCfg(BaseModel):
     book_sent: bool = True

@@ -348,6 +348,10 @@ def register(app: FastAPI) -> None:
             deps.cfg.general.mirror_refresh_hours = payload.hours
             save_config(deps.cfg, request.app.state.config_path)
             persisted = True
+        elif job_id == "retention" and payload.cron_hour is not None:
+            deps.cfg.general.retention_hour_utc = payload.cron_hour
+            save_config(deps.cfg, request.app.state.config_path)
+            persisted = True
         return {"ok": True, "persisted": persisted}
 
     # ---------- sources ----------

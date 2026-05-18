@@ -66,3 +66,38 @@ class EventRepo:
                 "SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [EventRow.from_row(r) for r in rows]
+
+    def prune(
+        self,
+        *,
+        keep_rows: int = 50_000,
+        keep_days: int = 90,
+    ) -> int:
+        """Delete events older than `keep_days` days AND keep only the most
+        recent `keep_rows` rows overall. Returns the number of rows deleted.
+
+        Whichever cuts more wins — this protects both against "slow drip"
+        retention (90 days of events from 1 active book = nothing) AND
+        "burst growth" (a hundred re-queues in one day filling the table
+        without crossing the day threshold).
+        """
+        deleted = 0
+        with connect(self.db_path) as conn:
+            # By age
+            r = conn.execute(
+                f"DELETE FROM events WHERE ts < datetime('now', '-{int(keep_days)} days')"
+            )
+            deleted += r.rowcount or 0
+            # By total count
+            total = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            if total > keep_rows:
+                excess = total - keep_rows
+                r2 = conn.execute(
+                    "DELETE FROM events WHERE id IN ("
+                    "  SELECT id FROM events ORDER BY id ASC LIMIT ?"
+                    ")",
+                    (excess,),
+                )
+                deleted += r2.rowcount or 0
+            conn.execute("VACUUM")
+        return deleted

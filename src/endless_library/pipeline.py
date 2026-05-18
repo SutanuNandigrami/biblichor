@@ -451,12 +451,12 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
     if inflated > cap_bytes and file_path.suffix.lower() == ".pdf":
         # Try ebook-convert PDF -> EPUB; text-only PDFs compress ~5-10x
         try:
-
             epub_path = convert_to_epub(file_path)
             new_inflated = int(epub_path.stat().st_size * 1.4)
             if new_inflated <= cap_bytes:
                 deps.events.append(
-                    book_id=book.id, kind="convert",
+                    book_id=book.id,
+                    kind="convert",
                     message=f"oversize PDF ({raw_bytes // 1_048_576}MB) -> EPUB "
                     f"({epub_path.stat().st_size // 1_048_576}MB) for SMTP fit",
                 )
@@ -464,14 +464,16 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
                 raw_bytes = file_path.stat().st_size
                 inflated = new_inflated
                 deps.books.set_status(
-                    book.id, "downloading",
+                    book.id,
+                    "downloading",
                     file_path=str(file_path),
                     format=file_path.suffix.lstrip("."),
                     file_size=raw_bytes,
                 )
         except Exception as e:
             deps.events.append(
-                book_id=book.id, kind="error",
+                book_id=book.id,
+                kind="error",
                 message=f"PDF->EPUB rescue failed: {e}",
             )
 
