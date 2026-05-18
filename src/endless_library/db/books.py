@@ -228,6 +228,24 @@ class BookRepo:
         with self._connect() as conn:
             conn.execute(f"UPDATE books SET {', '.join(sets)} WHERE id = ?", params)
 
+    def set_failed(self, book_id: int, *, error: str) -> None:
+        """Atomically transition a book to status='failed' AND bump
+        attempts by 1. Called from the pipeline at every genuine
+        failure point so attempts is a real "tried-and-broke" count,
+        not a "searched-anything" count.
+
+        Books that bounce into needs_review (low confidence, awaiting
+        manual pick) are NOT counted as failures here — they don't
+        consume the max_attempts budget.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE books SET status = ?, last_error = ?, "
+                "attempts = attempts + 1, updated_at = datetime('now') "
+                "WHERE id = ?",
+                ("failed", error, book_id),
+            )
+
     def increment_attempts(self, book_id: int) -> None:
         with self._connect() as conn:
             conn.execute(

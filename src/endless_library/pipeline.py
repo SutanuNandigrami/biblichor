@@ -374,12 +374,11 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
         )
 
     deps.books.set_status(book.id, "searching")
-    deps.books.increment_attempts(book.id)
     deps.events.append(book_id=book.id, kind="state_change", message="-> searching")
 
     candidates, _strat = _search_with_strategies(deps, book)
     if not candidates:
-        deps.books.set_status(book.id, "failed", error="no candidates from any scraper")
+        deps.books.set_failed(book.id, error="no candidates from any scraper")
         return "failed"
     # Set a dynamic deliverable cap on the scoring config so candidates
     # that can't possibly be SMTPed get hard-skipped at score time
@@ -390,7 +389,7 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
     deps.cfg.scoring.deliverable_max_bytes = smtp_cap
     scored = _score_and_persist(deps, book, candidates)
     if not scored:
-        deps.books.set_status(book.id, "failed", error="all candidates hard-skipped (audio?)")
+        deps.books.set_failed(book.id, error="all candidates hard-skipped (audio?)")
         return "failed"
     top = scored[0][0]
     second = scored[1][0] if len(scored) > 1 else 0.0
@@ -414,7 +413,7 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
         min_score_for_failure=floor,
     )
     if decision == "failed":
-        deps.books.set_status(book.id, "failed", error=f"no plausible match (top={top:.1f})")
+        deps.books.set_failed(book.id, error=f"no plausible match (top={top:.1f})")
         return "failed"
     if decision == "needs_review":
         deps.books.set_status(
@@ -426,7 +425,7 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
     picked_cand = scored[0][1]
     file_path = _resolve_and_download(deps, book, picked_cand)
     if not file_path:
-        deps.books.set_status(book.id, "failed", error="all scrapers failed to resolve/download")
+        deps.books.set_failed(book.id, error="all scrapers failed to resolve/download")
         return "failed"
     return _process_from_downloaded(deps, book, file_path)
 
@@ -470,7 +469,7 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
                     message=f"converted to {file_path.name}",
                 )
             except ConvertError as e:
-                deps.books.set_status(book.id, "failed", error=f"convert failed: {e}")
+                deps.books.set_failed(book.id, error=f"convert failed: {e}")
                 return "failed"
     deps.books.set_status(book.id, "sending")
     # Enrich epub/azw3 metadata so Kindle sees real author/series/tags.
@@ -577,7 +576,7 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
             author=book.author,
         )
     except KindleSendError as e:
-        deps.books.set_status(book.id, "failed", error=f"kindle send failed: {e}")
+        deps.books.set_failed(book.id, error=f"kindle send failed: {e}")
         return "failed"
     deps.books.set_status(book.id, "sent")
     deps.events.append(book_id=book.id, kind="send", message="sent to kindle")
@@ -594,7 +593,7 @@ def process_queue(deps: PipelineDeps) -> dict[str, int]:
             st = process_one(deps, b)
         except Exception as e:
             log.exception("pipeline crashed on book %s", b.id)
-            deps.books.set_status(b.id, "failed", error=f"pipeline crash: {e}")
+            deps.books.set_failed(b.id, error=f"pipeline crash: {e}")
             st = "failed"
         tally[st] = tally.get(st, 0) + 1
     return tally
