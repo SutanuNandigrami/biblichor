@@ -22,8 +22,15 @@ class ProbeResult:
     error: str | None = None
 
 
+def _is_cf_walled_host(url: str) -> bool:
+    """True if the host needs FlareSolverr — vanilla httpx will see 403."""
+    return "welib.org" in url
+
+
 def probe_http(url: str, *, timeout: float = 8.0) -> ProbeResult:
     """HEAD probe with timing. Falls back to GET if the server rejects HEAD."""
+    if _is_cf_walled_host(url):
+        return _probe_via_flaresolverr(url, timeout=timeout)
     t0 = time.monotonic()
     try:
         with httpx.Client(
@@ -65,6 +72,39 @@ def probe_tcp(host: str, port: int, *, timeout: float = 5.0) -> ProbeResult:
             latency_ms=ms,
             error=f"{type(e).__name__}: {e}",
         )
+
+
+def _probe_via_flaresolverr(url: str, *, timeout: float) -> ProbeResult:
+    """Probe a CF-walled mirror through FlareSolverr so we don't false-positive
+    on a 403 that's just Cloudflare's anti-bot wall. If FS itself is
+    unreachable, return a 0-status result with 'flaresolverr unavailable' so
+    the user can fix the upstream rather than thinking welib is dead.
+    """
+    import os
+    import time as _time
+
+    from endless_library.flaresolverr import FlareSolverr, FlareSolverrError
+
+    started = _time.monotonic()
+    fs_url = os.environ.get("FLARESOLVERR_URL") or "http://127.0.0.1:8191/v1"
+    fs = FlareSolverr(fs_url, max_timeout_ms=int(timeout * 1000))
+    try:
+        r = fs.get(url)
+    except FlareSolverrError as e:
+        ms = int((_time.monotonic() - started) * 1000)
+        return ProbeResult(
+            url=url, ok=False, status=None, latency_ms=ms,
+            error=f"flaresolverr unavailable: {e}",
+        )
+    except Exception as e:
+        ms = int((_time.monotonic() - started) * 1000)
+        return ProbeResult(
+            url=url, ok=False, status=None, latency_ms=ms,
+            error=f"probe-via-FS crashed: {e}",
+        )
+    ms = int((_time.monotonic() - started) * 1000)
+    code = int(r.status_code or 0)
+    return ProbeResult(url=url, ok=code < 400, status=code, latency_ms=ms)
 
 
 CURATED_MIRRORS: tuple[dict, ...] = (

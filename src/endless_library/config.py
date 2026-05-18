@@ -21,6 +21,10 @@ class GeneralCfg(BaseModel):
     auto_pick_threshold: float = 70.0
     auto_pick_gap: float = 10.0
     min_score_for_failure: float = 40.0
+    # Lower failure floor for non-Latin queries. rapidfuzz on
+    # Bengali/Devanagari/CJK rarely clears 40 without ISBN; keep the
+    # near-misses as needs_review rather than dropping them.
+    min_score_for_failure_non_latin: float = 25.0
     zombie_stale_minutes: int = 30
 
 
@@ -36,7 +40,9 @@ class SmtpCfg(BaseModel):
     starttls: bool = True
     user: str = ""
     password: str = ""
-
+    # Gmail outbound caps at ~25 MB total message (which is ~22 MB raw
+    # attachment after base64 overhead). Other providers: SES 40 MB, SendGrid 30 MB.
+    max_attachment_mb: int = 22
 
 class PushoverEventsCfg(BaseModel):
     book_sent: bool = True

@@ -314,12 +314,23 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
         return "failed"
     top = scored[0][0]
     second = scored[1][0] if len(scored) > 1 else 0.0
+    # Script-aware failure floor: non-Latin queries can't easily clear
+    # the Latin 40-point floor because they have no ISBN, no clean author
+    # parse, and shorter token sets in rapidfuzz. Use the (lower) non-Latin
+    # floor when the queried title is non-Latin.
+    from endless_library.domain.scoring import _is_non_latin
+
+    cfg_score = deps.cfg.general
+    if _is_non_latin(book.title or ""):
+        floor = cfg_score.min_score_for_failure_non_latin
+    else:
+        floor = cfg_score.min_score_for_failure
     decision = decide_auto_pick(
         top=top,
         second=second,
         threshold=deps.cfg.general.auto_pick_threshold,
         gap=deps.cfg.general.auto_pick_gap,
-        min_score_for_failure=deps.cfg.general.min_score_for_failure,
+        min_score_for_failure=floor,
     )
     if decision == "failed":
         deps.books.set_status(book.id, "failed", error=f"no plausible match (top={top:.1f})")
@@ -430,6 +441,50 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
                 kind="error",
                 message=f"calibre import failed (non-fatal): {e}",
             )
+    # Pre-flight: SMTP size guard. Gmail caps outbound message at ~25 MB
+    # which is ~22 MB raw attachment after base64. Rejecting at this stage
+    # gives a clear error and lets us try PDF->EPUB rescue first.
+    raw_bytes = file_path.stat().st_size
+    cap_bytes = deps.cfg.smtp.max_attachment_mb * 1024 * 1024
+    # Base64 inflates by 4/3; with email headers + boundaries, 1.4x is safe
+    inflated = int(raw_bytes * 1.4)
+    if inflated > cap_bytes and file_path.suffix.lower() == ".pdf":
+        # Try ebook-convert PDF -> EPUB; text-only PDFs compress ~5-10x
+        try:
+
+            epub_path = convert_to_epub(file_path)
+            new_inflated = int(epub_path.stat().st_size * 1.4)
+            if new_inflated <= cap_bytes:
+                deps.events.append(
+                    book_id=book.id, kind="convert",
+                    message=f"oversize PDF ({raw_bytes // 1_048_576}MB) -> EPUB "
+                    f"({epub_path.stat().st_size // 1_048_576}MB) for SMTP fit",
+                )
+                file_path = epub_path
+                raw_bytes = file_path.stat().st_size
+                inflated = new_inflated
+                deps.books.set_status(
+                    book.id, "downloading",
+                    file_path=str(file_path),
+                    format=file_path.suffix.lstrip("."),
+                    file_size=raw_bytes,
+                )
+        except Exception as e:
+            deps.events.append(
+                book_id=book.id, kind="error",
+                message=f"PDF->EPUB rescue failed: {e}",
+            )
+
+    if inflated > cap_bytes:
+        msg = (
+            f"too large for SMTP: {raw_bytes // 1_048_576}MB raw "
+            f"-> ~{inflated // 1_048_576}MB after base64, cap "
+            f"{deps.cfg.smtp.max_attachment_mb}MB"
+        )
+        deps.books.set_status(book.id, "needs_review", error=msg)
+        deps.events.append(book_id=book.id, kind="error", message=msg)
+        return "needs_review"
+
     try:
         send_to_kindle(
             attachment=file_path,
