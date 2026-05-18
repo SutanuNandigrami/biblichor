@@ -154,6 +154,31 @@ class SecurityCfg(BaseModel):
     max_members: int = 50
 
 
+class StorageCfg(BaseModel):
+    """Pluggable blob storage. Default is `local`, which behaves
+    exactly like pre-Phase-4 biblichor.
+
+    backend = local | rclone | hybrid
+      local   - files live under local_root (defaults to general.books_dir).
+      rclone  - all I/O goes to an rclone remote (gdrive / s3 / hetzner / ...).
+      hybrid  - primary=local, backup=rclone, with hybrid_mode controlling
+                when the backup write happens (mirror=sync, scheduled=cron).
+
+    Rclone setup is one-time:
+      $ rclone config            # interactive, configures remote auth
+    Then point rclone_remote at the name from rclone.conf.
+    """
+
+    backend: str = "local"
+    # local backend
+    local_root: str = ""  # empty = use general.books_dir
+    # rclone / hybrid backend
+    rclone_remote: str = ""  # name from rclone.conf, e.g. "gdrive"
+    rclone_bucket_path: str = ""  # optional path prefix on the remote
+    # hybrid only
+    hybrid_mode: str = "mirror"  # "mirror" or "scheduled"
+
+
 class Config(BaseModel):
     general: GeneralCfg = GeneralCfg()
     kindle: KindleCfg = KindleCfg()
@@ -163,6 +188,7 @@ class Config(BaseModel):
     scrapers: ScrapersCfg = ScrapersCfg()
     scoring: ScoringCfg = ScoringCfg()
     security: SecurityCfg = SecurityCfg()
+    storage: StorageCfg = StorageCfg()
 
     def public_view(self) -> dict:
         d = self.model_dump()

@@ -265,6 +265,48 @@ def cmd_resend(args):
     return 0 if failed == 0 else 1
 
 
+def cmd_storage_migrate(args):
+    """Migrate every key from the currently configured storage backend
+    to a target backend (Phase 4c). Idempotent + resumable.
+    """
+    from endless_library.storage.factory import build_store
+    from endless_library.storage.migrate import migrate_all
+
+    config_path, db_path = _resolve_paths(args)
+    cfg = load_config(config_path)
+    _setup_logging(cfg.general.log_level)
+
+    src = build_store(cfg.storage, data_root=Path(cfg.general.books_dir))
+
+    # Build a synthetic StorageCfg for the target so we can construct
+    # the dst Store without persisting config until migration succeeds.
+    target_cfg = cfg.storage.model_copy(update={"backend": args.to})
+    if args.to in ("rclone", "hybrid"):
+        if args.rclone_remote:
+            target_cfg = target_cfg.model_copy(update={"rclone_remote": args.rclone_remote})
+        if args.rclone_bucket_path:
+            target_cfg = target_cfg.model_copy(
+                update={"rclone_bucket_path": args.rclone_bucket_path}
+            )
+    dst = build_store(target_cfg, data_root=Path(cfg.general.books_dir))
+
+    def progress(key, n, total):
+        print(f"  [{n}/{total}] {key}")
+
+    print(f"migrating {src.name} -> {dst.name}")
+    result = migrate_all(
+        src, dst, prefix=args.prefix or "", overwrite=args.overwrite, on_progress=progress
+    )
+    print()
+    print(f"summary: total={result.total} copied={result.copied} "
+          f"skipped_existing={result.skipped_existing} failed={result.failed}")
+    for key, err in result.errors[:10]:
+        print(f"  FAIL: {key}: {err}")
+    if len(result.errors) > 10:
+        print(f"  ... and {len(result.errors) - 10} more failures")
+    return 1 if result.failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="endless-library", description="Self-hosted books -> kindle")
     p.add_argument("--config", help="Path to config.yaml")
@@ -290,6 +332,17 @@ def main(argv: list[str] | None = None) -> int:
     s_resend.add_argument("--format", help="Resend all sent books of this format (e.g. pdf)")
     s_resend.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
     s_resend.set_defaults(func=cmd_resend)
+
+    s_storage = sub.add_parser("storage", help="Storage management commands (Phase 4c)")
+    sub_storage = s_storage.add_subparsers(dest="storage_cmd")
+    sub_storage.required = True
+    s_migrate = sub_storage.add_parser("migrate", help="Migrate keys to a target storage backend")
+    s_migrate.add_argument("--to", required=True, choices=("local", "rclone", "hybrid"))
+    s_migrate.add_argument("--rclone-remote", default="", help="Override rclone remote for target")
+    s_migrate.add_argument("--rclone-bucket-path", default="", help="Override rclone bucket path")
+    s_migrate.add_argument("--prefix", default="", help="Migrate only keys under this prefix")
+    s_migrate.add_argument("--overwrite", action="store_true", help="Overwrite existing keys on dst")
+    s_migrate.set_defaults(func=cmd_storage_migrate)
 
     s_send = sub.add_parser("send", help="Send an existing epub/file straight to Kindle")
     s_send.add_argument("path", help="Path to the file to send")
