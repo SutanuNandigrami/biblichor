@@ -17,6 +17,21 @@ from endless_library.web import api
 log = logging.getLogger(__name__)
 
 
+def _probe_bookorbit_health(url: str, timeout: float = 0.5) -> bool:
+    """Best-effort sync HTTP HEAD/GET to BookOrbit's /api/v1/health.
+    Returns True only on a 200; False on any error/timeout/non-200.
+    Phase 6m.iii M-6 startup nudge."""
+    if not url:
+        return False
+    import httpx
+
+    try:
+        r = httpx.get(url.rstrip("/") + "/api/v1/health", timeout=timeout)
+        return r.status_code == 200
+    except (httpx.HTTPError, OSError):
+        return False
+
+
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Start the APScheduler inside FastAPI's event loop so the cron-like
@@ -27,6 +42,21 @@ async def _lifespan(app: FastAPI):
     sched.start()
     app.state.scheduler = sched
     log.info("scheduler started with %d jobs", len(sched.get_jobs()))
+
+    # M-6 startup nudge: warn if BookOrbit is reachable but biblichor's
+    # pipeline integration is disabled — means user skipped or aborted
+    # `biblichor bookorbit-setup` and books won't appear in the library.
+    cfg = app.state.cfg
+    if (
+        not cfg.bookorbit.enabled
+        and cfg.bookorbit.url
+        and _probe_bookorbit_health(cfg.bookorbit.url)
+    ):
+        log.warning(
+            "BookOrbit is reachable at %s but cfg.bookorbit.enabled=False — "
+            "run `biblichor bookorbit-setup` to wire the pipeline integration",
+            cfg.bookorbit.url,
+        )
     try:
         yield
     finally:

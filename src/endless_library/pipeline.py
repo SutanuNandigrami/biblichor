@@ -17,6 +17,10 @@ from endless_library.db.sources import SourceAccountRepo
 from endless_library.domain.format_router import decide_format_action
 from endless_library.domain.models import Candidate, SearchQuery
 from endless_library.domain.models import ScoreBreakdown
+from endless_library.bookorbit.drop import (
+    BookOrbitDropError,
+    drop_into_library,
+)
 from endless_library.domain.scoring import score_candidate
 from endless_library.domain.state_machine import decide_auto_pick
 from endless_library.download import DownloadError, download
@@ -657,11 +661,6 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
     # any failure logs to events but doesn't unwind the Kindle send.
     if deps.cfg.bookorbit.enabled and deps.cfg.bookorbit.library_root_on_host:
         try:
-            from endless_library.bookorbit.drop import (
-                BookOrbitDropError,
-                drop_into_library,
-            )
-
             drop = drop_into_library(
                 file_path,
                 library_root=Path(deps.cfg.bookorbit.library_root_on_host),

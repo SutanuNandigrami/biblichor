@@ -30,6 +30,23 @@ def test_bookorbit_image_pins_to_ghcr(compose):
     assert img.startswith("ghcr.io/bookorbit/bookorbit"), f"unexpected image: {img!r}"
 
 
+def test_bookorbit_image_not_latest(compose):
+    """Review M-7: never use :latest. An unattended `docker compose pull`
+    could change BookOrbit's auth API under us. Pin to a specific tag
+    (v1.x.y) or sha digest; bump deliberately + re-validate.
+    """
+    img = compose["services"]["bookorbit"]["image"]
+    assert ":latest" not in img, (
+        f"BookOrbit image must be pinned, not :latest. Got {img!r}"
+    )
+    # Must have either a sha digest OR a semver-shaped tag
+    has_sha = "@sha256:" in img
+    has_semver_tag = ":" in img.rsplit("/", 1)[-1] and not img.endswith(":")
+    assert has_sha or has_semver_tag, (
+        f"BookOrbit image needs a tag or sha pin: {img!r}"
+    )
+
+
 def test_bookorbit_db_image_pins_to_pgvector_sha(compose):
     """Postgres + pgvector at a specific sha matches what BookOrbit's
     own compose pins. Drifting from this could break migrations."""
