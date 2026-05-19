@@ -1,0 +1,234 @@
+name: compose-smoke
+
+# Brings up the full 4-service compose stack, runs bookorbit-setup,
+# drops a fixture book through the pipeline drop helper, and verifies
+# BookOrbit's API ingested it. This catches:
+#   - Dockerfile entry-point name regressions
+#   - apt package availability (e.g. unrar vs unar)
+#   - compose env var name mismatches
+#   - compose path resolution (./ vs ../)
+#   - postgres data dir UID ownership
+#   - bookorbit healthcheck binary + hostname
+#   - C-1 (library_root path mismatch between host and container)
+#   - Future BookOrbit DTO drift on /auth/setup, /libraries, /scanner
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/**"
+      - "src/endless_library/bookorbit/**"
+      - "src/endless_library/pipeline.py"
+      - "src/endless_library/app.py"
+      - "src/endless_library/config.py"
+      - ".github/workflows/smoke.yml"
+  pull_request:
+    paths:
+      - "deploy/**"
+      - "src/endless_library/bookorbit/**"
+      - "src/endless_library/pipeline.py"
+      - "src/endless_library/app.py"
+      - "src/endless_library/config.py"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build biblichor image
+        run: |
+          docker build -f deploy/Dockerfile -t ghcr.io/sutanunandigrami/biblichor:latest .
+
+      - name: Stage smoke test .env
+        run: |
+          openssl rand -hex 32 > /tmp/jwt_secret
+          openssl rand -hex 32 > /tmp/setup_token
+          openssl rand -hex 24 > /tmp/db_password
+          cat > .env <<EOF
+          # Deterministic-ish smoke .env. Secrets are throwaway; the
+          # stack is torn down at the end of the job.
+          GMAIL_USER=smoke@example.com
+          GMAIL_APP_PASSWORD=smoke-app-password-not-real
+          KINDLE_EMAIL=smoke@kindle.com
+          BIBLICHOR_PORT=8090
+          TZ=Etc/UTC
+          FLARESOLVERR_LOG_LEVEL=warning
+          BIBLICHOR_USE_CLAMAV=0
+          WELIB_AUTH_COOKIE=
+          BOOKORBIT_PORT=3000
+          BOOKORBIT_URL=http://localhost:3000
+          BOOKORBIT_DB_USER=bookorbit
+          BOOKORBIT_DB_NAME=bookorbit
+          BOOKORBIT_DB_PASSWORD=$(cat /tmp/db_password)
+          BOOKORBIT_JWT_SECRET=$(cat /tmp/jwt_secret)
+          BOOKORBIT_SETUP_TOKEN=$(cat /tmp/setup_token)
+          BOOKORBIT_NODE_HEAP_MB=1024
+          BOOKORBIT_ADMIN_USER=admin
+          BOOKORBIT_ADMIN_EMAIL=admin@example.com
+          BOOKORBIT_ADMIN_NAME=admin
+          BOOKORBIT_ADMIN_PASSWORD=Smoke123!Pass
+          EOF
+          mkdir -p data data/books library config
+          # Seed minimal config.yaml
+          cat > config/config.yaml <<EOF
+          general:
+            books_dir: /data/books
+            timezone: UTC
+            log_level: INFO
+          smtp:
+            host: smtp.gmail.com
+            port: 587
+          kindle:
+            recipient: smoke@kindle.com
+          EOF
+          # Seed an empty library.db so biblichor can boot
+          touch data/library.db
+          chmod 600 .env
+
+      - name: Pin Postgres data dir ownership
+        run: |
+          mkdir -p data/bookorbit-db data/bookorbit
+          sudo chown -R 999:999 data/bookorbit-db
+
+      - name: docker compose up
+        run: |
+          docker compose -f deploy/compose.yml --env-file .env up -d --wait \
+            --wait-timeout 240
+        timeout-minutes: 6
+
+      - name: biblichor /healthz returns 200
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8090/healthz | grep -q '"ok":true'; then
+              echo "biblichor healthy after ${i}x2s"
+              break
+            fi
+            sleep 2
+            if [ "$i" -eq 30 ]; then
+              echo "biblichor never went healthy"
+              docker compose -f deploy/compose.yml --env-file .env logs biblichor | tail -50
+              exit 1
+            fi
+          done
+
+      - name: bookorbit /api/v1/health returns 200
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/api/v1/health | grep -q '"status":"ok"'; then
+              echo "bookorbit healthy after ${i}x2s"
+              break
+            fi
+            sleep 2
+            if [ "$i" -eq 30 ]; then
+              echo "bookorbit never went healthy"
+              docker compose -f deploy/compose.yml --env-file .env logs bookorbit | tail -50
+              exit 1
+            fi
+          done
+
+      - name: bookorbit-setup runs via docker compose exec (C-1 + R-I-5 path)
+        run: |
+          docker compose -f deploy/compose.yml --env-file .env exec -T biblichor \
+            python -m endless_library \
+              --config /app/config/config.yaml \
+              --db /data/library.db \
+            bookorbit-setup \
+              --url http://bookorbit:3000 \
+              --setup-token "$(cat /tmp/setup_token)" \
+              --admin-user admin \
+              --admin-email admin@example.com \
+              --admin-name admin \
+              --admin-password "Smoke123!Pass" \
+              --library-root /library
+
+      - name: library_root reachable inside biblichor container (C-1 contract)
+        run: |
+          # The whole point of Phase 6o.2 — library_root must exist where biblichor
+          # actually reads it from. Asserts a host-vs-container mismatch can't ship.
+          docker compose -f deploy/compose.yml --env-file .env exec -T biblichor \
+            python -c "
+          from pathlib import Path
+          from endless_library.config import load_config
+          cfg = load_config(Path('/app/config/config.yaml'))
+          lr = cfg.bookorbit.library_root
+          print(f'library_root={lr!r}')
+          assert lr, 'library_root should be populated after setup'
+          assert Path(lr).exists(), f'C-1 regression: {lr} does not exist inside biblichor'
+          assert cfg.bookorbit.enabled is True
+          print('C-1 contract holds')
+          "
+
+      - name: Drop a fixture book via the pipeline helper
+        run: |
+          # Create a minimal fake EPUB inside the biblichor container, drop it
+          # into the watched library, and verify the path uses the shared layout.
+          docker compose -f deploy/compose.yml --env-file .env exec -T biblichor \
+            python -c "
+          from pathlib import Path
+          from endless_library.bookorbit.drop import drop_into_library
+
+          src = Path('/tmp/smoke.epub')
+          src.write_bytes(b'PK\x03\x04' + b'fake epub bytes for smoke test\n' * 50)
+          result = drop_into_library(
+              src,
+              library_root=Path('/library'),
+              title='Smoke Test Book',
+              author='CI',
+          )
+          print(f'dropped: {result.target_path}')
+          assert result.target_path.exists(), 'atomic drop did not produce target'
+          # No leftover .biblichor-tmp turds
+          siblings = list(result.target_path.parent.iterdir())
+          assert all(not p.name.endswith('.biblichor-tmp') for p in siblings), \
+              f'tmp turds left: {siblings}'
+          print('atomic-write contract holds')
+          "
+
+      - name: Trigger BookOrbit scan + verify ingest
+        run: |
+          JWT=$(curl -sS http://localhost:3000/api/v1/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"username":"admin","password":"Smoke123!Pass"}' \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['accessToken'])")
+          # Find the library id biblichor created
+          LIB_ID=$(curl -sS http://localhost:3000/api/v1/libraries \
+            -H "Authorization: Bearer $JWT" \
+            | python3 -c "import json,sys; libs=json.load(sys.stdin); print([l for l in libs if l['name']=='biblichor'][0]['id'])")
+          echo "library id: $LIB_ID"
+
+          # Trigger scan
+          curl -fsS -X POST "http://localhost:3000/api/v1/scanner/libraries/$LIB_ID/scan" \
+            -H "Authorization: Bearer $JWT"
+
+          # Poll for the book to appear (up to 30s)
+          for i in $(seq 1 30); do
+            BODY=$(curl -sS -X POST "http://localhost:3000/api/v1/libraries/$LIB_ID/books" \
+              -H "Authorization: Bearer $JWT" \
+              -H "Content-Type: application/json" \
+              -d '{"limit":10}')
+            TOTAL=$(echo "$BODY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total', 0))")
+            if [ "$TOTAL" -ge 1 ]; then
+              echo "ingest verified after ${i}x2s: $TOTAL book(s)"
+              echo "$BODY" | python3 -m json.tool | head -30
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ingest never happened"
+          docker compose -f deploy/compose.yml --env-file .env logs bookorbit | tail -50
+          exit 1
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f deploy/compose.yml --env-file .env down -v
