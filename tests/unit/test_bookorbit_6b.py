@@ -100,7 +100,7 @@ def test_login_stashes_jwt(respx_mock):
         return_value=httpx.Response(200, json={"accessToken": "jwt-abc"})
     )
     with BookOrbitClient(BASE) as c:
-        c.login(username_or_email="admin@x.com", password="Password1")
+        c.login(username="admin", password="Password1")
         assert c._jwt == "jwt-abc"
 
 
@@ -111,7 +111,7 @@ def test_login_supports_snake_case_response(respx_mock):
         return_value=httpx.Response(200, json={"access_token": "jwt-snake"})
     )
     with BookOrbitClient(BASE) as c:
-        c.login(username_or_email="admin@x.com", password="Password1")
+        c.login(username="admin", password="Password1")
         assert c._jwt == "jwt-snake"
 
 
@@ -135,7 +135,7 @@ def test_create_library_sends_correct_dto(respx_mock):
         return_value=httpx.Response(201, json={"id": "lib-1"})
     )
     with BookOrbitClient(BASE) as c:
-        c.login(username_or_email="x", password="x")
+        c.login(username="admin", password="x")
         out = c.create_library(name="biblichor", icon="📚", folders=["/books"])
     assert out["id"] == "lib-1"
     body = json.loads(route.calls.last.request.content)
@@ -159,7 +159,7 @@ def test_trigger_scan_accepts_202(respx_mock):
         return_value=httpx.Response(202)
     )
     with BookOrbitClient(BASE) as c:
-        c.login(username_or_email="x", password="x")
+        c.login(username="admin", password="x")
         c.trigger_scan("lib-1")
 
 

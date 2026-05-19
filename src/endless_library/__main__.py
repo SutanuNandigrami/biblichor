@@ -625,7 +625,7 @@ def cmd_migrate_to_bookorbit(args):
         else:
             try:
                 with BookOrbitClient(bo_cfg.url) as c:
-                    c.login(username_or_email=admin_email, password=admin_password)
+                    c.login(username=os.environ.get("BOOKORBIT_ADMIN_USER", "admin"), password=admin_password)
                     c.trigger_scan(bo_cfg.library_id)
                 print()
                 print(f"triggered scan on library {bo_cfg.library_id}")

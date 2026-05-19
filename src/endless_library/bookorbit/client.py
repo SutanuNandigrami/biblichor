@@ -98,12 +98,12 @@ class BookOrbitClient:
         if r.status_code not in (200, 201):
             raise BookOrbitError(f"setup failed ({r.status_code}): {r.text[:300]}")
 
-    def login(self, *, username_or_email: str, password: str) -> None:
+    def login(self, *, username: str, password: str) -> None:
         """POST /auth/login → stashes the access token for subsequent
         authenticated calls. Refresh-token cookie is ignored for now."""
         r = self._client.post(
             "/api/v1/auth/login",
-            json={"usernameOrEmail": username_or_email, "password": password},
+            json={"username": username, "password": password},
         )
         if r.status_code != 200:
             raise BookOrbitError(f"login failed ({r.status_code}): {r.text[:300]}")

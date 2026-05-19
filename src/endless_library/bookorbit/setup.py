@@ -68,7 +68,7 @@ def ensure_bookorbit_ready(
             )
             just_created = True
 
-        client.login(username_or_email=admin_email, password=admin_password)
+        client.login(username=admin_username, password=admin_password)
 
         # Find or create the biblichor library
         libs = client.list_libraries()
