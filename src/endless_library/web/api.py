@@ -80,6 +80,52 @@ def _candidate_mirror(detail_url: str | None) -> str | None:
     return urlparse(detail_url).netloc or None
 
 
+def _compute_bookorbit_urls(request: Request, cfg) -> dict[str, str]:
+    """Compute every URL the SPA needs to surface, based on:
+      1. cfg.bookorbit.url if explicitly set AND not pointing at localhost
+      2. else: derive from the request's host with the BOOKORBIT_PORT
+         taken from the env (default 3000).
+
+    Why not always trust cfg.bookorbit.url? Because a single APP_URL
+    can't satisfy both "same host as biblichor" and "Tailscale name"
+    simultaneously. Computing from request.url.hostname means the URL
+    biblichor's SPA sees matches the hostname the SPA was loaded from.
+    """
+    import os
+
+    configured = (cfg.bookorbit.url or "").strip()
+    fallback_port = os.environ.get("BOOKORBIT_PORT", "3000")
+    fallback_proto = request.url.scheme or "http"
+    fallback_host = request.url.hostname or "localhost"
+    fallback_base = f"{fallback_proto}://{fallback_host}:{fallback_port}"
+
+    # If configured URL doesn't contain a hostname OR contains
+    # "localhost" (which the docs explicitly warn against for any
+    # cross-device usage), prefer the request-derived base.
+    use_configured = configured and "localhost" not in configured and "127.0.0.1" not in configured
+    base = configured.rstrip("/") if use_configured else fallback_base
+
+    return {
+        # Open BookOrbit's dashboard
+        "dashboard": base,
+        # OPDS catalog — point any e-reader app at this URL (KOReader,
+        # Thorium, Moon+ Reader, etc.). Requires user-side OPDS password.
+        "opds_catalog": f"{base}/api/v1/opds",
+        # Kobo Sync — set as your Kobo device's My Sync URL. Per-device
+        # token gets minted when you complete the in-BookOrbit Kobo flow.
+        "kobo_sync_root": f"{base}/api/v1/kobo",
+        # KOReader two-way sync — uses OPDS (KOReader speaks OPDS, not
+        # a dedicated protocol). Same URL as opds_catalog.
+        "koreader_sync": f"{base}/api/v1/opds",
+        # Reading statistics page
+        "statistics": f"{base}/statistics",
+        # Web reader prefix — actual reader links are {book_id}/{file_id}
+        "reader_base": f"{base}/read",
+        # Used by biblichor's own startup-probe / SPA fallback logic
+        "base": base,
+    }
+
+
 def register(app: FastAPI) -> None:
     router = APIRouter(prefix="/api")
 
@@ -570,8 +616,21 @@ def register(app: FastAPI) -> None:
 
     @router.get("/settings")
     def get_settings(request: Request):
+        """Return public config + URL surfaces computed against the
+        request's host. The SPA reads bookorbit.url etc. from here so
+        clicking "Open BookOrbit" always lands at a URL that resolves
+        from wherever the SPA itself was loaded (Tailscale name,
+        Docker host, reverse proxy, localhost — all work the same).
+
+        Phase 6o.4 (D-1 + U-1..U-4): builds OPDS, Kobo, KOReader, web-
+        reader, and statistics URLs alongside the BookOrbit base. The
+        SPA Library page shows all of these so users can point their
+        e-reader apps at the catalog without copying URLs by hand.
+        """
         deps = request.app.state.deps
-        return deps.cfg.public_view()
+        pub = deps.cfg.public_view()
+        pub["bookorbit"]["urls"] = _compute_bookorbit_urls(request, deps.cfg)
+        return pub
 
     @router.post("/settings")
     def save_settings(patch: SettingsPatch, request: Request):
