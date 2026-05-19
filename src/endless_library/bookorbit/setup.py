@@ -3,10 +3,13 @@
 Idempotent. Calls /auth/setup-status to decide whether to:
   - bootstrap admin from scratch (first run), OR
   - just log in (subsequent runs)
-then ensures a watched library exists at the expected mount point.
+then ensures a watched library exists at the expected mount point,
+and writes both the URL and the library_id directly into biblichor's
+config.yaml so the pipeline + future CLI calls have a single source
+of truth.
 
-Persisted state lands in config/bookorbit.json so the pipeline can
-read library_id without re-authing on every boot.
+Phase 6m.ii consolidated this from a dual-file model (bookorbit.json
++ config.yaml) down to config.yaml only.
 """
 
 from __future__ import annotations
@@ -17,7 +20,6 @@ from pathlib import Path
 
 from endless_library.bookorbit.client import (
     BookOrbitClient,
-    BookOrbitConfig,
     BookOrbitError,
 )
 
@@ -30,10 +32,9 @@ DEFAULT_LIBRARY_MOUNT = "/books"  # what BookOrbit sees inside its container
 
 @dataclass
 class SetupResult:
-    config_path: Path
     library_id: str
     just_created: bool   # admin created right now (False if existing)
-    config_yaml_updated: bool = False  # Phase 6i: bookorbit section enabled
+    config_yaml_updated: bool = False  # config.yaml fields changed this run
     config_yaml_path: Path | None = None
 
 
@@ -46,15 +47,14 @@ def ensure_bookorbit_ready(
     admin_email: str,
     admin_password: str,
     library_root_on_host: str,
-    config_path: Path,
+    biblichor_config_yaml_path: Path,
     library_mount: str = DEFAULT_LIBRARY_MOUNT,
-    biblichor_config_yaml_path: Path | None = None,
 ) -> SetupResult:
     """First-run bootstrap or no-op resume.
 
     `library_root_on_host` is the host directory mounted at
-    `library_mount` inside the bookorbit container. We persist it so
-    the pipeline knows where to drop files on the host.
+    `library_mount` inside the bookorbit container. Persisted in
+    config.yaml so the pipeline knows where to drop files on the host.
     """
     with BookOrbitClient(url) as client:
         status = client.setup_status()
@@ -93,38 +93,31 @@ def ensure_bookorbit_ready(
             )
             library_id = created["id"]
 
-    config = BookOrbitConfig(
-        url=url,
-        library_id=library_id,
-        library_root_on_host=library_root_on_host,
-        organization_mode="book_per_folder",
+    # Always update config.yaml — this is the single source of truth.
+    # Only writes if any field differs (keeps mtime stable on no-op reruns).
+    from endless_library.config import load_config, save_config
+
+    cfg = load_config(biblichor_config_yaml_path)
+    library_id_str = str(library_id)
+    fields_changed = (
+        not cfg.bookorbit.enabled
+        or cfg.bookorbit.library_root_on_host != library_root_on_host
+        or cfg.bookorbit.organization_mode != "book_per_folder"
+        or cfg.bookorbit.library_id != library_id_str
+        or (url and cfg.bookorbit.url != url)
     )
-    config.save(config_path)
-
-    # Phase 6i: flip cfg.bookorbit.enabled in the live config.yaml so the
-    # pipeline drop actually fires after setup. Without this step, the
-    # pipeline integration is silently disabled and the integration looks
-    # complete but is wired to nothing.
-    config_yaml_updated = False
-    if biblichor_config_yaml_path is not None and biblichor_config_yaml_path.exists():
-        from endless_library.config import load_config, save_config
-
-        cfg = load_config(biblichor_config_yaml_path)
-        # Only update if any field differs — keeps file mtime stable on idempotent runs
-        if (not cfg.bookorbit.enabled
-                or cfg.bookorbit.library_root_on_host != library_root_on_host
-                or cfg.bookorbit.organization_mode != "book_per_folder"):
-            cfg.bookorbit.enabled = True
-            cfg.bookorbit.library_root_on_host = library_root_on_host
-            cfg.bookorbit.organization_mode = "book_per_folder"
-            save_config(cfg, biblichor_config_yaml_path)
-            log.info("biblichor config.yaml: bookorbit integration enabled")
-            config_yaml_updated = True
+    if fields_changed:
+        cfg.bookorbit.enabled = True
+        cfg.bookorbit.url = url
+        cfg.bookorbit.library_root_on_host = library_root_on_host
+        cfg.bookorbit.organization_mode = "book_per_folder"
+        cfg.bookorbit.library_id = library_id_str
+        save_config(cfg, biblichor_config_yaml_path)
+        log.info("biblichor config.yaml: bookorbit integration updated")
 
     return SetupResult(
-        config_path=config_path,
-        library_id=library_id,
+        library_id=library_id_str,
         just_created=just_created,
-        config_yaml_updated=config_yaml_updated,
+        config_yaml_updated=fields_changed,
         config_yaml_path=biblichor_config_yaml_path,
     )

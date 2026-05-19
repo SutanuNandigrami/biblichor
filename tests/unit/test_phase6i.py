@@ -73,7 +73,6 @@ def test_setup_enables_bookorbit_in_config_yaml(respx_mock, tmp_path):
         admin_email="admin@x.com",
         admin_password="Password1",
         library_root_on_host="/var/lib/biblichor/library",
-        config_path=tmp_path / "bookorbit.json",
         biblichor_config_yaml_path=cfg_yaml,
     )
     assert result.config_yaml_updated is True
@@ -102,8 +101,10 @@ def test_setup_is_idempotent_on_config_yaml(respx_mock, tmp_path):
     cfg_yaml = tmp_path / "config.yaml"
     cfg = Config()
     cfg.bookorbit.enabled = True
+    cfg.bookorbit.url = BASE
     cfg.bookorbit.library_root_on_host = "/var/lib/biblichor/library"
     cfg.bookorbit.organization_mode = "book_per_folder"
+    cfg.bookorbit.library_id = "lib-1"
     save_config(cfg, cfg_yaml)
     mtime_before = cfg_yaml.stat().st_mtime
 
@@ -115,7 +116,6 @@ def test_setup_is_idempotent_on_config_yaml(respx_mock, tmp_path):
         admin_email="admin@x.com",
         admin_password="Password1",
         library_root_on_host="/var/lib/biblichor/library",
-        config_path=tmp_path / "bookorbit.json",
         biblichor_config_yaml_path=cfg_yaml,
     )
     assert result.config_yaml_updated is False
@@ -124,10 +124,14 @@ def test_setup_is_idempotent_on_config_yaml(respx_mock, tmp_path):
 
 
 @respx.mock(base_url=BASE, assert_all_called=False)
-def test_setup_skips_config_yaml_when_path_missing(respx_mock, tmp_path):
-    """If biblichor_config_yaml_path is None, behavior is the same as
-    pre-6i (back-compat for callers that don't pass it)."""
+def test_setup_always_persists_to_config_yaml(respx_mock, tmp_path):
+    """Phase 6m.ii: biblichor_config_yaml_path is required; setup always
+    writes the bookorbit section into config.yaml as single source of truth."""
+    from endless_library.config import Config, load_config, save_config
+
     _mocked_setup_endpoints(respx_mock)
+    cfg_yaml = tmp_path / "config.yaml"
+    save_config(Config(), cfg_yaml)
     result = ensure_bookorbit_ready(
         url=BASE,
         setup_token="t",
@@ -136,11 +140,14 @@ def test_setup_skips_config_yaml_when_path_missing(respx_mock, tmp_path):
         admin_email="admin@x.com",
         admin_password="Password1",
         library_root_on_host="/var/lib/biblichor/library",
-        config_path=tmp_path / "bookorbit.json",
-        biblichor_config_yaml_path=None,
+        biblichor_config_yaml_path=cfg_yaml,
     )
-    assert result.config_yaml_updated is False
-    assert result.config_yaml_path is None
+    assert result.config_yaml_updated is True
+    assert result.config_yaml_path == cfg_yaml
+    reloaded = load_config(cfg_yaml)
+    assert reloaded.bookorbit.enabled is True
+    assert reloaded.bookorbit.library_id == "lib-1"
+    assert reloaded.bookorbit.url == BASE
 
 
 # ============ REGRESSION: pipeline drop fires when bookorbit.enabled=true ============

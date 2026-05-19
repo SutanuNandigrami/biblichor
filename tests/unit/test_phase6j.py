@@ -10,6 +10,14 @@ import pytest
 from endless_library.config import BookOrbitCfg, Config, load_config, save_config
 
 
+@pytest.fixture(autouse=True)
+def _clean_bookorbit_env(monkeypatch):
+    """load_config seeds process env from .env (intentional in
+    production, but causes test cross-pollination). Wipe BOOKORBIT_URL
+    before every test in this module."""
+    monkeypatch.delenv("BOOKORBIT_URL", raising=False)
+
+
 # ============ Config: url field + BOOKORBIT_URL env override ============
 
 

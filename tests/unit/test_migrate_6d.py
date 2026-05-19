@@ -153,12 +153,19 @@ def test_migrate_progress_callback(tmp_path):
 
 def test_migrate_is_safe_to_rerun(tmp_path):
     """Re-running the migration must NOT explode on existing target
-    files. BookOrbit's hash dedup catches duplicates on ingest; the
-    file-copy itself is idempotent overwrite."""
+    files. After Phase 6m.ii, the second run also skips the file
+    copy entirely (pre-drop size check) instead of redundantly
+    overwriting. So r2 reports the same files as skipped_existing,
+    not as copied."""
     src = _calibre_layout(tmp_path)
     dst = tmp_path / "bookorbit-library"
     dst.mkdir()
     r1 = migrate_calibre_to_bookorbit(calibre_root=src, bookorbit_library_root=dst)
     r2 = migrate_calibre_to_bookorbit(calibre_root=src, bookorbit_library_root=dst)
-    assert r1.copied == r2.copied
+    # First run copies; second run skips because targets already exist
+    # with matching sizes.
+    assert r1.copied == 3, f"first run should copy all 3, got {r1.copied}"
+    assert r1.skipped_existing == 0
+    assert r2.copied == 0
+    assert r2.skipped_existing == 3
     assert r1.failed == 0 == r2.failed

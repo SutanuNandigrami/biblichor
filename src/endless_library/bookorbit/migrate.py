@@ -109,21 +109,32 @@ def migrate_calibre_to_bookorbit(
         raw_title = book_dir.name
         title = raw_title.rsplit(" (", 1)[0] if raw_title.endswith(")") else raw_title
 
+        # Phase 6m.ii: real pre-drop skip. Compute the destination path
+        # the same way drop_into_library does so we can short-circuit
+        # before any I/O when the file already exists with matching
+        # size. BookOrbit's hash dedup would also catch duplicates on
+        # ingest, but this avoids the copy IO entirely.
+        from endless_library.download import safe_filename
+        if organization_mode == "book_per_folder":
+            target_dir = bookorbit_library_root / safe_filename(author) / safe_filename(title)
+        else:
+            target_dir = bookorbit_library_root
+        target_path = target_dir / safe_filename(canonical.name)
+        if target_path.exists() and target_path.stat().st_size == canonical.stat().st_size:
+            result.skipped_existing += 1
+            if on_progress:
+                on_progress(book_dir, i, result.total_books)
+            continue
+
         try:
-            r = drop_into_library(
+            drop_into_library(
                 canonical,
                 library_root=bookorbit_library_root,
                 title=title,
                 author=author,
                 organization_mode=organization_mode,
             )
-            # Skip if we already have this exact file (same size).
-            # BookOrbit's hash dedup would catch duplicates on ingest
-            # but we still avoid pointless I/O.
-            if r.target_path.stat().st_size == canonical.stat().st_size:
-                # Could be a fresh copy or a prior migrate output —
-                # either way it's done.
-                result.copied += 1
+            result.copied += 1
         except BookOrbitDropError as e:
             result.failed += 1
             result.errors.append((str(canonical), str(e)))

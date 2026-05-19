@@ -178,9 +178,12 @@ class BookOrbitCfg(BaseModel):
     # "book_per_folder" (default in BookOrbit) -> <author>/<title>/<file>
     # "book_per_file" -> flat
     organization_mode: str = "book_per_folder"
-    # Path to the JSON file ensure_bookorbit_ready() writes — used by
-    # the migration CLI; pipeline itself doesn't need it.
-    config_json_path: str = "config/bookorbit.json"
+    # The BookOrbit library this biblichor instance owns. Populated by
+    # `biblichor bookorbit-setup`. Used by `migrate-to-bookorbit
+    # --trigger-scan`; pipeline drop doesn't need it (the watcher
+    # auto-detects). Phase 6m.ii made this the single source of truth
+    # (was previously duplicated in config/bookorbit.json).
+    library_id: str = ""
 
 
 class StorageCfg(BaseModel):

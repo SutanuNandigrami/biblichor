@@ -17,10 +17,7 @@ add refresh logic.
 
 from __future__ import annotations
 
-import json
 import logging
-from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -32,28 +29,6 @@ DEFAULT_TIMEOUT = 30.0
 
 class BookOrbitError(Exception):
     """Any non-2xx response from the BookOrbit API."""
-
-
-@dataclass
-class BookOrbitConfig:
-    """Persisted to config/bookorbit.json — picked up by the pipeline
-    and the migrate CLI to talk to BookOrbit without re-authing each
-    boot."""
-
-    url: str
-    library_id: str | None = None
-    library_root_on_host: str | None = None  # the host path mounted at /books
-    organization_mode: str = "book_per_folder"
-
-    @classmethod
-    def load(cls, path: Path) -> "BookOrbitConfig":
-        if not path.exists():
-            raise BookOrbitError(f"bookorbit config not found at {path}; run biblichor bookorbit-setup first")
-        return cls(**json.loads(path.read_text()))
-
-    def save(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(asdict(self), indent=2))
 
 
 class BookOrbitClient:

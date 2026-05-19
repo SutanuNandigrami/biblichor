@@ -520,7 +520,6 @@ def cmd_bookorbit_setup(args):
             return 1
 
     library_root = args.library_root or str(Path(cfg.general.books_dir).resolve())
-    bo_cfg_path = Path(config_path).parent / "bookorbit.json"
 
     try:
         result = ensure_bookorbit_ready(
@@ -531,7 +530,6 @@ def cmd_bookorbit_setup(args):
             admin_email=admin_email,
             admin_password=admin_password,
             library_root_on_host=library_root,
-            config_path=bo_cfg_path,
             biblichor_config_yaml_path=config_path,
         )
     except BookOrbitError as e:
@@ -545,11 +543,10 @@ def cmd_bookorbit_setup(args):
         print(f"BookOrbit admin already exists; using existing account ({admin_email})")
     print(f"library id:   {result.library_id}")
     print(f"library root: {library_root} -> /books (mounted)")
-    print(f"config saved: {result.config_path}")
     if result.config_yaml_updated:
         print(f"biblichor config.yaml: bookorbit integration enabled at {result.config_yaml_path}")
-    elif result.config_yaml_path:
-        print(f"biblichor config.yaml: already configured at {result.config_yaml_path}")
+    else:
+        print(f"biblichor config.yaml: already in sync at {result.config_yaml_path}")
     print()
     print(f"open the library:  {url}")
     return 0
@@ -613,27 +610,28 @@ def cmd_migrate_to_bookorbit(args):
     for line in result.lost_calibre_fields:
         print(f"  - {line}")
 
-    # Optional: trigger a scan via the BookOrbit API
+    # Optional: trigger a scan via the BookOrbit API. Reads url + library_id
+    # from cfg.bookorbit (populated by `biblichor bookorbit-setup`).
     if args.trigger_scan:
-        bo_cfg_path = Path(config_path).parent / "bookorbit.json"
-        if not bo_cfg_path.exists():
+        if not cfg.bookorbit.library_id:
             print()
-            print("note: bookorbit.json missing; run biblichor bookorbit-setup first to enable --trigger-scan")
+            print("note: cfg.bookorbit.library_id empty; run `biblichor bookorbit-setup` first to enable --trigger-scan")
             return 0 if result.failed == 0 else 1
-        from endless_library.bookorbit.client import BookOrbitConfig, BookOrbitError
-        bo_cfg = BookOrbitConfig.load(bo_cfg_path)
-        admin_email = os.environ.get("BOOKORBIT_ADMIN_EMAIL")
+        from endless_library.bookorbit.client import BookOrbitError
         admin_password = os.environ.get("BOOKORBIT_ADMIN_PASSWORD")
-        if not (admin_email and admin_password):
+        if not admin_password:
             print()
-            print("note: BOOKORBIT_ADMIN_EMAIL/PASSWORD not set; skipping scan trigger")
+            print("note: BOOKORBIT_ADMIN_PASSWORD not set; skipping scan trigger")
         else:
             try:
-                with BookOrbitClient(bo_cfg.url) as c:
-                    c.login(username=os.environ.get("BOOKORBIT_ADMIN_USER", "admin"), password=admin_password)
-                    c.trigger_scan(bo_cfg.library_id)
+                with BookOrbitClient(cfg.bookorbit.url or "http://localhost:3000") as c:
+                    c.login(
+                        username=os.environ.get("BOOKORBIT_ADMIN_USER", "admin"),
+                        password=admin_password,
+                    )
+                    c.trigger_scan(cfg.bookorbit.library_id)
                 print()
-                print(f"triggered scan on library {bo_cfg.library_id}")
+                print(f"triggered scan on library {cfg.bookorbit.library_id}")
             except BookOrbitError as e:
                 print(f"scan trigger failed (non-fatal): {e}", file=sys.stderr)
     return 0 if result.failed == 0 else 1

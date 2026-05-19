@@ -14,35 +14,12 @@ import respx
 
 from endless_library.bookorbit.client import (
     BookOrbitClient,
-    BookOrbitConfig,
     BookOrbitError,
 )
 from endless_library.bookorbit.setup import ensure_bookorbit_ready
 
 
 BASE = "http://bookorbit.test"
-
-
-# ============ BookOrbitConfig persistence ============
-
-
-def test_config_round_trips(tmp_path):
-    p = tmp_path / "bookorbit.json"
-    cfg = BookOrbitConfig(
-        url="http://x:3000",
-        library_id="abc-123",
-        library_root_on_host="/var/lib/biblichor/library",
-    )
-    cfg.save(p)
-    loaded = BookOrbitConfig.load(p)
-    assert loaded.url == "http://x:3000"
-    assert loaded.library_id == "abc-123"
-    assert loaded.library_root_on_host == "/var/lib/biblichor/library"
-
-
-def test_config_load_missing_raises_clear_error(tmp_path):
-    with pytest.raises(BookOrbitError, match="run biblichor bookorbit-setup first"):
-        BookOrbitConfig.load(tmp_path / "absent.json")
 
 
 # ============ Client auth flows ============
@@ -168,6 +145,9 @@ def test_trigger_scan_accepts_202(respx_mock):
 
 @respx.mock(base_url=BASE)
 def test_ensure_creates_admin_and_library_on_first_run(respx_mock, tmp_path):
+    """Phase 6m.ii: config.yaml is the single source of truth."""
+    from endless_library.config import Config, load_config, save_config
+
     respx_mock.get("/api/v1/auth/setup-status").mock(
         return_value=httpx.Response(200, json={"needsSetup": True})
     )
@@ -184,7 +164,9 @@ def test_ensure_creates_admin_and_library_on_first_run(respx_mock, tmp_path):
         return_value=httpx.Response(201, json={"id": "lib-new"})
     )
 
-    cfg_path = tmp_path / "bookorbit.json"
+    cfg_yaml = tmp_path / "config.yaml"
+    save_config(Config(), cfg_yaml)
+
     result = ensure_bookorbit_ready(
         url=BASE,
         setup_token="t",
@@ -193,19 +175,23 @@ def test_ensure_creates_admin_and_library_on_first_run(respx_mock, tmp_path):
         admin_email="a@x.com",
         admin_password="Password1",
         library_root_on_host="/var/lib/biblichor/library",
-        config_path=cfg_path,
+        biblichor_config_yaml_path=cfg_yaml,
     )
     assert result.just_created is True
     assert result.library_id == "lib-new"
-    # Config persisted
-    loaded = BookOrbitConfig.load(cfg_path)
-    assert loaded.library_id == "lib-new"
+    # config.yaml is now the source of truth — bookorbit.json no longer exists
+    reloaded = load_config(cfg_yaml)
+    assert reloaded.bookorbit.library_id == "lib-new"
+    assert reloaded.bookorbit.url == BASE
+    assert reloaded.bookorbit.enabled is True
 
 
 @respx.mock(base_url=BASE, assert_all_called=False)
 def test_ensure_idempotent_on_second_run(respx_mock, tmp_path):
     """Second call: needsSetup=False, library already exists.
     Must NOT call /auth/setup or /libraries (POST) again."""
+    from endless_library.config import Config, save_config
+
     respx_mock.get("/api/v1/auth/setup-status").mock(
         return_value=httpx.Response(200, json={"needsSetup": False})
     )
@@ -222,7 +208,9 @@ def test_ensure_idempotent_on_second_run(respx_mock, tmp_path):
         return_value=httpx.Response(500)
     )
 
-    cfg_path = tmp_path / "bookorbit.json"
+    cfg_yaml = tmp_path / "config.yaml"
+    save_config(Config(), cfg_yaml)
+
     result = ensure_bookorbit_ready(
         url=BASE,
         setup_token="t",
@@ -231,7 +219,7 @@ def test_ensure_idempotent_on_second_run(respx_mock, tmp_path):
         admin_email="a@x.com",
         admin_password="Password1",
         library_root_on_host="/var/lib/biblichor/library",
-        config_path=cfg_path,
+        biblichor_config_yaml_path=cfg_yaml,
     )
     assert result.just_created is False
     assert result.library_id == "lib-existing"
