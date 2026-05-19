@@ -17,3 +17,6 @@ config/.env
 *.db-shm
 *.log
 .DS_Store
+# Phase 6 / cutover artifacts
+library/
+config/bookorbit.json

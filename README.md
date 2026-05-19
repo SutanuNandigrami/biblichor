@@ -205,6 +205,68 @@ biblichor backup --postgres-container bookorbit-db \
                  --bookorbit-data ./data/bookorbit         # snapshot everything
 ```
 
+### Migrating from a native systemd deployment
+
+If you've been running biblichor natively under systemd (the legacy
+"advanced way" install path), here's the cutover to docker compose
+without losing data. The whole thing is a controlled ~5-minute swap.
+
+1. **Take a backup first** so you can roll back atomically:
+   ```bash
+   cd ~/endless-library
+   .venv/bin/python -m endless_library backup --no-encrypt --library data/books
+   ```
+
+2. **Rewrite host paths to container-relative paths** in `config.yaml`
+   AND in the books table:
+   ```bash
+   # In config.yaml change:
+   #   general.books_dir: /home/<you>/endless-library/data/books
+   # to:
+   #   general.books_dir: /data/books
+
+   sqlite3 data/library.db \
+     "UPDATE books SET file_path = REPLACE(file_path, \
+        '/home/<you>/endless-library/data/books', '/data/books') \
+      WHERE file_path LIKE '/home/<you>/endless-library/data/books/%';"
+   ```
+
+3. **Generate the docker compose `.env`** carrying over your live
+   secrets (Gmail user/password, Kindle email, Welib cookie, etc.):
+   ```bash
+   # Edit deploy/env.example and use values from your config/.env
+   cp deploy/env.example .env
+   chmod 600 .env
+   # ...edit and fill in GMAIL_USER/GMAIL_APP_PASSWORD/KINDLE_EMAIL/
+   # BOOKORBIT_* secrets...
+   ```
+
+4. **Stop the native service**:
+   ```bash
+   sudo systemctl stop endless-library.service
+   sudo systemctl disable endless-library.service
+   # Keep the unit file in place for fast rollback if needed.
+   ```
+
+5. **Start the compose stack**:
+   ```bash
+   docker compose -f deploy/compose.yml --env-file .env up -d
+   ```
+
+6. **Rollback** if anything goes wrong:
+   ```bash
+   docker compose -f deploy/compose.yml --env-file .env down
+   sudo systemctl enable --now endless-library.service
+   # Edit config.yaml books_dir + UNDO the sqlite file_path REPLACE
+   # using the backup tar.zst from step 1.
+   ```
+
+Cutover gotchas you'll hit on a real box (lessons from claude-1):
+- The pre-Phase-6n `deploy/Dockerfile` had `ENTRYPOINT [..., "endless_library.app:app", ...]` — should be `"endless_library.app:entry", "--factory"` (the app module exposes a factory). Fixed in this commit.
+- The pre-Phase-6n `deploy/compose.yml` had `BIBLICHOR_DATA_DIR` / `BIBLICHOR_CONFIG` env names, but the code reads `CONFIG_PATH` and `LIBRARY_DB`. Renamed.
+- The pre-Phase-6n `deploy/compose.yml` used `./data` relative paths — docker compose resolves those relative to the COMPOSE FILE LOCATION, not where you ran the command. So `./data` meant `deploy/data` (empty), not your library. Fixed to `../<dir>`.
+- The pgvector container runs Postgres as UID 999. If your host data dir gets accidentally chowned to your user, postgres can't read it. `sudo chown -R 999:999 data/bookorbit-db` recovers.
+
 ### The advanced way — native install on the host
 
 If you'd rather run biblichor as a systemd unit alongside FlareSolverr

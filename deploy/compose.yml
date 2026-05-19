@@ -27,12 +27,12 @@ services:
     ports:
       - "${BIBLICHOR_PORT:-8090}:8090"
     volumes:
-      - ./data:/data
-      - ./config:/app/config
-      - ./library:/library
+      - ../data:/data
+      - ../config:/app/config
+      - ../library:/library
     environment:
-      BIBLICHOR_DATA_DIR: /data
-      BIBLICHOR_CONFIG: /app/config/config.yaml
+      CONFIG_PATH: /app/config/config.yaml
+      LIBRARY_DB: /data/library.db
       # Forwarded to config.yaml at first boot by bootstrap.sh
       GMAIL_USER: "${GMAIL_USER}"
       GMAIL_APP_PASSWORD: "${GMAIL_APP_PASSWORD}"
@@ -79,7 +79,7 @@ services:
       POSTGRES_PASSWORD: "${BOOKORBIT_DB_PASSWORD}"
       POSTGRES_DB: "${BOOKORBIT_DB_NAME:-bookorbit}"
     volumes:
-      - ./data/bookorbit-db:/var/lib/postgresql/data
+      - ../data/bookorbit-db:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${BOOKORBIT_DB_USER:-bookorbit} -d ${BOOKORBIT_DB_NAME:-bookorbit}"]
       interval: 10s
@@ -93,14 +93,14 @@ services:
     # Pinned to a specific tag, not :latest. Bumping requires a
     # deliberate decision + a quick re-run of `biblichor bookorbit-setup`
     # to confirm the API shape hasn't drifted. See review M-7.
-    image: ghcr.io/bookorbit/bookorbit:v1.3.0
+    image: ghcr.io/bookorbit/bookorbit@sha256:df1f2f399c913641913f33943b7ce2fef13861e33a10e8053a2c9c4cb15a82be
     container_name: biblichor-bookorbit
     restart: unless-stopped
     ports:
       - "${BOOKORBIT_PORT:-3000}:3000"
     volumes:
-      - ./library:/books
-      - ./data/bookorbit:/data
+      - ../library:/books
+      - ../data/bookorbit:/data
     environment:
       PUID: "1000"
       PGID: "1000"
@@ -137,7 +137,7 @@ services:
     environment:
       CLAMAV_NO_FRESHCLAMD: "false"
     volumes:
-      - ./data/clamav:/var/lib/clamav
+      - ../data/clamav:/var/lib/clamav
     healthcheck:
       test: ["CMD", "clamdcheck.sh"]
       interval: 60s

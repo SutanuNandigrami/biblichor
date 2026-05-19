@@ -22,7 +22,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     BIBLICHOR_DATA_DIR=/data
 
-# Calibre (ebook-convert, ebook-meta, calibredb) + unrar for .rar archives.
+# Calibre (ebook-convert, ebook-meta, calibredb) + unar (the-unarchiver, in Debian main) for .rar archives.
 # Use the no-recommends + the official Calibre tarball would be smaller,
 # but apt-get pulls a working setup with one line. Image ends up ~1.1 GB.
 # Calibre for ebook conversion + ocrmypdf stack for last-resort
@@ -31,7 +31,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # normal PDF->EPUB rescue). See endless_library.compress.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     calibre \
-    unrar \
+    unar \
     curl \
     ca-certificates \
     ocrmypdf \
@@ -83,4 +83,4 @@ EXPOSE 8090
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -fsS http://localhost:8090/healthz || exit 1
 
-ENTRYPOINT ["uvicorn", "endless_library.app:app", "--host", "0.0.0.0", "--port", "8090"]
+ENTRYPOINT ["uvicorn", "endless_library.app:entry", "--factory", "--host", "0.0.0.0", "--port", "8090"]
