@@ -37,8 +37,6 @@ services:
       GMAIL_USER: "${GMAIL_USER}"
       GMAIL_APP_PASSWORD: "${GMAIL_APP_PASSWORD}"
       KINDLE_EMAIL: "${KINDLE_EMAIL}"
-      CALIBRE_WEB_USER: "${CALIBRE_WEB_USER:-admin}"
-      CALIBRE_WEB_PASSWORD: "${CALIBRE_WEB_PASSWORD:-admin123}"
     depends_on:
       flaresolverr:
         condition: service_healthy

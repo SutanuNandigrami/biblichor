@@ -83,9 +83,6 @@ echo
 say "${C_BOLD}Optional values${C_OFF} — press Enter to accept the bracketed default."
 prompt_var BIBLICHOR_PORT        "Dashboard port"                            "${BIBLICHOR_PORT:-8090}"      0
 prompt_var TZ                    "Timezone (e.g. America/Los_Angeles)"       "${TZ:-Etc/UTC}"                0
-prompt_var CALIBRE_WEB_USER      "Calibre-Web admin username"                 "${CALIBRE_WEB_USER:-admin}"   0
-prompt_var CALIBRE_WEB_PASSWORD  "Calibre-Web admin password (change later)"  "${CALIBRE_WEB_PASSWORD:-admin123}" 1
-
 echo
 say "${C_BOLD}BookOrbit values${C_OFF} — library UI + reader + Kobo/KOReader/OPDS"
 # Generate secrets on first run; reuse on subsequent runs.
@@ -111,8 +108,6 @@ GMAIL_APP_PASSWORD=$GMAIL_APP_PASSWORD
 KINDLE_EMAIL=$KINDLE_EMAIL
 BIBLICHOR_PORT=$BIBLICHOR_PORT
 TZ=$TZ
-CALIBRE_WEB_USER=$CALIBRE_WEB_USER
-CALIBRE_WEB_PASSWORD=$CALIBRE_WEB_PASSWORD
 FLARESOLVERR_LOG_LEVEL=${FLARESOLVERR_LOG_LEVEL:-info}
 BIBLICHOR_USE_CLAMAV=${BIBLICHOR_USE_CLAMAV:-0}
 BOOKORBIT_PORT=$BOOKORBIT_PORT
@@ -209,8 +204,7 @@ fi
 echo
 echo "${C_GREEN}${C_BOLD}biblichor is running.${C_OFF}"
 echo "  Dashboard:    http://localhost:${BIBLICHOR_PORT}"
-echo "  Library:      http://localhost:${BOOKORBIT_PORT}  (BookOrbit)"
-echo "                http://localhost:${BIBLICHOR_PORT}/library  (legacy Calibre-Web, being retired)"
+echo "  Library:      http://localhost:${BOOKORBIT_PORT}  (BookOrbit — reader, Kobo/KOReader sync, OPDS)"
 echo "  Healthz:      $HEALTH_URL"
 echo
 echo "  ${C_YELLOW}BookOrbit first-run setup:${C_OFF}"

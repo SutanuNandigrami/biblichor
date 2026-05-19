@@ -72,7 +72,6 @@ Self-hosted automation that watches your reading lists, finds the books on Anna'
        │      → convert (Calibre `ebook-convert` if needed)  │
        │      → enrich metadata (`ebook-meta` author/series/ │
        │         tags/ISBN) — Kindle uses these for collections
-       │      → add to Calibre library (`calibredb add`)     │
        │      → email to Kindle (aiosmtplib + STARTTLS)      │
        └─────────────────────────────────────────────────────┘
                                ▼
@@ -143,7 +142,7 @@ Self-hosted automation that watches your reading lists, finds the books on Anna'
 |---|---|---|
 | **Python 3.12** | Backend runtime | Tested on 3.12 only |
 | **Node.js 20+** | Build the Vue 3 SPA | Built once at install time; not needed at runtime |
-| **Calibre** | `ebook-convert`, `ebook-meta`, `calibredb` | Install the host package, not the Docker mod (faster restarts) |
+| **Calibre** | `ebook-convert`, `ebook-meta` (CLI tools only — Calibre-Web is no longer used) | Install via apt: `sudo apt-get install -y calibre` |
 | **Docker + docker compose** | FlareSolverr + BookOrbit + Postgres | Required for the easy-setup path |
 | **An SMTP account** | Send to Kindle | Gmail with an app password is the easy path |
 | **Amazon Kindle email setup** | Whitelist sender, capture `@kindle.com` address | <https://www.amazon.com/sendtokindle> |
@@ -430,7 +429,7 @@ security:
 - **Backend**: Python 3.12, FastAPI, Pydantic v2, APScheduler, SQLite WAL, aiosmtplib, httpx, curl-cffi, BeautifulSoup, rapidfuzz
 - **Anti-bot**: FlareSolverr, optional CloakBrowser stealth Chromium, Playwright (last-resort)
 - **Frontend**: Vue 3 + Vite, TypeScript, Tailwind CSS, shadcn-vue, Pinia, Vue Router, Lucide icons
-- **Conversion**: Calibre (`ebook-convert`, `ebook-meta`, `calibredb`)
+- **Conversion**: Calibre CLI (`ebook-convert`, `ebook-meta`)
 - **Library UI**: BookOrbit in a container; biblichor drops books into a shared mount; BookOrbit ingests + serves reader/Kobo/KOReader/OPDS
 
 ## Acknowledgements
