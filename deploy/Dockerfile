@@ -75,6 +75,14 @@ COPY --from=webapp-build /webapp/dist /app/webapp/dist
 # Default data directory; the compose file mounts a volume over this
 RUN mkdir -p ${BIBLICHOR_DATA_DIR}
 
+# Phase 6o.5 (R-I-6): run as UID 1000, not root. Matches BookOrbit's
+# default PUID and the host 'ubuntu' user on most cloud distros, so
+# the shared library bind-mount has one consistent owner.
+RUN groupadd -g 1000 biblichor 2>/dev/null || true \
+    && useradd -u 1000 -g 1000 -m -s /bin/false biblichor 2>/dev/null || true \
+    && chown -R 1000:1000 /app ${BIBLICHOR_DATA_DIR}
+USER 1000:1000
+
 EXPOSE 8090
 
 # Healthcheck hits the /healthz endpoint Phase 2a added. Returns 503

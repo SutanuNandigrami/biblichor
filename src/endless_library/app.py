@@ -17,10 +17,14 @@ from endless_library.web import api
 log = logging.getLogger(__name__)
 
 
-def _probe_bookorbit_health(url: str, timeout: float = 0.5) -> bool:
-    """Best-effort sync HTTP HEAD/GET to BookOrbit's /api/v1/health.
+def _probe_bookorbit_health(url: str, timeout: float = 2.5) -> bool:
+    """Best-effort sync HTTP GET to BookOrbit's /api/v1/health.
     Returns True only on a 200; False on any error/timeout/non-200.
-    Phase 6m.iii M-6 startup nudge."""
+    Phase 6m.iii M-6 startup nudge. Phase 6o.5 (R-I-7) bumped the
+    default timeout from 500ms to 2.5s so cold-start BookOrbit
+    containers (Postgres migrations can take ~60s) aren't silently
+    flagged as unreachable. The probe still blocks the event loop
+    briefly — acceptable because it runs exactly once per startup."""
     if not url:
         return False
     import httpx

@@ -180,20 +180,35 @@ if [[ -z "${BOOKORBIT_SKIPPED:-}" ]]; then
   # via the biblichor container's exec. Prefer native venv if present.
   if command -v biblichor > /dev/null 2>&1; then
     BIBLICHOR_BIN="biblichor"
+    LIBRARY_ROOT_ARG="$REPO_ROOT/library"
   elif [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
     BIBLICHOR_BIN="$REPO_ROOT/.venv/bin/python -m endless_library"
+    LIBRARY_ROOT_ARG="$REPO_ROOT/library"
+  elif docker compose "${COMPOSE_ARGS[@]}" ps --status running --quiet biblichor 2>/dev/null | grep -q .; then
+    # Phase 6o.5 (R-I-5): pure docker-compose deployment — exec into
+    # the biblichor container so the CLI runs in the right filesystem
+    # context. library_root must be the container-internal mount point
+    # (Phase 6o.2 C-1 fix).
+    BIBLICHOR_BIN="docker compose ${COMPOSE_ARGS[*]} exec -T biblichor python -m endless_library"
+    LIBRARY_ROOT_ARG="/library"
   else
     BIBLICHOR_BIN=""
+    LIBRARY_ROOT_ARG=""
   fi
   if [[ -n "$BIBLICHOR_BIN" ]]; then
-    BOOKORBIT_URL="$BOOKORBIT_URL" \
-    BOOKORBIT_SETUP_TOKEN="$BOOKORBIT_SETUP_TOKEN" \
-    BOOKORBIT_ADMIN_USER="$BOOKORBIT_ADMIN_USER" \
-    BOOKORBIT_ADMIN_EMAIL="$BOOKORBIT_ADMIN_EMAIL" \
-    BOOKORBIT_ADMIN_NAME="$BOOKORBIT_ADMIN_NAME" \
-    BOOKORBIT_ADMIN_PASSWORD="$BOOKORBIT_ADMIN_PASSWORD" \
-    $BIBLICHOR_BIN bookorbit-setup --library-root "$REPO_ROOT/library" 2>&1 | sed "s|^|  |" || \
+    export BOOKORBIT_URL BOOKORBIT_SETUP_TOKEN BOOKORBIT_ADMIN_USER \
+           BOOKORBIT_ADMIN_EMAIL BOOKORBIT_ADMIN_NAME BOOKORBIT_ADMIN_PASSWORD
+    if $BIBLICHOR_BIN bookorbit-setup --library-root "$LIBRARY_ROOT_ARG" 2>&1 | sed "s|^|  |"; then
+      # Phase 6o.5 (R-M-7): SETUP_BOOTSTRAP_TOKEN has no remaining
+      # attack value after first-use (BookOrbit refuses /auth/setup
+      # afterwards) but rotating it out of .env reduces blast radius
+      # if .env ever leaks. Comment-only; the variable is left in
+      # place but blanked.
+      sed -i "s/^BOOKORBIT_SETUP_TOKEN=.*/BOOKORBIT_SETUP_TOKEN=  # cleared post-bootstrap/" "$ENV_FILE"
+      ok "bookorbit-setup complete; SETUP_BOOTSTRAP_TOKEN cleared from .env"
+    else
       warn "bookorbit-setup failed; re-run manually with: $BIBLICHOR_BIN bookorbit-setup"
+    fi
   else
     warn "biblichor CLI not on PATH and no .venv detected; run manually:"
     warn "  biblichor bookorbit-setup"

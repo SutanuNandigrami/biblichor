@@ -164,8 +164,10 @@ class BookOrbitCfg(BaseModel):
     library directory; @parcel/watcher ingests automatically.
 
     Default disabled so back-compat preserved. Flip enabled=true
-    after running `biblichor bookorbit-setup` (which writes
-    config/bookorbit.json with the library_id).
+    after running `biblichor bookorbit-setup` (which writes the
+    fields below directly into config.yaml — Phase 6m.ii made this
+    the single source of truth; an earlier design used a separate
+    config/bookorbit.json that no longer exists).
     """
 
     enabled: bool = False

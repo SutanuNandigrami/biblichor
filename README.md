@@ -356,7 +356,24 @@ sudo systemctl status biblichor
 
 The two settings files do different things:
 
+### Two `.env` files (Phase 6o.5)
+
+biblichor maintains **two** `.env` files with non-overlapping
+responsibilities:
+
+| File | Purpose | Who writes it |
+|---|---|---|
+| `<repo>/.env` | **docker compose** secrets (`BOOKORBIT_*`, `GMAIL_*`, `KINDLE_EMAIL`, etc). Read by `docker compose --env-file` for variable interpolation in `compose.yml`. | `bootstrap.sh` |
+| `<repo>/config/.env` | **biblichor application** secrets (`SMTP_*`, `KINDLE_EMAIL`, `WELIB_AUTH_COOKIE`, `BOOKORBIT_URL`). Read by `endless_library.config.load_config()` for env-overrides over `config.yaml`. | `biblichor` itself (via `save_config`) |
+
+They overlap on a few keys (`KINDLE_EMAIL`, `BOOKORBIT_URL`) but never
+conflict because the docker-compose env is interpolated into the
+container's process environment, which biblichor then reads via the
+same env-override path. Source of truth: the docker compose `.env`
+for first-run secrets; biblichor's `config/.env` for runtime tuning.
+
 ### `config/.env`
+
 Secret credentials only. Never committed. Read by `load_config()` at startup; `save_config()` writes secrets back here, never into `config.yaml`.
 
 ### `config/config.yaml`
