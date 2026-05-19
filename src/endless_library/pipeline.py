@@ -555,29 +555,6 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
                 kind="error",
                 message=f"metadata enrich failed (non-fatal): {e}",
             )
-        # Push the file into our Calibre library so Calibre-Web shows it
-        try:
-            from endless_library.convert import add_to_calibre_library
-
-            calibre_lib = Path(deps.cfg.general.books_dir).parent / "calibre-library"
-            cb_id = add_to_calibre_library(
-                file_path,
-                library_path=calibre_lib,
-                series=book.series,
-                tags=tags,
-            )
-            if cb_id is not None:
-                deps.events.append(
-                    book_id=book.id,
-                    kind="convert",
-                    message=f"added to Calibre library as id={cb_id}",
-                )
-        except Exception as e:
-            deps.events.append(
-                book_id=book.id,
-                kind="error",
-                message=f"calibre import failed (non-fatal): {e}",
-            )
     # Pre-flight: SMTP size guard. Gmail caps outbound message at ~25 MB
     # which is ~22 MB raw attachment after base64. Rejecting at this stage
     # gives a clear error and lets us try PDF->EPUB rescue first.
