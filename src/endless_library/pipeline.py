@@ -675,6 +675,34 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
     deps.books.set_status(book.id, "sent")
     deps.events.append(book_id=book.id, kind="send", message="sent to kindle")
     deps.notifier.book_sent(book.title, book.author, file_path.suffix.lstrip("."))
+
+    # Phase 6c: hand the enriched file off to BookOrbit. Best-effort —
+    # any failure logs to events but doesn't unwind the Kindle send.
+    if deps.cfg.bookorbit.enabled and deps.cfg.bookorbit.library_root_on_host:
+        try:
+            from endless_library.bookorbit.drop import (
+                BookOrbitDropError,
+                drop_into_library,
+            )
+
+            drop = drop_into_library(
+                file_path,
+                library_root=Path(deps.cfg.bookorbit.library_root_on_host),
+                title=book.title or "",
+                author=book.author,
+                organization_mode=deps.cfg.bookorbit.organization_mode,
+            )
+            deps.events.append(
+                book_id=book.id,
+                kind="bookorbit",
+                message=f"added to library: {drop.target_path.name}",
+            )
+        except BookOrbitDropError as e:
+            deps.events.append(
+                book_id=book.id,
+                kind="error",
+                message=f"bookorbit drop failed (non-fatal): {e}",
+            )
     return "sent"
 
 

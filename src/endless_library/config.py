@@ -154,6 +154,32 @@ class SecurityCfg(BaseModel):
     max_members: int = 50
 
 
+class BookOrbitCfg(BaseModel):
+    """BookOrbit integration (Phase 6).
+
+    BookOrbit is biblichor's library frontend — it owns reader, Kobo
+    sync, KOReader two-way, OPDS, statistics. biblichor stays the
+    acquisition pipeline. After every successful Kindle send, the
+    pipeline copies the enriched file into BookOrbit's watched
+    library directory; @parcel/watcher ingests automatically.
+
+    Default disabled so back-compat preserved. Flip enabled=true
+    after running `biblichor bookorbit-setup` (which writes
+    config/bookorbit.json with the library_id).
+    """
+
+    enabled: bool = False
+    # Host path that BookOrbit sees as /books. Files dropped here are
+    # ingested via the BookOrbit scanner.
+    library_root_on_host: str = ""
+    # "book_per_folder" (default in BookOrbit) -> <author>/<title>/<file>
+    # "book_per_file" -> flat
+    organization_mode: str = "book_per_folder"
+    # Path to the JSON file ensure_bookorbit_ready() writes — used by
+    # the migration CLI; pipeline itself doesn't need it.
+    config_json_path: str = "config/bookorbit.json"
+
+
 class StorageCfg(BaseModel):
     """Pluggable blob storage. Default is `local`, which behaves
     exactly like pre-Phase-4 biblichor.
@@ -189,6 +215,7 @@ class Config(BaseModel):
     scoring: ScoringCfg = ScoringCfg()
     security: SecurityCfg = SecurityCfg()
     storage: StorageCfg = StorageCfg()
+    bookorbit: BookOrbitCfg = BookOrbitCfg()
 
     def public_view(self) -> dict:
         d = self.model_dump()
