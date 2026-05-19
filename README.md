@@ -372,7 +372,39 @@ container's process environment, which biblichor then reads via the
 same env-override path. Source of truth: the docker compose `.env`
 for first-run secrets; biblichor's `config/.env` for runtime tuning.
 
+### Enabling BookOrbit metadata providers (optional)
+
+BookOrbit ships with 9 metadata providers (Goodreads, OpenLibrary,
+Hardcover, Google Books, Amazon, iTunes, Audible, AudNexus,
+ComicVine) but every one is **disabled by default** and requires
+user-supplied API credentials. biblichor deliberately does NOT
+enable them programmatically — but you can turn them on in
+BookOrbit's UI for richer cover art, series ordering, and
+descriptions on books that biblichor's own enrichment couldn't
+populate.
+
+**Critical:** if you enable any metadata provider, set the field
+rule to **"Fill missing only"** (BookOrbit Settings → Metadata
+Preferences). The default ("Overwrite if provided") will silently
+clobber the Bengali / CJK / Cyrillic titles biblichor wrote during
+Phase X.ii enrichment, because providers like Goodreads only have
+Latin transliterations of those titles.
+
+Recommended provider opt-in:
+- **Goodreads** + **OpenLibrary** — best coverage, no API key
+  needed for OpenLibrary, Goodreads needs a free account
+- **Hardcover** — best for newer / indie books
+- **Skip Amazon + iTunes** unless you read mainstream English
+  bestsellers; their data is biased and they'''re the only ones
+  that demand an Amazon/Apple ID
+
+biblichor sets a per-library **auto-scan cron (`0 * * * *`)** on
+first-run bookorbit-setup. The watcher catches every real-time
+drop; the hourly cron is belt-and-braces for missed events on
+network shares or during container restarts.
+
 ### `config/.env`
+
 
 Secret credentials only. Never committed. Read by `load_config()` at startup; `save_config()` writes secrets back here, never into `config.yaml`.
 

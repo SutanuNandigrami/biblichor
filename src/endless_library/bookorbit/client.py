@@ -109,17 +109,21 @@ class BookOrbitClient:
         folders: list[str],
         watch: bool = True,
         organization_mode: str = "book_per_folder",
+        auto_scan_cron_expression: str | None = None,
     ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "name": name,
+            "icon": icon,
+            "folders": folders,
+            "watch": watch,
+            "organizationMode": organization_mode,
+        }
+        if auto_scan_cron_expression:
+            body["autoScanCronExpression"] = auto_scan_cron_expression
         r = self._client.post(
             "/api/v1/libraries",
             headers=self._auth_headers(),
-            json={
-                "name": name,
-                "icon": icon,
-                "folders": folders,
-                "watch": watch,
-                "organizationMode": organization_mode,
-            },
+            json=body,
         )
         if r.status_code not in (200, 201):
             raise BookOrbitError(f"create library ({r.status_code}): {r.text[:300]}")

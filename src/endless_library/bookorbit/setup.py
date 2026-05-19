@@ -86,12 +86,17 @@ def ensure_bookorbit_ready(
             log.info("bookorbit: reusing existing library id=%s", library_id)
         else:
             log.info("bookorbit: creating library %s -> %s", DEFAULT_LIBRARY_NAME, library_mount)
+            # Phase 6o.6 (D-2): hourly auto-scan cron in addition to the
+            # @parcel/watcher. The watcher catches all real-time drops, but
+            # the cron is belt-and-braces for cases where the watcher misses
+            # an event (network shares, container restarts mid-write, etc).
             created = client.create_library(
                 name=DEFAULT_LIBRARY_NAME,
                 icon=DEFAULT_LIBRARY_ICON,
                 folders=[library_mount],
                 watch=True,
                 organization_mode="book_per_folder",
+                auto_scan_cron_expression="0 * * * *",  # hourly
             )
             library_id = created["id"]
 
