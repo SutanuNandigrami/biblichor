@@ -57,6 +57,20 @@ async def _lifespan(app: FastAPI):
             "run `biblichor bookorbit-setup` to wire the pipeline integration",
             cfg.bookorbit.url,
         )
+
+    # Phase 6o.2 (C-1): warn at startup if bookorbit is enabled but
+    # library_root doesn't exist inside this process. Catches the host-
+    # vs-container path mismatch the live cutover almost shipped.
+    if cfg.bookorbit.enabled and cfg.bookorbit.library_root:
+        from pathlib import Path as _Path
+
+        if not _Path(cfg.bookorbit.library_root).exists():
+            log.warning(
+                "bookorbit: library_root=%r does not exist in this process — "
+                "books will NOT land in BookOrbit. Re-run `biblichor bookorbit-setup` "
+                "from the correct context (e.g. `docker compose exec biblichor ...`).",
+                cfg.bookorbit.library_root,
+            )
     try:
         yield
     finally:

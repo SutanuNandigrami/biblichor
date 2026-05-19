@@ -172,9 +172,14 @@ class BookOrbitCfg(BaseModel):
     # External URL biblichor's SPA links to. Falls back to
     # http://localhost:3000 if not set. Override via BOOKORBIT_URL.
     url: str = ""
-    # Host path that BookOrbit sees as /books. Files dropped here are
-    # ingested via the BookOrbit scanner.
-    library_root_on_host: str = ""
+    # Path biblichor SEES the BookOrbit-watched library at. In a docker
+    # compose deployment this is the container-internal mount point
+    # (default: /library). In a native deployment this is the host
+    # path biblichor was launched from. Pre-Phase 6o.2 this field
+    # was named library_root_on_host — the rename clarifies that the
+    # value isn't always a host path. Setup writes the right value
+    # depending on how it's invoked.
+    library_root: str = ""
     # "book_per_folder" (default in BookOrbit) -> <author>/<title>/<file>
     # "book_per_file" -> flat
     organization_mode: str = "book_per_folder"

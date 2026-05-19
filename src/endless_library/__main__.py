@@ -548,7 +548,11 @@ def cmd_bookorbit_setup(args):
             print("password must be at least 8 chars", file=sys.stderr)
             return 1
 
-    library_root = args.library_root or str(Path(cfg.general.books_dir).resolve())
+    # Phase 6o.2 (C-1): default the library_root to the container-internal
+    # /library when invoked via `docker compose exec biblichor` (the canonical
+    # docker-deployment path). For native deployments + manual host invocations,
+    # the user can pass --library-root explicitly.
+    library_root = args.library_root or "/library"
 
     try:
         result = ensure_bookorbit_ready(
@@ -558,7 +562,7 @@ def cmd_bookorbit_setup(args):
             admin_name=admin_name,
             admin_email=admin_email,
             admin_password=admin_password,
-            library_root_on_host=library_root,
+            library_root=library_root,
             biblichor_config_yaml_path=config_path,
         )
     except BookOrbitError as e:
@@ -571,7 +575,7 @@ def cmd_bookorbit_setup(args):
     else:
         print(f"BookOrbit admin already exists; using existing account ({admin_email})")
     print(f"library id:   {result.library_id}")
-    print(f"library root: {library_root} -> /books (mounted)")
+    print(f"library root: {library_root}  (path biblichor sees; in container = /library)")
     if result.config_yaml_updated:
         print(f"biblichor config.yaml: bookorbit integration enabled at {result.config_yaml_path}")
     else:

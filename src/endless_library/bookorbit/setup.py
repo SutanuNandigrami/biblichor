@@ -45,15 +45,18 @@ def ensure_bookorbit_ready(
     admin_name: str,
     admin_email: str,
     admin_password: str,
-    library_root_on_host: str,
+    library_root: str,
     biblichor_config_yaml_path: Path,
     library_mount: str = DEFAULT_LIBRARY_MOUNT,
 ) -> SetupResult:
     """First-run bootstrap or no-op resume.
 
-    `library_root_on_host` is the host directory mounted at
-    `library_mount` inside the bookorbit container. Persisted in
-    config.yaml so the pipeline knows where to drop files on the host.
+    `library_root` is the path biblichor SEES the BookOrbit-watched
+    library at. In a docker compose deployment this is the
+    container-internal mount point (default: /library); the host path
+    is irrelevant to the pipeline. In a native deployment this is the
+    host path biblichor was launched from. Caller picks the right
+    value.
     """
     with BookOrbitClient(url) as client:
         status = client.setup_status()
@@ -94,13 +97,23 @@ def ensure_bookorbit_ready(
 
     # Always update config.yaml — this is the single source of truth.
     # Only writes if any field differs (keeps mtime stable on no-op reruns).
-    from endless_library.config import load_config, save_config
+    # Phase 6o.2 (I-3): handle missing yaml gracefully — create a default
+    # Config() instead of raising on a fresh install.
+    from endless_library.config import Config, load_config, save_config
 
-    cfg = load_config(biblichor_config_yaml_path)
+    if biblichor_config_yaml_path.exists():
+        cfg = load_config(biblichor_config_yaml_path)
+    else:
+        log.info(
+            "biblichor config.yaml not found at %s; creating fresh",
+            biblichor_config_yaml_path,
+        )
+        biblichor_config_yaml_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg = Config()
     library_id_str = str(library_id)
     fields_changed = (
         not cfg.bookorbit.enabled
-        or cfg.bookorbit.library_root_on_host != library_root_on_host
+        or cfg.bookorbit.library_root != library_root
         or cfg.bookorbit.organization_mode != "book_per_folder"
         or cfg.bookorbit.library_id != library_id_str
         or (url and cfg.bookorbit.url != url)
@@ -108,7 +121,7 @@ def ensure_bookorbit_ready(
     if fields_changed:
         cfg.bookorbit.enabled = True
         cfg.bookorbit.url = url
-        cfg.bookorbit.library_root_on_host = library_root_on_host
+        cfg.bookorbit.library_root = library_root
         cfg.bookorbit.organization_mode = "book_per_folder"
         cfg.bookorbit.library_id = library_id_str
         save_config(cfg, biblichor_config_yaml_path)

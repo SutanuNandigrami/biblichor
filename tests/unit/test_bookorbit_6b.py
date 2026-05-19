@@ -162,7 +162,7 @@ def test_ensure_creates_admin_and_library_on_first_run(respx_mock, tmp_path):
         admin_name="Admin",
         admin_email="a@x.com",
         admin_password="Password1",
-        library_root_on_host="/var/lib/biblichor/library",
+        library_root="/var/lib/biblichor/library",
         biblichor_config_yaml_path=cfg_yaml,
     )
     assert result.just_created is True
@@ -202,7 +202,7 @@ def test_ensure_idempotent_on_second_run(respx_mock, tmp_path):
         admin_name="Admin",
         admin_email="a@x.com",
         admin_password="Password1",
-        library_root_on_host="/var/lib/biblichor/library",
+        library_root="/var/lib/biblichor/library",
         biblichor_config_yaml_path=cfg_yaml,
     )
     assert result.just_created is False

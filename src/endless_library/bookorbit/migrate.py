@@ -24,6 +24,7 @@ from pathlib import Path
 
 from endless_library.bookorbit.drop import (
     BookOrbitDropError,
+    compute_target_path,
     drop_into_library,
 )
 
@@ -108,18 +109,18 @@ def migrate_calibre_to_bookorbit(
         raw_title = book_dir.name
         title = raw_title.rsplit(" (", 1)[0] if raw_title.endswith(")") else raw_title
 
-        # Phase 6m.ii: real pre-drop skip. Compute the destination path
-        # the same way drop_into_library does so we can short-circuit
-        # before any I/O when the file already exists with matching
-        # size. BookOrbit's hash dedup would also catch duplicates on
-        # ingest, but this avoids the copy IO entirely.
-        from endless_library.download import safe_filename
-
-        if organization_mode == "book_per_folder":
-            target_dir = bookorbit_library_root / safe_filename(author) / safe_filename(title)
-        else:
-            target_dir = bookorbit_library_root
-        target_path = target_dir / safe_filename(canonical.name)
+        # Phase 6o.2: shared compute_target_path is the single source
+        # of layout truth. If a same-size file already exists at the
+        # target we skip the I/O entirely (BookOrbit's hash dedup
+        # would still catch the duplicate on ingest, but skipping
+        # avoids pointless reads/writes for large migrations).
+        target_path = compute_target_path(
+            library_root=bookorbit_library_root,
+            title=title,
+            author=author,
+            file_basename=canonical.name,
+            organization_mode=organization_mode,
+        )
         if target_path.exists() and target_path.stat().st_size == canonical.stat().st_size:
             result.skipped_existing += 1
             if on_progress:

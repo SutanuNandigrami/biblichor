@@ -5,7 +5,7 @@ Three contracts pinned:
      config path is provided.
   2. Re-running is a no-op on config.yaml when nothing changed.
   3. Pipeline integration test: with bookorbit.enabled=true and a
-     library_root_on_host, the pipeline successful-send path triggers
+     library_root, the pipeline successful-send path triggers
      drop_into_library. (This is the regression that L1 / L5 plugged.)
 """
 
@@ -46,7 +46,7 @@ def _mocked_setup_endpoints(respx_mock):
 def test_setup_enables_bookorbit_in_config_yaml(respx_mock, tmp_path):
     """The exact bug L1 caught: pipeline reads from config.yaml but
     setup only wrote to bookorbit.json. After this fix, config.yaml
-    gets enabled=true + library_root_on_host populated."""
+    gets enabled=true + library_root populated."""
     _mocked_setup_endpoints(respx_mock)
 
     # Seed a config.yaml with bookorbit disabled (the default state)
@@ -56,7 +56,7 @@ def test_setup_enables_bookorbit_in_config_yaml(respx_mock, tmp_path):
     # Sanity: starts disabled, library_root empty
     loaded = load_config(cfg_yaml)
     assert loaded.bookorbit.enabled is False
-    assert loaded.bookorbit.library_root_on_host == ""
+    assert loaded.bookorbit.library_root == ""
 
     result = ensure_bookorbit_ready(
         url=BASE,
@@ -65,7 +65,7 @@ def test_setup_enables_bookorbit_in_config_yaml(respx_mock, tmp_path):
         admin_name="Admin",
         admin_email="admin@x.com",
         admin_password="Password1",
-        library_root_on_host="/var/lib/biblichor/library",
+        library_root="/var/lib/biblichor/library",
         biblichor_config_yaml_path=cfg_yaml,
     )
     assert result.config_yaml_updated is True
@@ -74,7 +74,7 @@ def test_setup_enables_bookorbit_in_config_yaml(respx_mock, tmp_path):
     # Reload and verify the pipeline-facing fields are now wired
     reloaded = load_config(cfg_yaml)
     assert reloaded.bookorbit.enabled is True
-    assert reloaded.bookorbit.library_root_on_host == "/var/lib/biblichor/library"
+    assert reloaded.bookorbit.library_root == "/var/lib/biblichor/library"
     assert reloaded.bookorbit.organization_mode == "book_per_folder"
 
 
@@ -95,7 +95,7 @@ def test_setup_is_idempotent_on_config_yaml(respx_mock, tmp_path):
     cfg = Config()
     cfg.bookorbit.enabled = True
     cfg.bookorbit.url = BASE
-    cfg.bookorbit.library_root_on_host = "/var/lib/biblichor/library"
+    cfg.bookorbit.library_root = "/var/lib/biblichor/library"
     cfg.bookorbit.organization_mode = "book_per_folder"
     cfg.bookorbit.library_id = "lib-1"
     save_config(cfg, cfg_yaml)
@@ -108,7 +108,7 @@ def test_setup_is_idempotent_on_config_yaml(respx_mock, tmp_path):
         admin_name="Admin",
         admin_email="admin@x.com",
         admin_password="Password1",
-        library_root_on_host="/var/lib/biblichor/library",
+        library_root="/var/lib/biblichor/library",
         biblichor_config_yaml_path=cfg_yaml,
     )
     assert result.config_yaml_updated is False
@@ -132,7 +132,7 @@ def test_setup_always_persists_to_config_yaml(respx_mock, tmp_path):
         admin_name="Admin",
         admin_email="admin@x.com",
         admin_password="Password1",
-        library_root_on_host="/var/lib/biblichor/library",
+        library_root="/var/lib/biblichor/library",
         biblichor_config_yaml_path=cfg_yaml,
     )
     assert result.config_yaml_updated is True
@@ -147,7 +147,7 @@ def test_setup_always_persists_to_config_yaml(respx_mock, tmp_path):
 
 
 def test_pipeline_drop_fires_when_bookorbit_configured(tmp_path):
-    """End-to-end: with bookorbit.enabled=true + library_root_on_host
+    """End-to-end: with bookorbit.enabled=true + library_root
     set, the pipeline's successful-send path calls drop_into_library.
 
     L5 was the original gap: drop_into_library was tested in isolation
@@ -157,7 +157,7 @@ def test_pipeline_drop_fires_when_bookorbit_configured(tmp_path):
     # Setup: build a Cfg with bookorbit enabled
     cfg = Config()
     cfg.bookorbit.enabled = True
-    cfg.bookorbit.library_root_on_host = str(tmp_path / "library")
+    cfg.bookorbit.library_root = str(tmp_path / "library")
     cfg.bookorbit.organization_mode = "book_per_folder"
     (tmp_path / "library").mkdir()
 
@@ -205,7 +205,7 @@ def test_pipeline_drop_fires_when_bookorbit_configured(tmp_path):
         deps.books.set_status(book.id, "sent")
         deps.events.append(book_id=book.id, kind="send", message="sent to kindle")
         deps.notifier.book_sent(book.title, book.author, file_path.suffix.lstrip("."))
-        if deps.cfg.bookorbit.enabled and deps.cfg.bookorbit.library_root_on_host:
+        if deps.cfg.bookorbit.enabled and deps.cfg.bookorbit.library_root:
             try:
                 from endless_library.bookorbit.drop import (
                     BookOrbitDropError,
@@ -214,7 +214,7 @@ def test_pipeline_drop_fires_when_bookorbit_configured(tmp_path):
 
                 drop = drop_into_library(
                     file_path,
-                    library_root=Path(deps.cfg.bookorbit.library_root_on_host),
+                    library_root=Path(deps.cfg.bookorbit.library_root),
                     title=book.title or "",
                     author=book.author,
                     organization_mode=deps.cfg.bookorbit.organization_mode,
@@ -254,17 +254,17 @@ def test_pipeline_drop_skipped_when_bookorbit_disabled(tmp_path):
 
     with patch.object(drop_mod, "drop_into_library", fake_drop):
         # The pipeline condition: enabled=False -> drop is never called
-        if cfg.bookorbit.enabled and cfg.bookorbit.library_root_on_host:
+        if cfg.bookorbit.enabled and cfg.bookorbit.library_root:
             drop_mod.drop_into_library(tmp_path / "x", library_root=tmp_path, title="t", author="a")
     assert calls == []
 
 
 def test_pipeline_drop_skipped_when_library_root_empty(tmp_path):
-    """L1 specifically: enabled=True but library_root_on_host empty must
+    """L1 specifically: enabled=True but library_root empty must
     also be a no-op (failsafe — don't blast files into pwd)."""
     cfg = Config()
     cfg.bookorbit.enabled = True
-    cfg.bookorbit.library_root_on_host = ""  # the L1 bug state
+    cfg.bookorbit.library_root = ""  # the L1 bug state
 
-    # The pipeline conjunction: enabled AND library_root_on_host
-    assert not (cfg.bookorbit.enabled and cfg.bookorbit.library_root_on_host)
+    # The pipeline conjunction: enabled AND library_root
+    assert not (cfg.bookorbit.enabled and cfg.bookorbit.library_root)
