@@ -25,12 +25,7 @@ def _get_enrich_gating_line() -> str:
     src = inspect.getsource(pipeline)
     # Find the line with the format-extension set used before enrich_metadata
     for line in src.splitlines():
-        if (
-            'file_path.suffix' in line
-            and 'in {' in line
-            and '.epub' in line
-            and '.mobi' in line
-        ):
+        if "file_path.suffix" in line and "in {" in line and ".epub" in line and ".mobi" in line:
             return line
     return ""
 
@@ -98,6 +93,7 @@ def test_enrich_metadata_writes_pdf_title(tmp_path):
     if src is None:
         # No real PDF available in CI — skip the functional half.
         import pytest
+
         pytest.skip("no real PDF available for functional enrich test")
 
     dst = tmp_path / "test.pdf"
@@ -107,9 +103,7 @@ def test_enrich_metadata_writes_pdf_title(tmp_path):
     enrich_metadata(dst, title="ঘনাদা সমগ্র ১", author="Premendra Mitra")
 
     # Read it back via ebook-meta
-    out = subprocess.run(
-        ["ebook-meta", str(dst)], capture_output=True, text=True, timeout=30
-    )
+    out = subprocess.run(["ebook-meta", str(dst)], capture_output=True, text=True, timeout=30)
     assert out.returncode == 0
     # The Bengali title must round-trip
     assert "ঘনাদা সমগ্র ১" in out.stdout, f"Bengali title lost: {out.stdout[:300]}"

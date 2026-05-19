@@ -105,4 +105,3 @@ def enrich_metadata(
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "")[-500:]
         raise ConvertError(f"ebook-meta exit {proc.returncode}: {tail}")
-

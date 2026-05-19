@@ -80,9 +80,7 @@ class RcloneStore:
         # `rclone copyto src dst` overwrites; `rclone copy` treats dst as a dir
         proc = self._run(["copyto", str(local_path), target])
         if proc.returncode != 0:
-            raise StorageError(
-                f"rclone copyto failed: {(proc.stderr or proc.stdout)[-400:]}"
-            )
+            raise StorageError(f"rclone copyto failed: {(proc.stderr or proc.stdout)[-400:]}")
 
     def get(self, remote_key: str, local_path: Path) -> None:
         # First check existence so we can raise KeyNotFound rather than
@@ -93,9 +91,7 @@ class RcloneStore:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         proc = self._run(["copyto", self._remote_path(remote_key), str(local_path)])
         if proc.returncode != 0:
-            raise StorageError(
-                f"rclone copyto failed: {(proc.stderr or proc.stdout)[-400:]}"
-            )
+            raise StorageError(f"rclone copyto failed: {(proc.stderr or proc.stdout)[-400:]}")
 
     def exists(self, remote_key: str) -> bool:
         # `rclone lsf --files-only` returns lines for matching objects.
@@ -116,8 +112,10 @@ class RcloneStore:
             raise StorageError(f"rclone deletefile failed: {(proc.stderr or proc.stdout)[-400:]}")
 
     def list(self, prefix: str = "") -> Iterator[str]:
-        scope = self._remote_path(prefix) if prefix else (
-            f"{self.remote}:{self.bucket_path}" if self.bucket_path else f"{self.remote}:"
+        scope = (
+            self._remote_path(prefix)
+            if prefix
+            else (f"{self.remote}:{self.bucket_path}" if self.bucket_path else f"{self.remote}:")
         )
         proc = self._run(["lsf", "-R", "--files-only", scope])
         if proc.returncode != 0:

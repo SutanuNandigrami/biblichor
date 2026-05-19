@@ -52,7 +52,9 @@ class HybridStore:
         except StorageError as e:
             log.warning(
                 "hybrid backup put failed for %s (key=%s): %s — primary OK",
-                self.backup.name, remote_key, e,
+                self.backup.name,
+                remote_key,
+                e,
             )
 
     def get(self, remote_key: str, local_path: Path) -> None:

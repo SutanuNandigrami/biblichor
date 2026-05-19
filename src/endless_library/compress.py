@@ -64,7 +64,8 @@ def compress_pdf(
     dst = src.with_suffix(".opt.pdf")
     cmd = [
         ocrmypdf_bin,
-        "--optimize", "3",
+        "--optimize",
+        "3",
         "--skip-text",
         "--jbig2-lossy",
         "--quiet",
@@ -95,9 +96,7 @@ def compress_pdf(
     if dst_size >= src_size:
         # No win — discard
         dst.unlink(missing_ok=True)
-        raise CompressError(
-            f"output not smaller: {src_size} -> {dst_size}"
-        )
+        raise CompressError(f"output not smaller: {src_size} -> {dst_size}")
     return dst
 
 
@@ -169,9 +168,10 @@ def compress_epub(
     saved_bytes = 0
     src_size = src.stat().st_size
     try:
-        with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(
-            dst, "w", zipfile.ZIP_DEFLATED, compresslevel=9
-        ) as zout:
+        with (
+            zipfile.ZipFile(src, "r") as zin,
+            zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zout,
+        ):
             for info in zin.infolist():
                 blob = zin.read(info.filename)
                 ext = Path(info.filename).suffix.lower()

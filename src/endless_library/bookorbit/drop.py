@@ -74,6 +74,8 @@ def drop_into_library(
 
     log.info(
         "bookorbit: dropped %s -> %s (%d bytes)",
-        src_path.name, target.relative_to(library_root), target.stat().st_size,
+        src_path.name,
+        target.relative_to(library_root),
+        target.stat().st_size,
     )
     return DropResult(target_path=target, bytes_written=target.stat().st_size)

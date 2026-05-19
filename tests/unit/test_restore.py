@@ -163,9 +163,8 @@ def test_restore_rejects_schema_version_mismatch(world, tmp_path):
     work = tmp_path / "work"
     work.mkdir()
     import subprocess
-    proc = subprocess.run(
-        ["zstd", "-d", "-c", str(archive_local)], capture_output=True
-    )
+
+    proc = subprocess.run(["zstd", "-d", "-c", str(archive_local)], capture_output=True)
     tar_blob = proc.stdout
     import io
     import tarfile as _tar

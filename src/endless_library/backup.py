@@ -227,9 +227,7 @@ def make_backup(
         # 4. Library (optional, can be huge)
         if library_dir and library_dir.exists():
             log.info("backup: copying library from %s", library_dir)
-            shutil.copytree(
-                library_dir, staging / "library", dirs_exist_ok=True
-            )
+            shutil.copytree(library_dir, staging / "library", dirs_exist_ok=True)
 
         # 4b. Postgres dump (Phase 6g) — captures BookOrbit's entire
         # state (users, libraries, sync, audit, etc.) into postgres.sql.
@@ -254,9 +252,7 @@ def make_backup(
         # 4c. BookOrbit data dir (covers + book-bucket)
         if bookorbit_data_dir and bookorbit_data_dir.exists():
             log.info("backup: copying bookorbit data from %s", bookorbit_data_dir)
-            shutil.copytree(
-                bookorbit_data_dir, staging / "bookorbit-data", dirs_exist_ok=True
-            )
+            shutil.copytree(bookorbit_data_dir, staging / "bookorbit-data", dirs_exist_ok=True)
 
         # 5. Manifest LAST so it includes everyone else's checksums
         manifest = _build_manifest(staging)

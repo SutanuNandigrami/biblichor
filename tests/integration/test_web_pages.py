@@ -38,6 +38,7 @@ def test_healthz(client):
     # Rebuild a client inside a `with` so FastAPI lifespan fires
     from endless_library.app import create_app
     from endless_library.config import Config, save_config
+
     cfg = Config()
     cfg.scrapers.order = ["annas_curl"]
     cfg.scrapers.enabled = {"annas_curl": True}

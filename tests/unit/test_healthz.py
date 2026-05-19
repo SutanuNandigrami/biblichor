@@ -141,7 +141,9 @@ def test_healthz_body_always_contains_documented_fields(healthy_db: Path):
     # Unhealthy path
     app_bad = _build_app(db_path=healthy_db, scheduler_running=False)
     body_bad = TestClient(app_bad).get("/healthz").json()
-    assert set(body_bad.keys()) >= REQUIRED_KEYS, f"missing keys: {REQUIRED_KEYS - set(body_bad.keys())}"
+    assert set(body_bad.keys()) >= REQUIRED_KEYS, (
+        f"missing keys: {REQUIRED_KEYS - set(body_bad.keys())}"
+    )
 
 
 def test_healthz_scrapers_count_matches_registry(healthy_db: Path):

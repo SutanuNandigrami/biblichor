@@ -103,8 +103,18 @@ def test_book_detail_response_shape(client_with_book):
     body = r.json()
     assert "book" in body and "candidates" in body and "events" in body
     cand = body["candidates"][0]
-    REQUIRED = {"id", "provider", "md5", "title", "format", "filesize_bytes",
-                "language", "score", "detail_url", "mirror"}
+    REQUIRED = {
+        "id",
+        "provider",
+        "md5",
+        "title",
+        "format",
+        "filesize_bytes",
+        "language",
+        "score",
+        "detail_url",
+        "mirror",
+    }
     assert set(cand.keys()) >= REQUIRED, f"regressed: missing {REQUIRED - set(cand.keys())}"
 
 
@@ -124,15 +134,23 @@ def test_score_breakdown_is_safe_on_corrupt_raw_json(tmp_path: Path):
     deps = PipelineDeps.build(cfg=cfg, db_path=db)
     cfg_path = tmp_path / "config.yaml"
     save_config(cfg, cfg_path)
-    book_id = deps.books.upsert(
-        title="x", author="y", isbn13=None, source="manual", source_id=None
-    )
+    book_id = deps.books.upsert(title="x", author="y", isbn13=None, source="manual", source_id=None)
     # Insert with broken raw_json
     deps.cands.insert(
-        book_id=book_id, provider="annas", md5="b" * 32, title="x", author="y",
-        language="en", format="epub", filesize_bytes=1000, year=None,
-        publisher=None, edition_hints="", score=10.0,
-        detail_url="x", raw_json="not json {{",
+        book_id=book_id,
+        provider="annas",
+        md5="b" * 32,
+        title="x",
+        author="y",
+        language="en",
+        format="epub",
+        filesize_bytes=1000,
+        year=None,
+        publisher=None,
+        edition_hints="",
+        score=10.0,
+        detail_url="x",
+        raw_json="not json {{",
     )
     app = create_app(cfg=cfg, deps=deps, config_path=cfg_path)
     c = TestClient(app)

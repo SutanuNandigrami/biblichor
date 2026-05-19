@@ -25,7 +25,7 @@ def test_override_auto_picks_when_isbn_and_title_match_even_with_low_total():
     but identity signals are rock-solid (ISBN matched, title sim 0.95).
     Previously -> needs_review. Now -> auto."""
     d = decide_auto_pick(
-        top=55.0,           # below threshold 70
+        top=55.0,  # below threshold 70
         second=10.0,
         threshold=70.0,
         gap=10.0,
@@ -44,8 +44,8 @@ def test_override_does_not_fire_without_isbn_match():
         second=10.0,
         threshold=70.0,
         gap=10.0,
-        top_isbn_matched=False,        # no ISBN
-        top_title_similarity=1.00,     # perfect title
+        top_isbn_matched=False,  # no ISBN
+        top_title_similarity=1.00,  # perfect title
     )
     assert d == "needs_review"
 
@@ -59,7 +59,7 @@ def test_override_does_not_fire_below_similarity_threshold():
         threshold=70.0,
         gap=10.0,
         top_isbn_matched=True,
-        top_title_similarity=0.85,    # below 0.92
+        top_title_similarity=0.85,  # below 0.92
     )
     assert d == "needs_review"
 
@@ -96,7 +96,7 @@ def test_override_does_not_rescue_below_min_score_for_failure():
     means the candidate is so broken (huge filesize, audio-flagged, etc.)
     that we should NOT try to download it. Fail outright."""
     d = decide_auto_pick(
-        top=20.0,                      # below floor 40
+        top=20.0,  # below floor 40
         second=0.0,
         threshold=70.0,
         gap=10.0,

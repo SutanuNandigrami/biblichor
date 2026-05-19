@@ -63,9 +63,7 @@ def test_setup_admin_raises_clear_error_on_failure(respx_mock):
         return_value=httpx.Response(403, text="setup token mismatch")
     )
     with BookOrbitClient(BASE) as c, pytest.raises(BookOrbitError, match="setup failed"):
-        c.setup_admin(
-            token="bad", username="x", name="x", email="x@x.com", password="Password1"
-        )
+        c.setup_admin(token="bad", username="x", name="x", email="x@x.com", password="Password1")
 
 
 @respx.mock(base_url=BASE)
@@ -128,9 +126,7 @@ def test_trigger_scan_accepts_202(respx_mock):
     respx_mock.post("/api/v1/auth/login").mock(
         return_value=httpx.Response(200, json={"accessToken": "j"})
     )
-    respx_mock.post("/api/v1/scanner/libraries/lib-1/scan").mock(
-        return_value=httpx.Response(202)
-    )
+    respx_mock.post("/api/v1/scanner/libraries/lib-1/scan").mock(return_value=httpx.Response(202))
     with BookOrbitClient(BASE) as c:
         c.login(username="admin", password="x")
         c.trigger_scan("lib-1")
@@ -147,15 +143,11 @@ def test_ensure_creates_admin_and_library_on_first_run(respx_mock, tmp_path):
     respx_mock.get("/api/v1/auth/setup-status").mock(
         return_value=httpx.Response(200, json={"needsSetup": True})
     )
-    respx_mock.post("/api/v1/auth/setup").mock(
-        return_value=httpx.Response(201, json={"id": "u1"})
-    )
+    respx_mock.post("/api/v1/auth/setup").mock(return_value=httpx.Response(201, json={"id": "u1"}))
     respx_mock.post("/api/v1/auth/login").mock(
         return_value=httpx.Response(200, json={"accessToken": "j"})
     )
-    respx_mock.get("/api/v1/libraries").mock(
-        return_value=httpx.Response(200, json=[])
-    )
+    respx_mock.get("/api/v1/libraries").mock(return_value=httpx.Response(200, json=[]))
     respx_mock.post("/api/v1/libraries").mock(
         return_value=httpx.Response(201, json={"id": "lib-new"})
     )
@@ -191,18 +183,14 @@ def test_ensure_idempotent_on_second_run(respx_mock, tmp_path):
     respx_mock.get("/api/v1/auth/setup-status").mock(
         return_value=httpx.Response(200, json={"needsSetup": False})
     )
-    setup_route = respx_mock.post("/api/v1/auth/setup").mock(
-        return_value=httpx.Response(409)
-    )
+    setup_route = respx_mock.post("/api/v1/auth/setup").mock(return_value=httpx.Response(409))
     respx_mock.post("/api/v1/auth/login").mock(
         return_value=httpx.Response(200, json={"accessToken": "j"})
     )
     respx_mock.get("/api/v1/libraries").mock(
         return_value=httpx.Response(200, json=[{"id": "lib-existing", "name": "biblichor"}])
     )
-    create_route = respx_mock.post("/api/v1/libraries").mock(
-        return_value=httpx.Response(500)
-    )
+    create_route = respx_mock.post("/api/v1/libraries").mock(return_value=httpx.Response(500))
 
     cfg_yaml = tmp_path / "config.yaml"
     save_config(Config(), cfg_yaml)

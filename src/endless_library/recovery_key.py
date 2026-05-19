@@ -68,9 +68,7 @@ def ensure_recovery_key(secrets_dir: Path) -> RecoveryKey:
         check=False,
     )
     if proc.returncode != 0:
-        raise RecoveryKeyError(
-            f"age-keygen failed: {(proc.stderr or proc.stdout)[-400:]}"
-        )
+        raise RecoveryKeyError(f"age-keygen failed: {(proc.stderr or proc.stdout)[-400:]}")
     # Lock down the file so other local users can't read the private key.
     os.chmod(key_path, 0o600)
     pubkey = _extract_public(key_path)
@@ -84,16 +82,14 @@ def ensure_recovery_key(secrets_dir: Path) -> RecoveryKey:
 
 def _extract_public(key_path: Path) -> str:
     """age-keygen output has the form:
-        # created: ...
-        # public key: age1...
-        AGE-SECRET-KEY-1...
+    # created: ...
+    # public key: age1...
+    AGE-SECRET-KEY-1...
     """
     for line in key_path.read_text().splitlines():
         if line.startswith("# public key:"):
             return line.split(":", 1)[1].strip()
-    raise RecoveryKeyError(
-        f"could not find public key line in {key_path}"
-    )
+    raise RecoveryKeyError(f"could not find public key line in {key_path}")
 
 
 STORE_THIS_BANNER = """

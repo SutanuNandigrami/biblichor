@@ -40,6 +40,7 @@ class _FakeClient:
         class _H:
             status_code = 200
             headers: dict = {}  # noqa: RUF012
+
         return _H()
 
     @contextmanager

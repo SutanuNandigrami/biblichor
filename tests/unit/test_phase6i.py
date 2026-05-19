@@ -29,15 +29,11 @@ def _mocked_setup_endpoints(respx_mock):
     respx_mock.get("/api/v1/auth/setup-status").mock(
         return_value=httpx.Response(200, json={"needsSetup": True})
     )
-    respx_mock.post("/api/v1/auth/setup").mock(
-        return_value=httpx.Response(201, json={"id": "u1"})
-    )
+    respx_mock.post("/api/v1/auth/setup").mock(return_value=httpx.Response(201, json={"id": "u1"}))
     respx_mock.post("/api/v1/auth/login").mock(
         return_value=httpx.Response(200, json={"accessToken": "j"})
     )
-    respx_mock.get("/api/v1/libraries").mock(
-        return_value=httpx.Response(200, json=[])
-    )
+    respx_mock.get("/api/v1/libraries").mock(return_value=httpx.Response(200, json=[]))
     respx_mock.post("/api/v1/libraries").mock(
         return_value=httpx.Response(201, json={"id": "lib-1"})
     )
@@ -167,12 +163,24 @@ def test_pipeline_drop_fires_when_bookorbit_configured(tmp_path):
 
     # Mock the drop function so we can prove it was called
     calls = []
+
     def fake_drop(src_path, *, library_root, title, author, organization_mode="book_per_folder"):
-        calls.append({"src": str(src_path), "title": title, "author": author,
-                      "library_root": str(library_root), "mode": organization_mode})
+        calls.append(
+            {
+                "src": str(src_path),
+                "title": title,
+                "author": author,
+                "library_root": str(library_root),
+                "mode": organization_mode,
+            }
+        )
+
         class _R:
-            target_path = library_root / (author or "Unknown") / (title or "Unknown") / Path(src_path).name
+            target_path = (
+                library_root / (author or "Unknown") / (title or "Unknown") / Path(src_path).name
+            )
             bytes_written = 100
+
         return _R()
 
     # Patch the imported drop_into_library at the call site
@@ -181,6 +189,7 @@ def test_pipeline_drop_fires_when_bookorbit_configured(tmp_path):
     with patch.object(drop_mod, "drop_into_library", fake_drop):
         # Build minimal deps to exercise the post-send block
         from types import SimpleNamespace
+
         events_calls = []
         deps = SimpleNamespace(
             cfg=cfg,
@@ -202,6 +211,7 @@ def test_pipeline_drop_fires_when_bookorbit_configured(tmp_path):
                     BookOrbitDropError,
                     drop_into_library,
                 )
+
                 drop = drop_into_library(
                     file_path,
                     library_root=Path(deps.cfg.bookorbit.library_root_on_host),
@@ -238,13 +248,14 @@ def test_pipeline_drop_skipped_when_bookorbit_disabled(tmp_path):
     cfg = Config()  # bookorbit defaults: enabled=False, library_root=""
 
     calls = []
+
     def fake_drop(*a, **kw):
         calls.append(kw)
+
     with patch.object(drop_mod, "drop_into_library", fake_drop):
         # The pipeline condition: enabled=False -> drop is never called
         if cfg.bookorbit.enabled and cfg.bookorbit.library_root_on_host:
-            drop_mod.drop_into_library(tmp_path / "x", library_root=tmp_path,
-                                        title="t", author="a")
+            drop_mod.drop_into_library(tmp_path / "x", library_root=tmp_path, title="t", author="a")
     assert calls == []
 
 

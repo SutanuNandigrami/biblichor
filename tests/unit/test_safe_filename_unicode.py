@@ -75,7 +75,7 @@ def test_backslash_replaced():
 def test_windows_reserved_chars_replaced():
     """Drive-letter colon, glob wildcards, redirection chars."""
     out = safe_filename('Title: with "quotes" * and ? and | <pipes>.epub')
-    for c in (':', '"', '*', '?', '|', '<', '>'):
+    for c in (":", '"', "*", "?", "|", "<", ">"):
         assert c not in out, f"{c!r} survived: {out!r}"
 
 
@@ -137,6 +137,7 @@ def test_nfc_normalization_applied():
     fewer bytes, more interoperable on macOS HFS+ (which prefers NFD
     historically but Linux/Windows use NFC)."""
     import unicodedata
+
     # 'é' in NFD = 'e' + combining acute
     nfd = "Café.epub"
     nfc = "Café.epub"

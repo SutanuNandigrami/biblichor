@@ -101,9 +101,7 @@ def test_build_store_rejects_unknown_backend(tmp_path):
 
 def test_build_store_rejects_invalid_hybrid_mode(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda x: "/usr/bin/rclone")
-    cfg = StorageCfg(
-        backend="hybrid", rclone_remote="gdrive", hybrid_mode="frenzied"
-    )
+    cfg = StorageCfg(backend="hybrid", rclone_remote="gdrive", hybrid_mode="frenzied")
     with pytest.raises(ValueError, match="hybrid_mode must be"):
         build_store(cfg, data_root=tmp_path)
 

@@ -137,11 +137,11 @@ def test_floor_threshold_invariant_unit():
     the configured floor and the auto-pick threshold. This is the core
     semantic — pinning it directly rules out regressions in the formula."""
     for configured_floor, threshold, expected in [
-        (60.0, 70.0, 70.0),   # default Latin -> floor raised to threshold
-        (40.0, 45.0, 45.0),   # default non-Latin -> floor raised to threshold
-        (70.0, 70.0, 70.0),   # already equal
-        (85.0, 70.0, 85.0),   # user wants extra scraping
-        (0.0,  70.0, 70.0),   # never below threshold
+        (60.0, 70.0, 70.0),  # default Latin -> floor raised to threshold
+        (40.0, 45.0, 45.0),  # default non-Latin -> floor raised to threshold
+        (70.0, 70.0, 70.0),  # already equal
+        (85.0, 70.0, 85.0),  # user wants extra scraping
+        (0.0, 70.0, 70.0),  # never below threshold
     ]:
         assert max(configured_floor, threshold) == expected
 

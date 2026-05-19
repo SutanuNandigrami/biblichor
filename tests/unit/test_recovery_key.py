@@ -151,8 +151,6 @@ def test_extract_public_raises_when_line_missing(tmp_path):
 
 def test_recovery_key_dataclass_holds_expected_fields(tmp_path):
     """Pin the shape backup.py depends on."""
-    rk = RecoveryKey(
-        private_key_path=tmp_path / "k", public_key="age1xxx", just_generated=True
-    )
+    rk = RecoveryKey(private_key_path=tmp_path / "k", public_key="age1xxx", just_generated=True)
     assert rk.public_key == "age1xxx"
     assert rk.just_generated is True

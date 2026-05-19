@@ -32,7 +32,7 @@ DEFAULT_LIBRARY_MOUNT = "/books"  # what BookOrbit sees inside its container
 @dataclass
 class SetupResult:
     library_id: str
-    just_created: bool   # admin created right now (False if existing)
+    just_created: bool  # admin created right now (False if existing)
     config_yaml_updated: bool = False  # config.yaml fields changed this run
     config_yaml_path: Path | None = None
 

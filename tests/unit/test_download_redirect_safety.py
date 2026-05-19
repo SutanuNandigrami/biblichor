@@ -59,9 +59,11 @@ class _RedirectingClient:
     def head(self, url: str, follow_redirects: bool = True):
         self.head_calls.append(url)
         if url in self.redirect_map:
+
             class _R:
                 status_code = 302
                 headers = {"location": self.redirect_map[url]}  # noqa: RUF012
+
             return _R()
 
         class _R:

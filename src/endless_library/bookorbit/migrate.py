@@ -30,8 +30,7 @@ from endless_library.bookorbit.drop import (
 log = logging.getLogger(__name__)
 
 # Preference order for picking a single canonical file per book dir
-PREFERRED_FORMATS = (".epub", ".kepub", ".azw3", ".mobi", ".pdf",
-                     ".cbz", ".cbr", ".fb2", ".m4b")
+PREFERRED_FORMATS = (".epub", ".kepub", ".azw3", ".mobi", ".pdf", ".cbz", ".cbr", ".fb2", ".m4b")
 
 
 @dataclass
@@ -115,6 +114,7 @@ def migrate_calibre_to_bookorbit(
         # size. BookOrbit's hash dedup would also catch duplicates on
         # ingest, but this avoids the copy IO entirely.
         from endless_library.download import safe_filename
+
         if organization_mode == "book_per_folder":
             target_dir = bookorbit_library_root / safe_filename(author) / safe_filename(title)
         else:

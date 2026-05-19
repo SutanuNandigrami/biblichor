@@ -63,9 +63,7 @@ def _decrypt_if_needed(archive: Path, *, age_identity: Path | None) -> Path:
     if archive.suffix != ".age":
         return archive
     if age_identity is None:
-        raise RestoreError(
-            "archive is encrypted (.age) but no --age-identity provided"
-        )
+        raise RestoreError("archive is encrypted (.age) but no --age-identity provided")
     if shutil.which("age") is None:
         raise RestoreError("age binary not on PATH")
     out = archive.with_suffix("")
@@ -85,9 +83,7 @@ def _extract_tar_zst(archive: Path, dest: Path) -> Path:
     root directory."""
     if shutil.which("zstd") is None:
         raise RestoreError("zstd not on PATH")
-    proc = subprocess.Popen(
-        ["zstd", "-d", "-c", str(archive)], stdout=subprocess.PIPE
-    )
+    proc = subprocess.Popen(["zstd", "-d", "-c", str(archive)], stdout=subprocess.PIPE)
     assert proc.stdout is not None
     try:
         with tarfile.open(fileobj=proc.stdout, mode="r|") as tf:
@@ -176,9 +172,7 @@ def _atomic_swap(staged: Path, live: Path) -> None:
     if live.exists():
         from datetime import datetime
 
-        bak = live.with_name(
-            f"{live.name}.bak-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
-        )
+        bak = live.with_name(f"{live.name}.bak-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}")
         live.rename(bak)
         log.info("preserved old %s as %s", live.name, bak.name)
     live.parent.mkdir(parents=True, exist_ok=True)
@@ -258,8 +252,7 @@ def restore(
                 from datetime import datetime
 
                 bak = library_target.with_name(
-                    f"{library_target.name}.bak-"
-                    f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+                    f"{library_target.name}.bak-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
                 )
                 library_target.rename(bak)
                 log.info("preserved old library as %s", bak.name)

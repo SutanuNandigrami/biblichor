@@ -123,7 +123,10 @@ def test_missing_library_root_raises_clear_error(src, tmp_path):
 def test_unknown_organization_mode_raises(src, library_root):
     with pytest.raises(BookOrbitDropError, match="unknown organization_mode"):
         drop_into_library(
-            src, library_root=library_root, title="x", author="y",
+            src,
+            library_root=library_root,
+            title="x",
+            author="y",
             organization_mode="random-thing",
         )
 
@@ -151,6 +154,7 @@ def test_bookorbit_cfg_defaults_to_disabled():
     """Existing biblichor installs without bookorbit must keep working.
     Default enabled=false ensures the pipeline is a no-op."""
     from endless_library.config import BookOrbitCfg
+
     cfg = BookOrbitCfg()
     assert cfg.enabled is False
     assert cfg.organization_mode == "book_per_folder"
@@ -159,6 +163,7 @@ def test_bookorbit_cfg_defaults_to_disabled():
 def test_config_now_exposes_bookorbit_section():
     """Config dataclass round-trips a BookOrbitCfg field."""
     from endless_library.config import BookOrbitCfg, Config
+
     c = Config()
     assert isinstance(c.bookorbit, BookOrbitCfg)
     assert c.bookorbit.enabled is False

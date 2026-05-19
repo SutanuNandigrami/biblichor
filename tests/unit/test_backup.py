@@ -55,6 +55,7 @@ def fake_world(tmp_path: Path):
 
 def _is_zstd_available() -> bool:
     import shutil
+
     return shutil.which("zstd") is not None
 
 

@@ -298,8 +298,10 @@ def cmd_storage_migrate(args):
         src, dst, prefix=args.prefix or "", overwrite=args.overwrite, on_progress=progress
     )
     print()
-    print(f"summary: total={result.total} copied={result.copied} "
-          f"skipped_existing={result.skipped_existing} failed={result.failed}")
+    print(
+        f"summary: total={result.total} copied={result.copied} "
+        f"skipped_existing={result.skipped_existing} failed={result.failed}"
+    )
     for key, err in result.errors[:10]:
         print(f"  FAIL: {key}: {err}")
     if len(result.errors) > 10:
@@ -352,8 +354,15 @@ def cmd_backup(args):
         pg_user = args.postgres_user or os.environ.get("BOOKORBIT_DB_USER", "bookorbit")
         pg_db = args.postgres_db or os.environ.get("BOOKORBIT_DB_NAME", "bookorbit")
         pg_cmd = [
-            "docker", "compose", "exec", "-T", args.postgres_container,
-            "pg_dump", "-U", pg_user, pg_db,
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            args.postgres_container,
+            "pg_dump",
+            "-U",
+            pg_user,
+            pg_db,
         ]
 
     bookorbit_data = Path(args.bookorbit_data).expanduser() if args.bookorbit_data else None
@@ -413,8 +422,10 @@ def cmd_restore(args):
     age_identity = Path(args.age_identity).expanduser() if args.age_identity else None
 
     secrets_target = Path(args.secrets_target).expanduser() if args.secrets_target else None
-    library_target = Path(args.library_target).expanduser() if args.library_target else (
-        Path(cfg.general.books_dir) if cfg.general.books_dir else None
+    library_target = (
+        Path(args.library_target).expanduser()
+        if args.library_target
+        else (Path(cfg.general.books_dir) if cfg.general.books_dir else None)
     )
 
     print(f"restoring {archive.name}")
@@ -437,24 +448,34 @@ def cmd_restore(args):
             library_target=library_target,
             age_identity=age_identity,
             force=args.force,
-            postgres_dump_target=Path(args.postgres_dump_target).expanduser() if args.postgres_dump_target else None,
-            bookorbit_data_target=Path(args.bookorbit_data_target).expanduser() if args.bookorbit_data_target else None,
+            postgres_dump_target=Path(args.postgres_dump_target).expanduser()
+            if args.postgres_dump_target
+            else None,
+            bookorbit_data_target=Path(args.bookorbit_data_target).expanduser()
+            if args.bookorbit_data_target
+            else None,
         )
     except RestoreError as e:
         print(f"restore failed: {e}", file=sys.stderr)
         return 1
     print()
-    print(f"manifest: biblichor={result.manifest.biblichor_version} "
-          f"schema={result.manifest.schema_version} "
-          f"created={result.manifest.created_at_utc}")
+    print(
+        f"manifest: biblichor={result.manifest.biblichor_version} "
+        f"schema={result.manifest.schema_version} "
+        f"created={result.manifest.created_at_utc}"
+    )
     print(f"validated {result.files_validated} files")
-    print(f"db_restored={result.db_restored} cfg={result.config_restored} "
-          f"secrets={result.secrets_restored} lib={result.library_restored} "
-          f"bookorbit_data={result.bookorbit_data_restored}")
+    print(
+        f"db_restored={result.db_restored} cfg={result.config_restored} "
+        f"secrets={result.secrets_restored} lib={result.library_restored} "
+        f"bookorbit_data={result.bookorbit_data_restored}"
+    )
     if result.postgres_dump_staged_path:
         print()
         print(f"postgres dump staged at: {result.postgres_dump_staged_path}")
-        print("  apply with:  docker compose exec -T bookorbit-db psql -U bookorbit bookorbit < <path>")
+        print(
+            "  apply with:  docker compose exec -T bookorbit-db psql -U bookorbit bookorbit < <path>"
+        )
     return 0
 
 
@@ -509,7 +530,10 @@ def cmd_bookorbit_setup(args):
     url = args.url or os.environ.get("BOOKORBIT_URL", "http://localhost:3000")
     setup_token = args.setup_token or os.environ.get("BOOKORBIT_SETUP_TOKEN")
     if not setup_token:
-        print("error: BOOKORBIT_SETUP_TOKEN not set in env and --setup-token not given", file=sys.stderr)
+        print(
+            "error: BOOKORBIT_SETUP_TOKEN not set in env and --setup-token not given",
+            file=sys.stderr,
+        )
         return 1
 
     admin_user = args.admin_user or os.environ.get("BOOKORBIT_ADMIN_USER", "admin")
@@ -567,15 +591,22 @@ def cmd_migrate_to_bookorbit(args):
     cfg = load_config(config_path)
     _setup_logging(cfg.general.log_level)
 
-    calibre_root = Path(args.calibre_root).expanduser() if args.calibre_root else (
-        Path(cfg.general.books_dir).parent / "calibre-library"
+    calibre_root = (
+        Path(args.calibre_root).expanduser()
+        if args.calibre_root
+        else (Path(cfg.general.books_dir).parent / "calibre-library")
     )
     if not calibre_root.exists():
         print(f"error: calibre library not found at {calibre_root}", file=sys.stderr)
         return 1
-    bookorbit_root = Path(args.bookorbit_root).expanduser() if args.bookorbit_root else (
-        Path(cfg.bookorbit.library_root_on_host) if cfg.bookorbit.library_root_on_host
-        else Path(cfg.general.books_dir).parent / "library"
+    bookorbit_root = (
+        Path(args.bookorbit_root).expanduser()
+        if args.bookorbit_root
+        else (
+            Path(cfg.bookorbit.library_root_on_host)
+            if cfg.bookorbit.library_root_on_host
+            else Path(cfg.general.books_dir).parent / "library"
+        )
     )
     if not bookorbit_root.exists():
         bookorbit_root.mkdir(parents=True, exist_ok=True)
@@ -589,10 +620,13 @@ def cmd_migrate_to_bookorbit(args):
         print("  (DRY RUN — no files copied)")
         # Skip the actual call in dry-run by walking manually
         from endless_library.bookorbit.migrate import _book_dirs, _pick_canonical_file
+
         for book_dir in _book_dirs(calibre_root):
             canonical = _pick_canonical_file(book_dir)
-            print(f"  {book_dir.parent.name}/{book_dir.name}: "
-                  f"{canonical.name if canonical else 'NO BOOK FILE'}")
+            print(
+                f"  {book_dir.parent.name}/{book_dir.name}: "
+                f"{canonical.name if canonical else 'NO BOOK FILE'}"
+            )
         return 0
 
     result = migrate_calibre_to_bookorbit(
@@ -602,8 +636,10 @@ def cmd_migrate_to_bookorbit(args):
         on_progress=progress,
     )
     print()
-    print(f"summary: total={result.total_books} copied={result.copied} "
-          f"no_book_file={result.skipped_no_book_file} failed={result.failed}")
+    print(
+        f"summary: total={result.total_books} copied={result.copied} "
+        f"no_book_file={result.skipped_no_book_file} failed={result.failed}"
+    )
     if result.errors:
         print()
         for path, err in result.errors[:10]:
@@ -611,7 +647,7 @@ def cmd_migrate_to_bookorbit(args):
         if len(result.errors) > 10:
             print(f"  ... and {len(result.errors) - 10} more failures")
     print()
-    print("NOT migrated (per BookOrbit\'s lack of a Calibre adapter):")
+    print("NOT migrated (per BookOrbit's lack of a Calibre adapter):")
     for line in result.lost_calibre_fields:
         print(f"  - {line}")
 
@@ -620,9 +656,12 @@ def cmd_migrate_to_bookorbit(args):
     if args.trigger_scan:
         if not cfg.bookorbit.library_id:
             print()
-            print("note: cfg.bookorbit.library_id empty; run `biblichor bookorbit-setup` first to enable --trigger-scan")
+            print(
+                "note: cfg.bookorbit.library_id empty; run `biblichor bookorbit-setup` first to enable --trigger-scan"
+            )
             return 0 if result.failed == 0 else 1
         from endless_library.bookorbit.client import BookOrbitError
+
         admin_password = os.environ.get("BOOKORBIT_ADMIN_PASSWORD")
         if not admin_password:
             print()
@@ -658,8 +697,13 @@ def main(argv: list[str] | None = None) -> int:
     s_status = sub.add_parser("status", help="Print queue summary")
     s_status.set_defaults(func=cmd_status)
 
-    s_repair = sub.add_parser("repair-filenames", help="Re-derive on-disk filenames with Unicode-safe sanitization (Phase X.iii)")
-    s_repair.add_argument("--dry-run", action="store_true", help="Print what would change, don't rename")
+    s_repair = sub.add_parser(
+        "repair-filenames",
+        help="Re-derive on-disk filenames with Unicode-safe sanitization (Phase X.iii)",
+    )
+    s_repair.add_argument(
+        "--dry-run", action="store_true", help="Print what would change, don't rename"
+    )
     s_repair.set_defaults(func=cmd_repair_filenames)
 
     s_resend = sub.add_parser("resend", help="Re-enrich metadata + resend to Kindle (Phase X.iv)")
@@ -670,47 +714,94 @@ def main(argv: list[str] | None = None) -> int:
 
     s_restore = sub.add_parser("restore", help="Restore from a backup bundle (Phase 5b)")
     s_restore.add_argument("archive", nargs="?", default="", help="Local backup archive path")
-    s_restore.add_argument("--from-store", default="", help="Or fetch from the configured Store by this key")
-    s_restore.add_argument("--age-identity", default="", help="age private key file for .age archives")
-    s_restore.add_argument("--secrets-target", default="", help="Where to land .env (skip if empty)")
-    s_restore.add_argument("--library-target", default="", help="Where to land library (default: general.books_dir)")
+    s_restore.add_argument(
+        "--from-store", default="", help="Or fetch from the configured Store by this key"
+    )
+    s_restore.add_argument(
+        "--age-identity", default="", help="age private key file for .age archives"
+    )
+    s_restore.add_argument(
+        "--secrets-target", default="", help="Where to land .env (skip if empty)"
+    )
+    s_restore.add_argument(
+        "--library-target", default="", help="Where to land library (default: general.books_dir)"
+    )
     s_restore.add_argument("--force", action="store_true", help="Override the live-newer guard")
-    s_restore.add_argument("--postgres-dump-target", default="", help="Where to land postgres.sql for manual psql restore (Phase 6g)")
-    s_restore.add_argument("--bookorbit-data-target", default="", help="Where to land BookOrbit /data (Phase 6g)")
+    s_restore.add_argument(
+        "--postgres-dump-target",
+        default="",
+        help="Where to land postgres.sql for manual psql restore (Phase 6g)",
+    )
+    s_restore.add_argument(
+        "--bookorbit-data-target", default="", help="Where to land BookOrbit /data (Phase 6g)"
+    )
     s_restore.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     s_restore.set_defaults(func=cmd_restore)
 
     s_bo = sub.add_parser("bookorbit-setup", help="First-run BookOrbit admin + library (Phase 6b)")
     s_bo.add_argument("--url", default="", help="BookOrbit base URL (default $BOOKORBIT_URL)")
-    s_bo.add_argument("--setup-token", default="", help="x-setup-token (default $BOOKORBIT_SETUP_TOKEN)")
-    s_bo.add_argument("--admin-user", default="", help="Admin username (default \"admin\")")
+    s_bo.add_argument(
+        "--setup-token", default="", help="x-setup-token (default $BOOKORBIT_SETUP_TOKEN)"
+    )
+    s_bo.add_argument("--admin-user", default="", help='Admin username (default "admin")')
     s_bo.add_argument("--admin-name", default="", help="Display name (default from email)")
     s_bo.add_argument("--admin-email", default="", help="Prompted if missing")
     s_bo.add_argument("--admin-password", default="", help="Prompted (hidden) if missing")
     s_bo.add_argument("--library-root", default="", help="Host path mounted at /books in container")
     s_bo.set_defaults(func=cmd_bookorbit_setup)
 
-    s_mig = sub.add_parser("migrate-to-bookorbit", help="Walk Calibre library + copy every book to BookOrbit (Phase 6d)")
+    s_mig = sub.add_parser(
+        "migrate-to-bookorbit",
+        help="Walk Calibre library + copy every book to BookOrbit (Phase 6d)",
+    )
     s_mig.add_argument("--calibre-root", default="", help="Default: data/calibre-library")
-    s_mig.add_argument("--bookorbit-root", default="", help="Default: cfg.bookorbit.library_root_on_host")
+    s_mig.add_argument(
+        "--bookorbit-root", default="", help="Default: cfg.bookorbit.library_root_on_host"
+    )
     s_mig.add_argument("--dry-run", action="store_true", help="List what would migrate, no copy")
-    s_mig.add_argument("--trigger-scan", action="store_true", help="POST /scanner/.../scan after copy (needs BOOKORBIT_ADMIN_EMAIL/PASSWORD)")
+    s_mig.add_argument(
+        "--trigger-scan",
+        action="store_true",
+        help="POST /scanner/.../scan after copy (needs BOOKORBIT_ADMIN_EMAIL/PASSWORD)",
+    )
     s_mig.set_defaults(func=cmd_migrate_to_bookorbit)
 
     s_backup = sub.add_parser("backup", help="Create a disaster-recovery backup (Phase 5a)")
     s_backup.add_argument("--secrets", default="", help="Path to .env (defaults to none)")
-    s_backup.add_argument("--library", default="", help="Override library dir (default: general.books_dir)")
+    s_backup.add_argument(
+        "--library", default="", help="Override library dir (default: general.books_dir)"
+    )
     s_backup.add_argument("--age-recipient", default="", help="age public key for encryption")
     s_backup.add_argument("--prefix", default="backups", help="Remote key prefix")
-    s_backup.add_argument("--no-encrypt", action="store_true", help="Produce unencrypted backup (NOT recommended for non-local stores)")
-    s_backup.add_argument("--postgres-container", default="", help="docker compose service name for pg_dump (e.g. bookorbit-db). Skip pg dump if empty.")
-    s_backup.add_argument("--postgres-user", default="", help="Override pg_dump user (default $BOOKORBIT_DB_USER)")
-    s_backup.add_argument("--postgres-db", default="", help="Override pg_dump database (default $BOOKORBIT_DB_NAME)")
-    s_backup.add_argument("--bookorbit-data", default="", help="Path to BookOrbit /data dir (covers + book-bucket)")
+    s_backup.add_argument(
+        "--no-encrypt",
+        action="store_true",
+        help="Produce unencrypted backup (NOT recommended for non-local stores)",
+    )
+    s_backup.add_argument(
+        "--postgres-container",
+        default="",
+        help="docker compose service name for pg_dump (e.g. bookorbit-db). Skip pg dump if empty.",
+    )
+    s_backup.add_argument(
+        "--postgres-user", default="", help="Override pg_dump user (default $BOOKORBIT_DB_USER)"
+    )
+    s_backup.add_argument(
+        "--postgres-db", default="", help="Override pg_dump database (default $BOOKORBIT_DB_NAME)"
+    )
+    s_backup.add_argument(
+        "--bookorbit-data", default="", help="Path to BookOrbit /data dir (covers + book-bucket)"
+    )
     s_backup.set_defaults(func=cmd_backup)
 
-    s_backup_key = sub.add_parser("backup-key", help="Show or initialize the recovery key (Phase 5c)")
-    s_backup_key.add_argument("--show-private", action="store_true", help="Print the private key (for transfer to a password manager)")
+    s_backup_key = sub.add_parser(
+        "backup-key", help="Show or initialize the recovery key (Phase 5c)"
+    )
+    s_backup_key.add_argument(
+        "--show-private",
+        action="store_true",
+        help="Print the private key (for transfer to a password manager)",
+    )
     s_backup_key.set_defaults(func=cmd_backup_key)
 
     s_storage = sub.add_parser("storage", help="Storage management commands (Phase 4c)")
@@ -721,7 +812,9 @@ def main(argv: list[str] | None = None) -> int:
     s_migrate.add_argument("--rclone-remote", default="", help="Override rclone remote for target")
     s_migrate.add_argument("--rclone-bucket-path", default="", help="Override rclone bucket path")
     s_migrate.add_argument("--prefix", default="", help="Migrate only keys under this prefix")
-    s_migrate.add_argument("--overwrite", action="store_true", help="Overwrite existing keys on dst")
+    s_migrate.add_argument(
+        "--overwrite", action="store_true", help="Overwrite existing keys on dst"
+    )
     s_migrate.set_defaults(func=cmd_storage_migrate)
 
     s_send = sub.add_parser("send", help="Send an existing epub/file straight to Kindle")

@@ -35,8 +35,13 @@ def _seed_world(tmp_path):
     (bo_data / "covers" / "abc.jpg").write_bytes(b"\xff\xd8\xff" * 10)
     (bo_data / "book-bucket").mkdir()
     (bo_data / "book-bucket" / "staging.txt").write_text("upload staging")
-    return {"src": src, "db": db, "cfg": cfg, "bo_data": bo_data,
-            "store": LocalStore(tmp_path / "store")}
+    return {
+        "src": src,
+        "db": db,
+        "cfg": cfg,
+        "bo_data": bo_data,
+        "store": LocalStore(tmp_path / "store"),
+    }
 
 
 # ============ REGRESSION: postgres + bookorbit-data live in the bundle ============
@@ -56,19 +61,34 @@ def test_postgres_dump_captured_into_archive(tmp_path, monkeypatch):
         # subprocess.run in the backup module); let other callers
         # (platform module's uname probe, etc.) hit real subprocess.run.
         if isinstance(cmd, list) and cmd and "pg_dump" in cmd:
+
             class _Proc:
                 returncode = 0
                 stdout = b"-- PostgreSQL database dump\n-- bookorbit\n"
                 stderr = b""
+
             return _Proc()
         return real_run(cmd, **kw)
+
     monkeypatch.setattr(backup_mod.subprocess, "run", fake_run)
 
     result = make_backup(
-        db_path=w["db"], config_path=w["cfg"],
-        secrets_path=None, library_dir=None, store=w["store"],
-        postgres_dump_cmd=["docker", "compose", "exec", "-T", "bookorbit-db",
-                           "pg_dump", "-U", "bookorbit", "bookorbit"],
+        db_path=w["db"],
+        config_path=w["cfg"],
+        secrets_path=None,
+        library_dir=None,
+        store=w["store"],
+        postgres_dump_cmd=[
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "bookorbit-db",
+            "pg_dump",
+            "-U",
+            "bookorbit",
+            "bookorbit",
+        ],
     )
 
     # The manifest lists postgres.sql
@@ -101,18 +121,24 @@ def test_pg_dump_failure_aborts_backup(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kw):
         if isinstance(cmd, list) and cmd and "pg_dump" in cmd:
+
             class _Proc:
                 returncode = 1
                 stdout = b""
                 stderr = b"could not connect to db"
+
             return _Proc()
         return real_run(cmd, **kw)
+
     monkeypatch.setattr(backup_mod.subprocess, "run", fake_run)
 
     with pytest.raises(BackupError, match="pg_dump exit 1"):
         make_backup(
-            db_path=w["db"], config_path=w["cfg"],
-            secrets_path=None, library_dir=None, store=w["store"],
+            db_path=w["db"],
+            config_path=w["cfg"],
+            secrets_path=None,
+            library_dir=None,
+            store=w["store"],
             postgres_dump_cmd=["pg_dump", "-U", "x", "y"],
         )
 
@@ -122,8 +148,11 @@ def test_bookorbit_data_dir_included(tmp_path):
     """If bookorbit_data_dir is given, the bundle includes its contents."""
     w = _seed_world(tmp_path)
     result = make_backup(
-        db_path=w["db"], config_path=w["cfg"],
-        secrets_path=None, library_dir=None, store=w["store"],
+        db_path=w["db"],
+        config_path=w["cfg"],
+        secrets_path=None,
+        library_dir=None,
+        store=w["store"],
         bookorbit_data_dir=w["bo_data"],
     )
     keys = result.manifest.file_checksums.keys()
@@ -137,9 +166,13 @@ def test_neither_postgres_nor_bookorbit_skips_cleanly(tmp_path):
     bundle contains exactly what it always did."""
     w = _seed_world(tmp_path)
     result = make_backup(
-        db_path=w["db"], config_path=w["cfg"],
-        secrets_path=None, library_dir=None, store=w["store"],
-        postgres_dump_cmd=None, bookorbit_data_dir=None,
+        db_path=w["db"],
+        config_path=w["cfg"],
+        secrets_path=None,
+        library_dir=None,
+        store=w["store"],
+        postgres_dump_cmd=None,
+        bookorbit_data_dir=None,
     )
     keys = set(result.manifest.file_checksums.keys())
     assert "postgres.sql" not in keys
@@ -160,17 +193,23 @@ def test_restore_stages_postgres_dump_at_target(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kw):
         if isinstance(cmd, list) and cmd and "pg_dump" in cmd:
+
             class _Proc:
                 returncode = 0
                 stdout = b"-- PostgreSQL dump\nSELECT 1;\n"
                 stderr = b""
+
             return _Proc()
         return real_run(cmd, **kw)
+
     monkeypatch.setattr(backup_mod.subprocess, "run", fake_run)
 
     result = make_backup(
-        db_path=w["db"], config_path=w["cfg"],
-        secrets_path=None, library_dir=None, store=w["store"],
+        db_path=w["db"],
+        config_path=w["cfg"],
+        secrets_path=None,
+        library_dir=None,
+        store=w["store"],
         postgres_dump_cmd=["pg_dump"],
         bookorbit_data_dir=w["bo_data"],
     )
@@ -201,8 +240,11 @@ def test_restore_handles_archive_with_no_postgres_or_bookorbit(tmp_path):
     no bookorbit-data) still works and just reports them as absent."""
     w = _seed_world(tmp_path)
     result = make_backup(
-        db_path=w["db"], config_path=w["cfg"],
-        secrets_path=None, library_dir=None, store=w["store"],
+        db_path=w["db"],
+        config_path=w["cfg"],
+        secrets_path=None,
+        library_dir=None,
+        store=w["store"],
     )
     archive_local = tmp_path / "got.tar.zst"
     w["store"].get(result.remote_key, archive_local)
@@ -212,7 +254,8 @@ def test_restore_handles_archive_with_no_postgres_or_bookorbit(tmp_path):
         archive_path=archive_local,
         db_target=new / "library.db",
         config_target=new / "config.yaml",
-        secrets_target=None, library_target=None,
+        secrets_target=None,
+        library_target=None,
         postgres_dump_target=new / "postgres.sql",
         bookorbit_data_target=new / "bookorbit-data",
     )
@@ -226,8 +269,11 @@ def test_restore_preserves_existing_bookorbit_data_as_bak(tmp_path):
     leave a recoverable artifact."""
     w = _seed_world(tmp_path)
     result = make_backup(
-        db_path=w["db"], config_path=w["cfg"],
-        secrets_path=None, library_dir=None, store=w["store"],
+        db_path=w["db"],
+        config_path=w["cfg"],
+        secrets_path=None,
+        library_dir=None,
+        store=w["store"],
         bookorbit_data_dir=w["bo_data"],
     )
     archive_local = tmp_path / "got.tar.zst"
@@ -243,7 +289,8 @@ def test_restore_preserves_existing_bookorbit_data_as_bak(tmp_path):
         archive_path=archive_local,
         db_target=new / "library.db",
         config_target=new / "config.yaml",
-        secrets_target=None, library_target=None,
+        secrets_target=None,
+        library_target=None,
         postgres_dump_target=None,
         bookorbit_data_target=existing,
     )

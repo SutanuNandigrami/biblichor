@@ -124,8 +124,7 @@ def test_docstring_says_encoded_not_raw() -> None:
 
     src = inspect.getsource(config.SmtpCfg)
     assert "encoded" in src.lower(), (
-        "SmtpCfg docstring/comments must clarify the field is an encoded "
-        "(not raw) MIME size cap"
+        "SmtpCfg docstring/comments must clarify the field is an encoded (not raw) MIME size cap"
     )
     # And it should explicitly disambiguate Gmail's 50 MB inbound vs 25 MB outbound
     assert "50" in src and ("inbound" in src.lower() or "outbound" in src.lower()), (

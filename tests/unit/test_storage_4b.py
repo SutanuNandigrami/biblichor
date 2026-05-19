@@ -72,17 +72,21 @@ def test_rclone_put_raises_on_nonzero_exit(rclone, tmp_path):
     src = tmp_path / "x.bin"
     src.write_bytes(b"data")
 
-    with patch.object(
-        RcloneStore, "_run", lambda self, args: _FakeProc(1, stderr="drive permission denied")
-    ), pytest.raises(StorageError, match="permission denied"):
+    with (
+        patch.object(
+            RcloneStore, "_run", lambda self, args: _FakeProc(1, stderr="drive permission denied")
+        ),
+        pytest.raises(StorageError, match="permission denied"),
+    ):
         rclone.put(src, "x.bin")
 
 
 def test_rclone_get_raises_key_not_found_when_missing(rclone, tmp_path):
     # exists() probes via lsf; we return empty stdout + zero exit
-    with patch.object(
-        RcloneStore, "_run", lambda self, args: _FakeProc(0, stdout="")
-    ), pytest.raises(KeyNotFound):
+    with (
+        patch.object(RcloneStore, "_run", lambda self, args: _FakeProc(0, stdout="")),
+        pytest.raises(KeyNotFound),
+    ):
         rclone.get("absent.bin", tmp_path / "out.bin")
 
 
@@ -121,7 +125,9 @@ def test_rclone_exists_false_on_nonzero_exit(rclone):
 
 def test_rclone_delete_idempotent_on_missing(rclone):
     """rclone-side "object not found" must NOT raise."""
-    with patch.object(RcloneStore, "_run", lambda self, args: _FakeProc(3, stderr="Object not found")):
+    with patch.object(
+        RcloneStore, "_run", lambda self, args: _FakeProc(3, stderr="Object not found")
+    ):
         rclone.delete("x.bin")  # must not raise
 
 

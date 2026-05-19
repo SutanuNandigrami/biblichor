@@ -111,6 +111,7 @@ def test_skipped_state_is_legal_via_state_machine(tmp_path):
     """The book transitions searching -> skipped (Phase 3c) and that
     transition is already legal per _LEGAL (Phase 1 audit alignment)."""
     from endless_library.domain.state_machine import is_legal_transition
+
     assert is_legal_transition("searching", "skipped")
     # And the retry button can re-queue from skipped
     assert is_legal_transition("skipped", "queued")
