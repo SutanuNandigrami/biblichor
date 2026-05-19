@@ -176,6 +176,8 @@ def make_backup(
     store: Store,
     age_recipient: str | None = None,
     remote_prefix: str = "backups",
+    postgres_dump_cmd: list[str] | None = None,
+    bookorbit_data_dir: Path | None = None,
 ) -> BackupResult:
     """Create a backup and push it through `store`.
 
@@ -189,6 +191,14 @@ def make_backup(
         recommended; backups contain SMTP password etc.).
       remote_prefix: where to land the bundle on the destination
         backend (default "backups/").
+      postgres_dump_cmd: optional argv to run for the BookOrbit
+        Postgres dump (Phase 6g). The command's stdout is captured
+        into the backup as postgres.sql. Example:
+        ["docker", "compose", "exec", "-T", "bookorbit-db",
+         "pg_dump", "-U", "bookorbit", "bookorbit"]
+        Skipped if None.
+      bookorbit_data_dir: optional path to BookOrbit's /data
+        directory contents (covers + book-bucket). Skipped if None.
     """
     if not db_path.exists():
         raise BackupError(f"db not found: {db_path}")
@@ -219,6 +229,33 @@ def make_backup(
             log.info("backup: copying library from %s", library_dir)
             shutil.copytree(
                 library_dir, staging / "library", dirs_exist_ok=True
+            )
+
+        # 4b. Postgres dump (Phase 6g) — captures BookOrbit's entire
+        # state (users, libraries, sync, audit, etc.) into postgres.sql.
+        # We deliberately run AFTER files are staged so a failure here
+        # doesn't waste the library copy step (which is the big one).
+        if postgres_dump_cmd:
+            log.info("backup: running pg_dump (%s)", postgres_dump_cmd[0])
+            try:
+                proc = subprocess.run(
+                    postgres_dump_cmd,
+                    capture_output=True,
+                    timeout=600,
+                    check=False,
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                raise BackupError(f"pg_dump failed: {e}") from e
+            if proc.returncode != 0:
+                tail = proc.stderr[-400:].decode("utf-8", errors="replace")
+                raise BackupError(f"pg_dump exit {proc.returncode}: {tail}")
+            (staging / "postgres.sql").write_bytes(proc.stdout)
+
+        # 4c. BookOrbit data dir (covers + book-bucket)
+        if bookorbit_data_dir and bookorbit_data_dir.exists():
+            log.info("backup: copying bookorbit data from %s", bookorbit_data_dir)
+            shutil.copytree(
+                bookorbit_data_dir, staging / "bookorbit-data", dirs_exist_ok=True
             )
 
         # 5. Manifest LAST so it includes everyone else's checksums

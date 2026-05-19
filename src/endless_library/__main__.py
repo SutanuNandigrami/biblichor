@@ -345,6 +345,17 @@ def cmd_backup(args):
         if rk.just_generated:
             print_warning(rk)
 
+    pg_cmd: list[str] | None = None
+    if args.postgres_container:
+        pg_user = args.postgres_user or os.environ.get("BOOKORBIT_DB_USER", "bookorbit")
+        pg_db = args.postgres_db or os.environ.get("BOOKORBIT_DB_NAME", "bookorbit")
+        pg_cmd = [
+            "docker", "compose", "exec", "-T", args.postgres_container,
+            "pg_dump", "-U", pg_user, pg_db,
+        ]
+
+    bookorbit_data = Path(args.bookorbit_data).expanduser() if args.bookorbit_data else None
+
     try:
         result = make_backup(
             db_path=db_path,
@@ -354,6 +365,8 @@ def cmd_backup(args):
             store=store,
             age_recipient=recipient if recipient else None,
             remote_prefix=args.prefix or "backups",
+            postgres_dump_cmd=pg_cmd,
+            bookorbit_data_dir=bookorbit_data,
         )
     except BackupError as e:
         print(f"backup failed: {e}", file=sys.stderr)
@@ -421,6 +434,8 @@ def cmd_restore(args):
             library_target=library_target,
             age_identity=age_identity,
             force=args.force,
+            postgres_dump_target=Path(args.postgres_dump_target).expanduser() if args.postgres_dump_target else None,
+            bookorbit_data_target=Path(args.bookorbit_data_target).expanduser() if args.bookorbit_data_target else None,
         )
     except RestoreError as e:
         print(f"restore failed: {e}", file=sys.stderr)
@@ -431,7 +446,12 @@ def cmd_restore(args):
           f"created={result.manifest.created_at_utc}")
     print(f"validated {result.files_validated} files")
     print(f"db_restored={result.db_restored} cfg={result.config_restored} "
-          f"secrets={result.secrets_restored} lib={result.library_restored}")
+          f"secrets={result.secrets_restored} lib={result.library_restored} "
+          f"bookorbit_data={result.bookorbit_data_restored}")
+    if result.postgres_dump_staged_path:
+        print()
+        print(f"postgres dump staged at: {result.postgres_dump_staged_path}")
+        print("  apply with:  docker compose exec -T bookorbit-db psql -U bookorbit bookorbit < <path>")
     return 0
 
 
@@ -647,6 +667,8 @@ def main(argv: list[str] | None = None) -> int:
     s_restore.add_argument("--secrets-target", default="", help="Where to land .env (skip if empty)")
     s_restore.add_argument("--library-target", default="", help="Where to land library (default: general.books_dir)")
     s_restore.add_argument("--force", action="store_true", help="Override the live-newer guard")
+    s_restore.add_argument("--postgres-dump-target", default="", help="Where to land postgres.sql for manual psql restore (Phase 6g)")
+    s_restore.add_argument("--bookorbit-data-target", default="", help="Where to land BookOrbit /data (Phase 6g)")
     s_restore.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     s_restore.set_defaults(func=cmd_restore)
 
@@ -673,6 +695,10 @@ def main(argv: list[str] | None = None) -> int:
     s_backup.add_argument("--age-recipient", default="", help="age public key for encryption")
     s_backup.add_argument("--prefix", default="backups", help="Remote key prefix")
     s_backup.add_argument("--no-encrypt", action="store_true", help="Produce unencrypted backup (NOT recommended for non-local stores)")
+    s_backup.add_argument("--postgres-container", default="", help="docker compose service name for pg_dump (e.g. bookorbit-db). Skip pg dump if empty.")
+    s_backup.add_argument("--postgres-user", default="", help="Override pg_dump user (default $BOOKORBIT_DB_USER)")
+    s_backup.add_argument("--postgres-db", default="", help="Override pg_dump database (default $BOOKORBIT_DB_NAME)")
+    s_backup.add_argument("--bookorbit-data", default="", help="Path to BookOrbit /data dir (covers + book-bucket)")
     s_backup.set_defaults(func=cmd_backup)
 
     s_backup_key = sub.add_parser("backup-key", help="Show or initialize the recovery key (Phase 5c)")

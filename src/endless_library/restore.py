@@ -52,6 +52,9 @@ class RestoreResult:
     library_restored: bool
     files_validated: int
     target_paths: dict[str, Path]
+    # Phase 6g additions — staged for manual application, not auto-loaded
+    postgres_dump_staged_path: Path | None = None
+    bookorbit_data_restored: bool = False
 
 
 def _decrypt_if_needed(archive: Path, *, age_identity: Path | None) -> Path:
@@ -191,6 +194,8 @@ def restore(
     library_target: Path | None,
     age_identity: Path | None = None,
     force: bool = False,
+    postgres_dump_target: Path | None = None,
+    bookorbit_data_target: Path | None = None,
 ) -> RestoreResult:
     """Restore a biblichor backup.
 
@@ -270,6 +275,31 @@ def restore(
             target_paths["db"] = db_target
             db_done = True
 
+        # Phase 6g: stash postgres dump + bookorbit-data for manual restore
+        postgres_staged: Path | None = None
+        postgres_src = root / "postgres.sql"
+        if postgres_src.exists() and postgres_dump_target is not None:
+            _atomic_swap(postgres_src, postgres_dump_target)
+            target_paths["postgres_dump"] = postgres_dump_target
+            postgres_staged = postgres_dump_target
+
+        bookorbit_done = False
+        bookorbit_src = root / "bookorbit-data"
+        if bookorbit_src.exists() and bookorbit_data_target is not None:
+            if bookorbit_data_target.exists():
+                from datetime import datetime, timezone
+
+                bak = bookorbit_data_target.with_name(
+                    f"{bookorbit_data_target.name}.bak-"
+                    f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+                )
+                bookorbit_data_target.rename(bak)
+                log.info("preserved old bookorbit-data as %s", bak.name)
+            bookorbit_data_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(bookorbit_src), str(bookorbit_data_target))
+            target_paths["bookorbit_data"] = bookorbit_data_target
+            bookorbit_done = True
+
         return RestoreResult(
             manifest=manifest,
             db_restored=db_done,
@@ -278,4 +308,6 @@ def restore(
             library_restored=lib_done,
             files_validated=n_validated,
             target_paths=target_paths,
+            postgres_dump_staged_path=postgres_staged,
+            bookorbit_data_restored=bookorbit_done,
         )
