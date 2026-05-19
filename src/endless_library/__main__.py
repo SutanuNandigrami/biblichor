@@ -530,6 +530,90 @@ def cmd_bookorbit_setup(args):
     return 0
 
 
+def cmd_migrate_to_bookorbit(args):
+    """Phase 6d: walk an existing Calibre library and copy every book
+    into BookOrbit's watched directory."""
+    from endless_library.bookorbit.client import BookOrbitClient
+    from endless_library.bookorbit.migrate import migrate_calibre_to_bookorbit
+
+    config_path, _ = _resolve_paths(args)
+    cfg = load_config(config_path)
+    _setup_logging(cfg.general.log_level)
+
+    calibre_root = Path(args.calibre_root).expanduser() if args.calibre_root else (
+        Path(cfg.general.books_dir).parent / "calibre-library"
+    )
+    if not calibre_root.exists():
+        print(f"error: calibre library not found at {calibre_root}", file=sys.stderr)
+        return 1
+    bookorbit_root = Path(args.bookorbit_root).expanduser() if args.bookorbit_root else (
+        Path(cfg.bookorbit.library_root_on_host) if cfg.bookorbit.library_root_on_host
+        else Path(cfg.general.books_dir).parent / "library"
+    )
+    if not bookorbit_root.exists():
+        bookorbit_root.mkdir(parents=True, exist_ok=True)
+
+    def progress(book_dir, n, total):
+        print(f"  [{n}/{total}] {book_dir.parent.name} / {book_dir.name}")
+
+    print(f"migrating {calibre_root} -> {bookorbit_root}")
+    print(f"  organization_mode={cfg.bookorbit.organization_mode}")
+    if args.dry_run:
+        print("  (DRY RUN — no files copied)")
+        # Skip the actual call in dry-run by walking manually
+        from endless_library.bookorbit.migrate import _book_dirs, _pick_canonical_file
+        for book_dir in _book_dirs(calibre_root):
+            canonical = _pick_canonical_file(book_dir)
+            print(f"  {book_dir.parent.name}/{book_dir.name}: "
+                  f"{canonical.name if canonical else 'NO BOOK FILE'}")
+        return 0
+
+    result = migrate_calibre_to_bookorbit(
+        calibre_root=calibre_root,
+        bookorbit_library_root=bookorbit_root,
+        organization_mode=cfg.bookorbit.organization_mode,
+        on_progress=progress,
+    )
+    print()
+    print(f"summary: total={result.total_books} copied={result.copied} "
+          f"no_book_file={result.skipped_no_book_file} failed={result.failed}")
+    if result.errors:
+        print()
+        for path, err in result.errors[:10]:
+            print(f"  FAIL: {path}: {err}")
+        if len(result.errors) > 10:
+            print(f"  ... and {len(result.errors) - 10} more failures")
+    print()
+    print("NOT migrated (per BookOrbit\'s lack of a Calibre adapter):")
+    for line in result.lost_calibre_fields:
+        print(f"  - {line}")
+
+    # Optional: trigger a scan via the BookOrbit API
+    if args.trigger_scan:
+        bo_cfg_path = Path(config_path).parent / "bookorbit.json"
+        if not bo_cfg_path.exists():
+            print()
+            print("note: bookorbit.json missing; run biblichor bookorbit-setup first to enable --trigger-scan")
+            return 0 if result.failed == 0 else 1
+        from endless_library.bookorbit.client import BookOrbitConfig, BookOrbitError
+        bo_cfg = BookOrbitConfig.load(bo_cfg_path)
+        admin_email = os.environ.get("BOOKORBIT_ADMIN_EMAIL")
+        admin_password = os.environ.get("BOOKORBIT_ADMIN_PASSWORD")
+        if not (admin_email and admin_password):
+            print()
+            print("note: BOOKORBIT_ADMIN_EMAIL/PASSWORD not set; skipping scan trigger")
+        else:
+            try:
+                with BookOrbitClient(bo_cfg.url) as c:
+                    c.login(username_or_email=admin_email, password=admin_password)
+                    c.trigger_scan(bo_cfg.library_id)
+                print()
+                print(f"triggered scan on library {bo_cfg.library_id}")
+            except BookOrbitError as e:
+                print(f"scan trigger failed (non-fatal): {e}", file=sys.stderr)
+    return 0 if result.failed == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="endless-library", description="Self-hosted books -> kindle")
     p.add_argument("--config", help="Path to config.yaml")
@@ -575,6 +659,13 @@ def main(argv: list[str] | None = None) -> int:
     s_bo.add_argument("--admin-password", default="", help="Prompted (hidden) if missing")
     s_bo.add_argument("--library-root", default="", help="Host path mounted at /books in container")
     s_bo.set_defaults(func=cmd_bookorbit_setup)
+
+    s_mig = sub.add_parser("migrate-to-bookorbit", help="Walk Calibre library + copy every book to BookOrbit (Phase 6d)")
+    s_mig.add_argument("--calibre-root", default="", help="Default: data/calibre-library")
+    s_mig.add_argument("--bookorbit-root", default="", help="Default: cfg.bookorbit.library_root_on_host")
+    s_mig.add_argument("--dry-run", action="store_true", help="List what would migrate, no copy")
+    s_mig.add_argument("--trigger-scan", action="store_true", help="POST /scanner/.../scan after copy (needs BOOKORBIT_ADMIN_EMAIL/PASSWORD)")
+    s_mig.set_defaults(func=cmd_migrate_to_bookorbit)
 
     s_backup = sub.add_parser("backup", help="Create a disaster-recovery backup (Phase 5a)")
     s_backup.add_argument("--secrets", default="", help="Path to .env (defaults to none)")
