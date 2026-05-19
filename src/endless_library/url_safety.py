@@ -66,7 +66,7 @@ def assert_safe_url(url: str, *, allow_tailscale_carrier_grade: bool = False) ->
 
     `allow_tailscale_carrier_grade=True` keeps 100.64.0.0/10 reachable
     (used by Tailscale and required only by our internal flaresolverr /
-    calibre-web cross-talk — for which we already use 127.0.0.1).
+    BookOrbit cross-talk — for which we use service-name DNS inside the docker network).
     """
     parsed = urlparse(url)
     scheme = (parsed.scheme or "").lower()

@@ -91,8 +91,9 @@ Self-hosted automation that watches your reading lists, finds the books on Anna'
       │  /schedule    Pause/resume/run/reschedule any job    │
       │  /settings    SMTP, Pushover, Kindle, polling tuning │
       │  /logs        Recent events stream (WebSocket)       │
-      │  /lib         Library page links to BookOrbit (port  │
-      │               reverse proxy at /library/*)           │
+      │  /lib         Library page → BookOrbit (separate    │
+      │               container @ BOOKORBIT_URL; serves      │
+      │               reader, Kobo sync, KOReader, OPDS)     │
       └──────────────────────────────────────────────────────┘
 ```
 
@@ -161,11 +162,24 @@ cd biblichor
 ./deploy/bootstrap.sh
 ```
 
-`bootstrap.sh` prompts you for three values (Gmail address, Gmail
-**App Password**, your `@kindle.com` send-to-kindle address), writes
-a `.env` file, pulls / builds the four services
+`bootstrap.sh` walks you through every secret in one go:
+
+  - Gmail account + **App Password** (the SMTP-to-Kindle path)
+  - Your `@kindle.com` send-to-kindle address
+  - **BookOrbit admin** user / email / display name / password
+  - Optional: ports, TZ, ClamAV opt-in
+
+It then writes a single `.env`, pulls + builds the services
 (biblichor + FlareSolverr + BookOrbit + Postgres, plus optional ClamAV),
-and polls `/healthz` until everything is green.
+polls `/healthz` until biblichor's green, polls BookOrbit's
+`/api/v1/health` (cold Postgres migrations take ~60 s on first run),
+and finally chains `biblichor bookorbit-setup` which:
+
+  - Creates the BookOrbit superuser account.
+  - Creates a watched library at `/books` (the shared mount).
+  - **Flips `bookorbit.enabled = true` in `config.yaml`** so the
+    biblichor pipeline starts dropping books into the library after
+    every successful Kindle send.
 
 When it's done you'll have:
 
@@ -185,6 +199,11 @@ bracketed defaults.
 docker compose -f deploy/compose.yml --env-file .env logs -f biblichor   # tail logs
 docker compose -f deploy/compose.yml --env-file .env restart biblichor   # restart
 docker compose -f deploy/compose.yml --env-file .env down                # stop everything
+
+biblichor bookorbit-setup           # idempotent — re-run anytime
+biblichor migrate-to-bookorbit      # one-shot import from data/calibre-library/
+biblichor backup --postgres-container bookorbit-db \
+                 --bookorbit-data ./data/bookorbit         # snapshot everything
 ```
 
 ### The advanced way — native install on the host
