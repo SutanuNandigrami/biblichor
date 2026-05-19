@@ -757,6 +757,60 @@ def cmd_restore_postgres(args):
     return 0
 
 
+def cmd_bookorbit_doctor(args):
+    """Run BookOrbit health + DTO-drift checks before/after upgrades.
+
+    Phase 6o.8 (R-M-5). Probes the 5 endpoints biblichor relies on
+    and verifies cfg.bookorbit.library_root is reachable in this
+    process (catches C-1-style host-vs-container mismatches).
+    """
+    from endless_library.bookorbit.doctor import run_doctor
+
+    config_path, _ = _resolve_paths(args)
+    cfg = load_config(config_path)
+    _setup_logging(cfg.general.log_level)
+
+    bo_url = args.url or cfg.bookorbit.url or "http://localhost:3000"
+    library_root = (
+        Path(args.library_root)
+        if args.library_root
+        else Path(cfg.bookorbit.library_root)
+        if cfg.bookorbit.library_root
+        else None
+    )
+    library_id = args.library_id or cfg.bookorbit.library_id or None
+
+    admin_user = args.admin_user or os.environ.get("BOOKORBIT_ADMIN_USER", "admin")
+    admin_password = args.admin_password or os.environ.get("BOOKORBIT_ADMIN_PASSWORD", "")
+
+    print(f"Probing BookOrbit at: {bo_url}")
+    print(f"  library_root: {library_root}")
+    print(f"  library_id:   {library_id}")
+    print(f"  admin probes: {'yes' if admin_password else 'no (no password provided)'}")
+    print()
+
+    report = run_doctor(
+        bookorbit_url=bo_url,
+        library_root=library_root,
+        library_id=library_id,
+        admin_username=admin_user,
+        admin_password=admin_password,
+    )
+    for check in report.checks:
+        mark = "[OK]" if check.ok else "[FAIL]"
+        print(f"  {mark:7} {check.name:35} {check.detail}")
+    print()
+    if report.ok:
+        print("All checks passed — BookOrbit + biblichor integration looks healthy.")
+        return 0
+    print("One or more checks failed — see above. Likely causes:")
+    print("  - BookOrbit not running / not reachable at the configured URL")
+    print("  - C-1: cfg.bookorbit.library_root points at a path not visible here")
+    print("  - Auth credentials wrong (re-check BOOKORBIT_ADMIN_PASSWORD)")
+    print("  - BookOrbit version drift: rerun `biblichor bookorbit-setup`")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="endless-library", description="Self-hosted books -> kindle")
     p.add_argument("--config", help="Path to config.yaml")
@@ -841,6 +895,22 @@ def main(argv: list[str] | None = None) -> int:
         help="POST /scanner/.../scan after copy (needs BOOKORBIT_ADMIN_EMAIL/PASSWORD)",
     )
     s_mig.set_defaults(func=cmd_migrate_to_bookorbit)
+
+    s_doc = sub.add_parser(
+        "bookorbit-doctor", help="Probe BookOrbit health + DTO shapes (Phase 6o.8)"
+    )
+    s_doc.add_argument(
+        "--url",
+        default="",
+        help="BookOrbit URL (default: cfg.bookorbit.url or http://localhost:3000)",
+    )
+    s_doc.add_argument("--library-root", default="", help="Override library_root path")
+    s_doc.add_argument("--library-id", default="", help="Override expected library id")
+    s_doc.add_argument(
+        "--admin-user", default="", help="$BOOKORBIT_ADMIN_USER (skip auth checks if omitted)"
+    )
+    s_doc.add_argument("--admin-password", default="", help="$BOOKORBIT_ADMIN_PASSWORD")
+    s_doc.set_defaults(func=cmd_bookorbit_doctor)
 
     s_restore_pg = sub.add_parser(
         "restore-postgres",

@@ -262,6 +262,17 @@ without losing data. The whole thing is a controlled ~5-minute swap.
    ```
 
 Cutover gotchas you'll hit on a real box (lessons from claude-1):
+- **File ownership flip**: native biblichor writes files as your host
+  user (likely UID 1000); compose biblichor (Phase 6o.5) also runs as
+  UID 1000 → no flip. But if you have a pre-Phase-6o.5 image still
+  running as root, run `sudo chown -R 1000:1000 library/` before
+  cutover.
+- **BOOKORBIT_* secrets are NOT in your native config/.env** — they
+  are generated fresh by `bootstrap.sh`. Don'''t expect to carry
+  them over.
+- **The sqlite REPLACE statement** for path rewriting (`data/books` →
+  `/data/books`) is brittle on non-default `books_dir` values. Inspect
+  your `config.yaml` and adjust the SED-style replace exactly.
 - The pre-Phase-6n `deploy/Dockerfile` had `ENTRYPOINT [..., "endless_library.app:app", ...]` — should be `"endless_library.app:entry", "--factory"` (the app module exposes a factory). Fixed in this commit.
 - The pre-Phase-6n `deploy/compose.yml` had `BIBLICHOR_DATA_DIR` / `BIBLICHOR_CONFIG` env names, but the code reads `CONFIG_PATH` and `LIBRARY_DB`. Renamed.
 - The pre-Phase-6n `deploy/compose.yml` used `./data` relative paths — docker compose resolves those relative to the COMPOSE FILE LOCATION, not where you ran the command. So `./data` meant `deploy/data` (empty), not your library. Fixed to `../<dir>`.
@@ -355,6 +366,73 @@ sudo systemctl status biblichor
 ## Configuration reference
 
 The two settings files do different things:
+
+### Host filesystem requirements (PUID/PGID)
+
+BookOrbit'''s container runs as UID 1000 (`PUID=1000`, `PGID=1000` in
+the compose env). biblichor (Phase 6o.5 R-I-6) also runs as UID 1000.
+The shared library bind-mount `./library` MUST be readable + writable
+by UID 1000 on the host:
+
+  - On Ubuntu/Debian default cloud images: the `ubuntu` user is UID
+    1000 → no action needed.
+  - On custom cloud images / NAS / Synology: check `id -u <your-user>`
+    and adjust either the host directory ownership (`sudo chown -R 1000:1000 ./library`)
+    OR override `PUID/PGID` in `.env` to match your user.
+
+Postgres'''s container runs as UID 999 (pgvector convention) and only
+touches `./data/bookorbit-db`. If a `docker compose up` produces
+"could not open file ... Permission denied" from postgres, fix with:
+
+```bash
+sudo chown -R 999:999 data/bookorbit-db
+```
+
+### Tag-pinning the BookOrbit image
+
+`deploy/compose.yml` pins BookOrbit by **sha256 digest**:
+
+```yaml
+image: ghcr.io/bookorbit/bookorbit@sha256:<…>
+```
+
+GHCR doesn'''t publish semver tags for BookOrbit (the registry only
+has `:latest`), so digest pinning is the only way to get
+reproducibility. To bump:
+
+1. `docker pull ghcr.io/bookorbit/bookorbit:latest`
+2. `docker inspect ghcr.io/bookorbit/bookorbit:latest --format '{{index .RepoDigests 0}}''`
+3. Paste the new digest into `compose.yml`.
+4. **Run `biblichor bookorbit-doctor`** (Phase 6o.8 R-M-5) — probes
+   the 5 endpoints biblichor depends on (`/auth/setup-status`,
+   `/auth/login`, `/libraries`, `/scanner`, `/health` + OPDS) to
+   catch any DTO drift.
+5. `docker compose pull && docker compose up -d bookorbit`.
+6. Run `biblichor bookorbit-doctor` again to confirm post-upgrade.
+
+If the doctor flags drift, downgrade to the previous digest (history
+is in `git log -p deploy/compose.yml`) and open an issue.
+
+### BookOrbit API surface biblichor depends on
+
+BookOrbit'''s REST API is **not publicly documented** at
+[bookorbit.app/docs](https://bookorbit.app/), so biblichor relies on
+just these 5 endpoints (discovered by reading the NestJS server
+modules). Pinned by `biblichor bookorbit-doctor`:
+
+| Endpoint | Used for | Failure mode |
+|---|---|---|
+| `GET /api/v1/health` | service liveness | startup nudge / healthcheck |
+| `GET /api/v1/auth/setup-status` | first-run gate | setup CLI |
+| `POST /api/v1/auth/setup` | bootstrap admin (x-setup-token) | setup CLI |
+| `POST /api/v1/auth/login` | JWT for follow-up calls | setup + doctor + scan |
+| `POST /api/v1/libraries` | create watched library | setup CLI |
+| `POST /api/v1/scanner/libraries/{id}/scan` | manual scan trigger | optional, used by migrate --trigger-scan |
+| `GET /api/v1/libraries` | doctor probe | doctor |
+| `GET /api/v1/opds` | OPDS surface in SPA | doctor |
+
+If a future BookOrbit version changes any of these shapes, the
+doctor catches it before user-facing breakage.
 
 ### Two `.env` files (Phase 6o.5)
 
