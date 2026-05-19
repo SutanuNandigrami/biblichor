@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 
 from endless_library.config import BookOrbitCfg, Config, load_config, save_config

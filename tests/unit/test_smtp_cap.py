@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from endless_library.config import SmtpCfg
 
-
 # Gmail's outbound MIME-encoded ceiling
 GMAIL_OUTBOUND_LIMIT_BYTES = 25 * 1024 * 1024
 # The inflation factor used in pipeline.py:_process_from_downloaded

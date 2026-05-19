@@ -8,16 +8,14 @@ returns a structured result the CLI can print.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from endless_library.config import Config, StorageCfg
-from endless_library.storage.base import KeyNotFound, StorageError, Store
+from endless_library.storage.base import StorageError
 from endless_library.storage.factory import build_store
 from endless_library.storage.hybrid import HybridStore
 from endless_library.storage.local import LocalStore
-from endless_library.storage.migrate import MigrateResult, migrate_all
+from endless_library.storage.migrate import migrate_all
 
 
 @pytest.fixture

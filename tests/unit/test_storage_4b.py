@@ -8,9 +8,6 @@ combine two LocalStores in tmp_path so the cross-backend semantics
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -19,7 +16,6 @@ from endless_library.storage.base import KeyNotFound, StorageError, Store
 from endless_library.storage.hybrid import HybridStore
 from endless_library.storage.local import LocalStore
 from endless_library.storage.rclone import RcloneStore
-
 
 # ============ RcloneStore (mocked subprocess) ============
 
@@ -76,16 +72,18 @@ def test_rclone_put_raises_on_nonzero_exit(rclone, tmp_path):
     src = tmp_path / "x.bin"
     src.write_bytes(b"data")
 
-    with patch.object(RcloneStore, "_run", lambda self, args: _FakeProc(1, stderr="drive permission denied")):
-        with pytest.raises(StorageError, match="permission denied"):
-            rclone.put(src, "x.bin")
+    with patch.object(
+        RcloneStore, "_run", lambda self, args: _FakeProc(1, stderr="drive permission denied")
+    ), pytest.raises(StorageError, match="permission denied"):
+        rclone.put(src, "x.bin")
 
 
 def test_rclone_get_raises_key_not_found_when_missing(rclone, tmp_path):
     # exists() probes via lsf; we return empty stdout + zero exit
-    with patch.object(RcloneStore, "_run", lambda self, args: _FakeProc(0, stdout="")):
-        with pytest.raises(KeyNotFound):
-            rclone.get("absent.bin", tmp_path / "out.bin")
+    with patch.object(
+        RcloneStore, "_run", lambda self, args: _FakeProc(0, stdout="")
+    ), pytest.raises(KeyNotFound):
+        rclone.get("absent.bin", tmp_path / "out.bin")
 
 
 def test_rclone_get_calls_copyto_when_present(rclone, tmp_path):
@@ -196,7 +194,7 @@ def test_hybrid_mirror_swallows_backup_failure(hybrid_mirror, sample_file, monke
 
 def test_hybrid_mirror_propagates_primary_failure(hybrid_mirror, sample_file, monkeypatch):
     """Primary write failure IS authoritative — propagate."""
-    h, p, b = hybrid_mirror
+    h, p, _b = hybrid_mirror
 
     def boom(local_path, remote_key):
         raise StorageError("primary outage")
@@ -207,7 +205,7 @@ def test_hybrid_mirror_propagates_primary_failure(hybrid_mirror, sample_file, mo
 
 
 def test_hybrid_get_prefers_primary(hybrid_mirror, sample_file, tmp_path):
-    h, p, b = hybrid_mirror
+    h, p, _b = hybrid_mirror
     p.put(sample_file, "x.bin")  # primary only — backup empty
     out = tmp_path / "out.bin"
     h.get("x.bin", out)
@@ -216,7 +214,7 @@ def test_hybrid_get_prefers_primary(hybrid_mirror, sample_file, tmp_path):
 
 def test_hybrid_get_falls_back_to_backup(hybrid_mirror, sample_file, tmp_path):
     """If primary is missing the key but backup has it, return backup."""
-    h, p, b = hybrid_mirror
+    h, _p, b = hybrid_mirror
     b.put(sample_file, "x.bin")  # backup only
     out = tmp_path / "out.bin"
     h.get("x.bin", out)
@@ -225,7 +223,7 @@ def test_hybrid_get_falls_back_to_backup(hybrid_mirror, sample_file, tmp_path):
 
 def test_hybrid_get_propagates_backup_missing(hybrid_mirror, tmp_path):
     """Neither side has it -> KeyNotFound."""
-    h, p, b = hybrid_mirror
+    h, _p, _b = hybrid_mirror
     with pytest.raises(KeyNotFound):
         h.get("absent.bin", tmp_path / "out.bin")
 

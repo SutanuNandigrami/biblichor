@@ -9,14 +9,11 @@ from __future__ import annotations
 
 import json
 import shutil
-from pathlib import Path
 
 import pytest
 
 from endless_library.backup import (
-    BackupManifest,
     MANIFEST_NAME,
-    SCHEMA_VERSION,
     make_backup,
 )
 from endless_library.restore import RestoreError, restore

@@ -20,7 +20,6 @@ from pathlib import Path
 
 from endless_library.bookorbit.client import (
     BookOrbitClient,
-    BookOrbitError,
 )
 
 log = logging.getLogger(__name__)
@@ -76,7 +75,7 @@ def ensure_bookorbit_ready(
         # Find or create the biblichor library
         libs = client.list_libraries()
         existing = next(
-            (l for l in libs if l.get("name") == DEFAULT_LIBRARY_NAME),
+            (lib for lib in libs if lib.get("name") == DEFAULT_LIBRARY_NAME),
             None,
         )
         if existing:

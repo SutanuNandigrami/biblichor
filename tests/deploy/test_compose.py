@@ -37,7 +37,7 @@ def test_all_required_services_present(compose: dict):
     a half-broken stack. Phase 6e replaced calibre-web with bookorbit."""
     services = set(compose["services"].keys())
     REQUIRED = {"biblichor", "flaresolverr", "bookorbit", "bookorbit-db", "clamav"}
-    assert REQUIRED <= services, f"missing services: {REQUIRED - services}"
+    assert services >= REQUIRED, f"missing services: {REQUIRED - services}"
 
 
 def test_calibre_web_is_gone_after_phase_6e(compose: dict):

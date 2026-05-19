@@ -14,9 +14,6 @@ the queue UI shows skipped books distinctly.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from endless_library.config import Config
 from endless_library.pipeline import PipelineDeps, _search_fail_or_skip

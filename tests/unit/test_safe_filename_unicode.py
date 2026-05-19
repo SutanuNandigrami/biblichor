@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from endless_library.download import safe_filename
 
-
 # ============ REGRESSION: Unicode letters survive ============
 
 

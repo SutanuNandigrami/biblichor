@@ -6,7 +6,6 @@ BookOrbit instance to validate the request shapes.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import httpx
 import pytest
@@ -17,7 +16,6 @@ from endless_library.bookorbit.client import (
     BookOrbitError,
 )
 from endless_library.bookorbit.setup import ensure_bookorbit_ready
-
 
 BASE = "http://bookorbit.test"
 
@@ -64,11 +62,10 @@ def test_setup_admin_raises_clear_error_on_failure(respx_mock):
     respx_mock.post("/api/v1/auth/setup").mock(
         return_value=httpx.Response(403, text="setup token mismatch")
     )
-    with BookOrbitClient(BASE) as c:
-        with pytest.raises(BookOrbitError, match="setup failed"):
-            c.setup_admin(
-                token="bad", username="x", name="x", email="x@x.com", password="Password1"
-            )
+    with BookOrbitClient(BASE) as c, pytest.raises(BookOrbitError, match="setup failed"):
+        c.setup_admin(
+            token="bad", username="x", name="x", email="x@x.com", password="Password1"
+        )
 
 
 @respx.mock(base_url=BASE)
@@ -96,9 +93,8 @@ def test_login_supports_snake_case_response(respx_mock):
 def test_auth_required_for_libraries(respx_mock):
     """Calling list_libraries without login must raise — guard against
     a future refactor that lets unauthenticated calls through."""
-    with BookOrbitClient(BASE) as c:
-        with pytest.raises(BookOrbitError, match="not authenticated"):
-            c.list_libraries()
+    with BookOrbitClient(BASE) as c, pytest.raises(BookOrbitError, match="not authenticated"):
+        c.list_libraries()
 
 
 @respx.mock(base_url=BASE)

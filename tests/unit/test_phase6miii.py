@@ -5,10 +5,8 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import httpx
-import pytest
 
 from endless_library.app import _probe_bookorbit_health
-
 
 # ============ M-6 startup nudge ============
 
@@ -90,6 +88,7 @@ def test_pipeline_source_does_not_use_lazy_bookorbit_import():
     """Pins Improvement #5: the inline import must NOT come back. If a
     future refactor reintroduces it, this test fails."""
     import inspect
+
     import endless_library.pipeline as pipeline_mod
     src = inspect.getsource(pipeline_mod)
     # The only place "from endless_library.bookorbit" appears should be

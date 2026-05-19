@@ -26,6 +26,7 @@ import subprocess
 import tarfile
 import tempfile
 from dataclasses import dataclass
+from datetime import UTC
 from pathlib import Path
 
 from endless_library.backup import (
@@ -34,7 +35,6 @@ from endless_library.backup import (
     SCHEMA_VERSION,
     BackupManifest,
 )
-from endless_library.storage.base import Store
 
 log = logging.getLogger(__name__)
 
@@ -174,10 +174,10 @@ def _atomic_swap(staged: Path, live: Path) -> None:
     by renaming to `live.bak-YYYYMMDDhhmmssZ`. This way a botched
     restore is still recoverable from the backup-of-the-backup."""
     if live.exists():
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         bak = live.with_name(
-            f"{live.name}.bak-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+            f"{live.name}.bak-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
         )
         live.rename(bak)
         log.info("preserved old %s as %s", live.name, bak.name)
@@ -255,11 +255,11 @@ def restore(
             # For directories, we use a sibling-rename strategy on the
             # target itself, then move the staged dir into place
             if library_target.exists():
-                from datetime import datetime, timezone
+                from datetime import datetime
 
                 bak = library_target.with_name(
                     f"{library_target.name}.bak-"
-                    f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+                    f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
                 )
                 library_target.rename(bak)
                 log.info("preserved old library as %s", bak.name)
@@ -287,11 +287,11 @@ def restore(
         bookorbit_src = root / "bookorbit-data"
         if bookorbit_src.exists() and bookorbit_data_target is not None:
             if bookorbit_data_target.exists():
-                from datetime import datetime, timezone
+                from datetime import datetime
 
                 bak = bookorbit_data_target.with_name(
                     f"{bookorbit_data_target.name}.bak-"
-                    f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+                    f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
                 )
                 bookorbit_data_target.rename(bak)
                 log.info("preserved old bookorbit-data as %s", bak.name)

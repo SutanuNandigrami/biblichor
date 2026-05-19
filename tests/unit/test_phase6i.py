@@ -11,17 +11,14 @@ Three contracts pinned:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import httpx
-import pytest
 import respx
 
-from endless_library.config import Config, load_config, save_config
 from endless_library.bookorbit.setup import ensure_bookorbit_ready
-
+from endless_library.config import Config, load_config, save_config
 
 BASE = "http://bookorbit.test"
 
@@ -179,7 +176,6 @@ def test_pipeline_drop_fires_when_bookorbit_configured(tmp_path):
         return _R()
 
     # Patch the imported drop_into_library at the call site
-    import endless_library.pipeline as pipeline_mod
     # The pipeline imports drop_into_library lazily inside the function;
     # patch the module attribute that gets looked up.
     with patch.object(drop_mod, "drop_into_library", fake_drop):

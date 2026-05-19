@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 
 from endless_library.app import create_app
 from endless_library.config import Config, save_config
-from endless_library.domain.models import Candidate
 from endless_library.pipeline import PipelineDeps
 
 
@@ -74,7 +73,7 @@ def test_score_breakdown_components_contains_expected_keys(client_with_book):
     bd = r.json()["candidates"][0]["score_breakdown"]
     components = bd["components"]
     EXPECTED = {"isbn_match", "isbn13_matched", "title_similarity", "title_similarity_raw"}
-    assert EXPECTED <= set(components.keys()), f"missing: {EXPECTED - set(components.keys())}"
+    assert set(components.keys()) >= EXPECTED, f"missing: {EXPECTED - set(components.keys())}"
 
 
 def test_score_breakdown_reflects_actual_isbn_match(client_with_book):
@@ -106,7 +105,7 @@ def test_book_detail_response_shape(client_with_book):
     cand = body["candidates"][0]
     REQUIRED = {"id", "provider", "md5", "title", "format", "filesize_bytes",
                 "language", "score", "detail_url", "mirror"}
-    assert REQUIRED <= set(cand.keys()), f"regressed: missing {REQUIRED - set(cand.keys())}"
+    assert set(cand.keys()) >= REQUIRED, f"regressed: missing {REQUIRED - set(cand.keys())}"
 
 
 def test_book_detail_endpoint_returns_404_for_missing_book(client_with_book):

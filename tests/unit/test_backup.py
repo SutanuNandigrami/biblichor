@@ -8,18 +8,16 @@ the real pipeline if zstd is present.
 from __future__ import annotations
 
 import json
-import os
 import tarfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from endless_library.backup import (
+    MANIFEST_NAME,
     BackupError,
     BackupManifest,
     BackupResult,
-    MANIFEST_NAME,
     make_backup,
 )
 from endless_library.storage.local import LocalStore
@@ -111,7 +109,7 @@ def test_age_recipient_without_age_binary_raises(fake_world, monkeypatch):
     )
     if not _is_zstd_available():
         pytest.skip("real zstd needed for this path")
-    with pytest.raises(BackupError, match="age.*not on PATH"):
+    with pytest.raises(BackupError, match="age.*not on PATH"):  # noqa: RUF043
         make_backup(
             db_path=fake_world["db"],
             config_path=fake_world["cfg"],

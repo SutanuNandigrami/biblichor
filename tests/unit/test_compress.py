@@ -15,7 +15,6 @@ path round-trips the zip structure.
 
 from __future__ import annotations
 
-import io
 import shutil
 import zipfile
 from pathlib import Path
@@ -28,7 +27,6 @@ from endless_library.compress import (
     compress_pdf,
     try_compress,
 )
-
 
 # ============ REGRESSION: tool absence + larger-output protection ============
 

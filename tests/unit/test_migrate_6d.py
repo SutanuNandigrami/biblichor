@@ -4,12 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from endless_library.bookorbit.migrate import (
-    MigrateResult,
-    _pick_canonical_file,
     _book_dirs,
+    _pick_canonical_file,
     migrate_calibre_to_bookorbit,
 )
 

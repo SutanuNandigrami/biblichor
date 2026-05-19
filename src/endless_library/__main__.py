@@ -272,7 +272,7 @@ def cmd_storage_migrate(args):
     from endless_library.storage.factory import build_store
     from endless_library.storage.migrate import migrate_all
 
-    config_path, db_path = _resolve_paths(args)
+    config_path, _db_path = _resolve_paths(args)
     cfg = load_config(config_path)
     _setup_logging(cfg.general.log_level)
 
@@ -330,7 +330,9 @@ def cmd_backup(args):
     # --no-encrypt (which the user must explicitly set).
     if not recipient and not args.no_encrypt:
         from endless_library.recovery_key import (
-            RecoveryKeyError, ensure_recovery_key, print_warning,
+            RecoveryKeyError,
+            ensure_recovery_key,
+            print_warning,
         )
 
         secrets_dir = Path(cfg.general.books_dir).parent / "secrets"
@@ -387,7 +389,8 @@ def cmd_restore(args):
     """
     import tempfile
 
-    from endless_library.restore import RestoreError, restore as do_restore
+    from endless_library.restore import RestoreError
+    from endless_library.restore import restore as do_restore
     from endless_library.storage.factory import build_store
 
     config_path, db_path = _resolve_paths(args)
@@ -458,7 +461,9 @@ def cmd_restore(args):
 def cmd_backup_key(args):
     """Show or initialize the biblichor recovery key (Phase 5c)."""
     from endless_library.recovery_key import (
-        RecoveryKeyError, ensure_recovery_key, print_warning,
+        RecoveryKeyError,
+        ensure_recovery_key,
+        print_warning,
     )
 
     config_path, _ = _resolve_paths(args)
@@ -494,8 +499,8 @@ def cmd_bookorbit_setup(args):
     """
     import getpass
 
-    from endless_library.bookorbit.setup import ensure_bookorbit_ready
     from endless_library.bookorbit.client import BookOrbitError
+    from endless_library.bookorbit.setup import ensure_bookorbit_ready
 
     config_path, _ = _resolve_paths(args)
     cfg = load_config(config_path)

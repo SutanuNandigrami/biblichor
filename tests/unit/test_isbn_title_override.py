@@ -17,7 +17,6 @@ from endless_library.domain.models import Candidate, SearchQuery
 from endless_library.domain.scoring import score_candidate
 from endless_library.domain.state_machine import decide_auto_pick
 
-
 # ============ REGRESSION: ISBN + title override fires ============
 
 

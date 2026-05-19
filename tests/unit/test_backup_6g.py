@@ -5,7 +5,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tarfile
-from pathlib import Path
 
 import pytest
 import zstandard

@@ -37,7 +37,7 @@ class BookOrbitClient:
         self._jwt: str | None = None
         self._client = httpx.Client(base_url=self.base_url, timeout=timeout)
 
-    def __enter__(self) -> "BookOrbitClient":
+    def __enter__(self) -> BookOrbitClient:
         return self
 
     def __exit__(self, *exc) -> None:

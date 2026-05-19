@@ -18,10 +18,7 @@ books well below floor still fall through to every scraper.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from endless_library.config import Config
 from endless_library.domain.models import Candidate
@@ -105,7 +102,7 @@ def test_annas_top_in_gap_zone_continues_to_libgen(tmp_path):
         return scraper
 
     with patch("endless_library.scrapers.registry.build", side_effect=fake_build):
-        cands, last = _search_with_strategies(deps, book)
+        cands, _last = _search_with_strategies(deps, book)
 
     # libgen MUST have been queried, because annas's gap-zone score doesn't
     # short-circuit anymore

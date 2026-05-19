@@ -32,7 +32,7 @@ import sys
 import tarfile
 import tempfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from endless_library.storage.base import Store
@@ -103,7 +103,7 @@ def _build_manifest(staging: Path) -> BackupManifest:
         biblichor_version=bv,
         python_version=sys.version.split()[0],
         platform=platform.platform(),
-        created_at_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        created_at_utc=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         schema_version=SCHEMA_VERSION,
     )
     for root, _dirs, files in os.walk(staging):
@@ -205,7 +205,7 @@ def make_backup(
     if not config_path.exists():
         raise BackupError(f"config not found: {config_path}")
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     fname_root = f"biblichor-backup-{ts}"
 
     with tempfile.TemporaryDirectory(prefix="biblichor-backup-") as work_str:

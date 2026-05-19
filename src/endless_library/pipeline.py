@@ -5,6 +5,10 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from endless_library.bookorbit.drop import (
+    BookOrbitDropError,
+    drop_into_library,
+)
 from endless_library.config import Config
 from endless_library.convert import ConvertError, convert_to_epub
 from endless_library.db.bench import BenchRunRepo
@@ -15,12 +19,7 @@ from endless_library.db.mirrors import MirrorRepo
 from endless_library.db.schema import init_db
 from endless_library.db.sources import SourceAccountRepo
 from endless_library.domain.format_router import decide_format_action
-from endless_library.domain.models import Candidate, SearchQuery
-from endless_library.domain.models import ScoreBreakdown
-from endless_library.bookorbit.drop import (
-    BookOrbitDropError,
-    drop_into_library,
-)
+from endless_library.domain.models import Candidate, ScoreBreakdown, SearchQuery
 from endless_library.domain.scoring import score_candidate
 from endless_library.domain.state_machine import decide_auto_pick
 from endless_library.download import DownloadError, download

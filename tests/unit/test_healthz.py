@@ -15,16 +15,14 @@ contains the documented fields.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from endless_library.db.schema import connect, init_db
+from endless_library.db.schema import init_db
 from endless_library.web import api as api_mod
 
 
@@ -138,12 +136,12 @@ def test_healthz_body_always_contains_documented_fields(healthy_db: Path):
     # Happy path
     app = _build_app(db_path=healthy_db, scheduler_running=True)
     body = TestClient(app).get("/healthz").json()
-    assert REQUIRED_KEYS <= set(body.keys()), f"missing keys: {REQUIRED_KEYS - set(body.keys())}"
+    assert set(body.keys()) >= REQUIRED_KEYS, f"missing keys: {REQUIRED_KEYS - set(body.keys())}"
 
     # Unhealthy path
     app_bad = _build_app(db_path=healthy_db, scheduler_running=False)
     body_bad = TestClient(app_bad).get("/healthz").json()
-    assert REQUIRED_KEYS <= set(body_bad.keys()), f"missing keys: {REQUIRED_KEYS - set(body_bad.keys())}"
+    assert set(body_bad.keys()) >= REQUIRED_KEYS, f"missing keys: {REQUIRED_KEYS - set(body_bad.keys())}"
 
 
 def test_healthz_scrapers_count_matches_registry(healthy_db: Path):

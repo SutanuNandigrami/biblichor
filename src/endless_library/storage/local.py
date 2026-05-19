@@ -14,8 +14,8 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from endless_library.storage.base import KeyNotFound, StorageError
 
