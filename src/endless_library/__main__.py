@@ -465,6 +465,71 @@ def cmd_backup_key(args):
     return 0
 
 
+def cmd_bookorbit_setup(args):
+    """Phase 6b: idempotent first-run bootstrap for BookOrbit.
+
+    Reads the BOOKORBIT_* env vars (populated by deploy/bootstrap.sh)
+    plus optional CLI overrides, then ensures the admin user + watched
+    library both exist. Safe to re-run.
+    """
+    import getpass
+
+    from endless_library.bookorbit.setup import ensure_bookorbit_ready
+    from endless_library.bookorbit.client import BookOrbitError
+
+    config_path, _ = _resolve_paths(args)
+    cfg = load_config(config_path)
+    _setup_logging(cfg.general.log_level)
+
+    url = args.url or os.environ.get("BOOKORBIT_URL", "http://localhost:3000")
+    setup_token = args.setup_token or os.environ.get("BOOKORBIT_SETUP_TOKEN")
+    if not setup_token:
+        print("error: BOOKORBIT_SETUP_TOKEN not set in env and --setup-token not given", file=sys.stderr)
+        return 1
+
+    admin_user = args.admin_user or os.environ.get("BOOKORBIT_ADMIN_USER", "admin")
+    admin_email = args.admin_email or os.environ.get("BOOKORBIT_ADMIN_EMAIL")
+    if not admin_email:
+        admin_email = input("BookOrbit admin email: ").strip()
+    admin_name = args.admin_name or admin_email.split("@")[0]
+    admin_password = args.admin_password or os.environ.get("BOOKORBIT_ADMIN_PASSWORD")
+    if not admin_password:
+        admin_password = getpass.getpass("BookOrbit admin password (8+ chars, upper+lower+digit): ")
+        if len(admin_password) < 8:
+            print("password must be at least 8 chars", file=sys.stderr)
+            return 1
+
+    library_root = args.library_root or str(Path(cfg.general.books_dir).resolve())
+    bo_cfg_path = Path(config_path).parent / "bookorbit.json"
+
+    try:
+        result = ensure_bookorbit_ready(
+            url=url,
+            setup_token=setup_token,
+            admin_username=admin_user,
+            admin_name=admin_name,
+            admin_email=admin_email,
+            admin_password=admin_password,
+            library_root_on_host=library_root,
+            config_path=bo_cfg_path,
+        )
+    except BookOrbitError as e:
+        print(f"bookorbit setup failed: {e}", file=sys.stderr)
+        return 1
+
+    print()
+    if result.just_created:
+        print(f"created new BookOrbit admin ({admin_email})")
+    else:
+        print(f"BookOrbit admin already exists; using existing account ({admin_email})")
+    print(f"library id:   {result.library_id}")
+    print(f"library root: {library_root} -> /books (mounted)")
+    print(f"config saved: {result.config_path}")
+    print()
+    print(f"open the library:  {url}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="endless-library", description="Self-hosted books -> kindle")
     p.add_argument("--config", help="Path to config.yaml")
@@ -500,6 +565,16 @@ def main(argv: list[str] | None = None) -> int:
     s_restore.add_argument("--force", action="store_true", help="Override the live-newer guard")
     s_restore.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     s_restore.set_defaults(func=cmd_restore)
+
+    s_bo = sub.add_parser("bookorbit-setup", help="First-run BookOrbit admin + library (Phase 6b)")
+    s_bo.add_argument("--url", default="", help="BookOrbit base URL (default $BOOKORBIT_URL)")
+    s_bo.add_argument("--setup-token", default="", help="x-setup-token (default $BOOKORBIT_SETUP_TOKEN)")
+    s_bo.add_argument("--admin-user", default="", help="Admin username (default \"admin\")")
+    s_bo.add_argument("--admin-name", default="", help="Display name (default from email)")
+    s_bo.add_argument("--admin-email", default="", help="Prompted if missing")
+    s_bo.add_argument("--admin-password", default="", help="Prompted (hidden) if missing")
+    s_bo.add_argument("--library-root", default="", help="Host path mounted at /books in container")
+    s_bo.set_defaults(func=cmd_bookorbit_setup)
 
     s_backup = sub.add_parser("backup", help="Create a disaster-recovery backup (Phase 5a)")
     s_backup.add_argument("--secrets", default="", help="Path to .env (defaults to none)")
