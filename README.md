@@ -3,7 +3,8 @@
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
 [![Vue 3](https://img.shields.io/badge/vue-3-42b883.svg)](https://vuejs.org/)
 [![FastAPI](https://img.shields.io/badge/fastapi-async-009688.svg)](https://fastapi.tiangolo.com/)
-[![Tests: 435](https://img.shields.io/badge/tests-435%20passing-brightgreen.svg)]()
+[![Tests: 588](https://img.shields.io/badge/tests-588%20passing-brightgreen.svg)]()
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)](LICENSE)
 
 Self-hosted automation that watches your reading lists, finds the books on Anna's Archive (with Welib, LibGen, archive.org, and KindleBangla fallbacks), converts them where needed, and emails them to your Kindle — with a Vue 3 dashboard, an embedded Calibre-Web library, and a scheduler you control from the browser.
 
@@ -422,4 +423,6 @@ security:
 
 ## License
 
-MIT — see `LICENSE` if present, otherwise treat as MIT (do whatever you want, but no warranty).
+GNU Affero General Public License v3.0 (AGPL-3.0) — see [LICENSE](LICENSE).
+
+AGPL is strong copyleft with a network-use clause: if you run a modified biblichor as a service that users access over a network, you must make the source available to those users. Since this repo is already public, simply linking to it satisfies that obligation. Personal self-hosted use has no additional obligations.
