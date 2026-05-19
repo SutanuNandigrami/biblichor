@@ -11,6 +11,20 @@ import respx
 
 from endless_library.bookorbit.client import BookOrbitClient
 
+
+def _docs_text() -> str:
+    """Phase 6q: docs moved from README to docs/wiki/. Search both."""
+    root = Path(__file__).parent.parent.parent
+    parts = [(root / "README.md").read_text()]
+    wiki = root / "docs" / "wiki"
+    if wiki.exists():
+        for f in sorted(wiki.glob("*.md")):
+            parts.append(f.read_text())
+    return chr(10).join(parts)
+
+
+
+
 BASE = "http://bookorbit.test"
 
 
@@ -72,7 +86,7 @@ def test_setup_passes_hourly_cron_on_library_creation():
 
 
 def test_readme_warns_about_metadata_provider_field_rules():
-    readme = (Path(__file__).parent.parent.parent / "README.md").read_text()
+    readme = _docs_text()
     assert "Fill missing only" in readme
     assert "Bengali" in readme  # the protect-Bengali-enrichment guidance
     # Field rules warning specifically mentions Goodreads as a Latin-only source
@@ -80,6 +94,6 @@ def test_readme_warns_about_metadata_provider_field_rules():
 
 
 def test_readme_documents_auto_scan_cron():
-    readme = (Path(__file__).parent.parent.parent / "README.md").read_text()
+    readme = _docs_text()
     assert "auto-scan cron" in readme
     assert "0 * * * *" in readme or "hourly" in readme

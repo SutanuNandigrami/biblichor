@@ -67,6 +67,10 @@ const showCreds = ref(false)
 const credsBusy = ref(false)
 const credsForm = ref({ admin_username: 'admin', admin_password: '' })
 
+const showChangePw = ref(false)
+const changePwBusy = ref(false)
+const changePwForm = ref({ current_password: '', new_password: '', confirm_password: '' })
+
 const doctorBusy = ref(false)
 const doctorReport = ref<{ ok: boolean; checks: DoctorCheck[] } | null>(null)
 
@@ -179,6 +183,36 @@ async function runScan() {
     scanBusy.value = false
   }
 }
+
+async function submitChangePassword() {
+  if (changePwForm.value.new_password !== changePwForm.value.confirm_password) {
+    toast.error('New password and confirmation do not match')
+    return
+  }
+  if (!changePwForm.value.current_password || !changePwForm.value.new_password) {
+    toast.error('Both current and new password are required')
+    return
+  }
+  changePwBusy.value = true
+  try {
+    await api('/api/bookorbit/admin/change-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        current_password: changePwForm.value.current_password,
+        new_password: changePwForm.value.new_password,
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    toast.success('BookOrbit admin password changed')
+    showChangePw.value = false
+    changePwForm.value = { current_password: '', new_password: '', confirm_password: '' }
+    await refresh()
+  } catch (e: any) {
+    toast.error('Change failed: ' + (e?.message ?? e))
+  } finally {
+    changePwBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -277,7 +311,7 @@ async function runScan() {
           </p>
         </Card>
 
-        <div class="grid grid-cols-3 gap-3">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Button variant="outline" :disabled="scanBusy" @click="runScan">
             <RotateCw class="w-4 h-4 mr-2" :class="scanBusy ? 'animate-spin' : ''" />
             {{ scanBusy ? 'Scanning...' : 'Scan now' }}
@@ -286,10 +320,19 @@ async function runScan() {
             <Stethoscope class="w-4 h-4 mr-2" />
             {{ doctorBusy ? 'Probing...' : 'Run doctor' }}
           </Button>
+          <Button variant="outline" @click="showChangePw = !showChangePw">
+            <KeyRound class="w-4 h-4 mr-2" />
+            Change password
+          </Button>
           <Button variant="outline" @click="showCreds = !showCreds">
             <KeyRound class="w-4 h-4 mr-2" />
-            {{ status.has_creds ? 'Update creds' : 'Store creds' }}
+            {{ status.has_creds ? 'Stored creds' : 'Store creds' }}
           </Button>
+        </div>
+
+        <div class="text-[11px] text-muted-foreground text-center -mt-2">
+          Need to re-run setup or rebuild the watched library?
+          <button class="underline hover:text-foreground" @click="openWizard">Re-open setup wizard</button>
         </div>
 
         <Card v-if="doctorReport" class="p-4 space-y-2">
@@ -310,13 +353,54 @@ async function runScan() {
           </ul>
         </Card>
 
-        <Card v-if="showCreds" class="p-4 space-y-3">
+        <Card v-if="showChangePw" class="p-4 space-y-3 border-primary/40">
           <h3 class="text-sm font-semibold flex items-center gap-2">
-            <KeyRound class="w-4 h-4 text-primary" /> BookOrbit credentials
+            <KeyRound class="w-4 h-4 text-primary" /> Change BookOrbit admin password
           </h3>
           <p class="text-[11px] text-muted-foreground">
-            Stored encrypted in <code class="font-mono">library.db</code> under the recovery key.
-            Used by Scan and authenticated Doctor checks.
+            Rotates the actual password on BookOrbit's account (calls
+            <code class="font-mono">/auth/change-password</code>) and updates biblichor's stored copy.
+            Use this when you want to pick a password you remember instead of the bootstrap-generated one.
+          </p>
+          <div class="space-y-3">
+            <label class="text-xs space-y-1 block">
+              <span class="text-muted-foreground">Current password</span>
+              <input v-model="changePwForm.current_password" type="password" autocomplete="current-password"
+                class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+              <span class="text-[10px] text-muted-foreground">
+                The original is in <code class="font-mono">.env</code> as <code class="font-mono">BOOKORBIT_ADMIN_PASSWORD</code>.
+              </span>
+            </label>
+            <label class="text-xs space-y-1 block">
+              <span class="text-muted-foreground">New password (8+ chars, mixed case + digit)</span>
+              <input v-model="changePwForm.new_password" type="password" autocomplete="new-password"
+                class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+            </label>
+            <label class="text-xs space-y-1 block">
+              <span class="text-muted-foreground">Confirm new password</span>
+              <input v-model="changePwForm.confirm_password" type="password" autocomplete="new-password"
+                class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+            </label>
+          </div>
+          <div class="flex gap-2 justify-end">
+            <Button variant="ghost" size="sm" :disabled="changePwBusy" @click="showChangePw = false">Cancel</Button>
+            <Button size="sm"
+              :disabled="changePwBusy || !changePwForm.current_password || !changePwForm.new_password"
+              @click="submitChangePassword">
+              {{ changePwBusy ? 'Rotating...' : 'Change password' }}
+            </Button>
+          </div>
+        </Card>
+
+        <Card v-if="showCreds" class="p-4 space-y-3">
+          <h3 class="text-sm font-semibold flex items-center gap-2">
+            <KeyRound class="w-4 h-4 text-primary" /> Stored BookOrbit credentials
+          </h3>
+          <p class="text-[11px] text-muted-foreground">
+            What biblichor uses to authenticate with BookOrbit for Scan and Doctor checks.
+            Stored encrypted in <code class="font-mono">library.db</code>.
+            <strong>This does NOT change BookOrbit's password</strong> — it just tells biblichor what password
+            to use. To actually rotate the password, use <strong>Change password</strong> above.
           </p>
           <div class="grid grid-cols-2 gap-3">
             <label class="text-xs space-y-1">
@@ -325,7 +409,7 @@ async function runScan() {
                 class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
             </label>
             <label class="text-xs space-y-1">
-              <span class="text-muted-foreground">Admin password</span>
+              <span class="text-muted-foreground">Admin password (must match BookOrbit's current)</span>
               <input v-model="credsForm.admin_password" type="password" autocomplete="off"
                 class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
             </label>

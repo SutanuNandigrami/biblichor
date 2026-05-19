@@ -93,6 +93,7 @@ class BookOrbitService:
             else:
                 # Generate a dedicated 32-byte symmetric key.
                 import os as _os
+
                 secrets_dir.mkdir(parents=True, exist_ok=True)
                 secrets_key_file.write_bytes(_os.urandom(64))
                 _os.chmod(secrets_key_file, 0o600)
@@ -207,6 +208,30 @@ class BookOrbitService:
             admin_username=creds[0] if creds else None,
             admin_password=creds[1] if creds else None,
         )
+
+    # ---------- admin password change ----------
+
+    def change_admin_password(self, *, current_password: str, new_password: str) -> dict:
+        """Calls BookOrbit POST /auth/change-password with the supplied
+        current_password, then stores the new_password in the encrypted
+        secrets store. The username comes from stored creds (or defaults
+        to "admin" if none are stored).
+
+        This is the ACTUAL password change — the BookOrbit hash gets
+        rotated. After this returns, current_password no longer works
+        against BookOrbit; only new_password does.
+        """
+        creds = self.get_admin_creds()
+        username = creds[0] if creds else "admin"
+        with BookOrbitClient(self._cfg.bookorbit.url) as client:
+            client.login(username=username, password=current_password)
+            client.change_password(
+                current_password=current_password,
+                new_password=new_password,
+            )
+        # Persist the new password for future Scan/Doctor calls
+        self.store_admin_creds(username, new_password)
+        return {"ok": True, "username": username}
 
     # ---------- scan ----------
 

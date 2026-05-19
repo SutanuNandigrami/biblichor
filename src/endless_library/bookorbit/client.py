@@ -120,6 +120,18 @@ class BookOrbitClient:
             raise BookOrbitError(f"login response missing accessToken: {data}")
         self._jwt = token
 
+    def change_password(self, *, current_password: str, new_password: str) -> None:
+        """POST /auth/change-password with the JWT from a previous login().
+        BookOrbit validates current_password against the stored hash and
+        replaces it with new_password. Subsequent logins use the new one."""
+        r = self._client.post(
+            "/api/v1/auth/change-password",
+            headers=self._auth_headers(),
+            json={"currentPassword": current_password, "newPassword": new_password},
+        )
+        if r.status_code not in (200, 201, 204):
+            raise BookOrbitError(f"change-password failed ({r.status_code}): {r.text[:300]}")
+
     def _auth_headers(self) -> dict[str, str]:
         if not self._jwt:
             raise BookOrbitError("not authenticated — call login() first")

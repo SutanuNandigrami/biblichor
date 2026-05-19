@@ -44,6 +44,11 @@ class _BOCredsPayload(BaseModel):
     admin_password: str
 
 
+class _BOChangePasswordPayload(BaseModel):
+    current_password: str
+    new_password: str
+
+
 class AddSource(BaseModel):
     source: str
     identifier: str
@@ -1169,6 +1174,24 @@ def register(app: FastAPI) -> None:
         svc = _bookorbit_service(request)
         svc.store_admin_creds(payload.admin_username, payload.admin_password)
         return {"ok": True}
+
+    @router.post("/bookorbit/admin/change-password")
+    def bookorbit_change_password(payload: _BOChangePasswordPayload, request: Request):
+        """Rotate the BookOrbit admin password. Calls BookOrbit's
+        POST /auth/change-password and stores the new password in
+        the encrypted secrets store."""
+        from endless_library.bookorbit.service import BookOrbitServiceError
+
+        svc = _bookorbit_service(request)
+        try:
+            return svc.change_admin_password(
+                current_password=payload.current_password,
+                new_password=payload.new_password,
+            )
+        except BookOrbitServiceError as e:
+            raise HTTPException(400, str(e)) from e
+        except Exception as e:
+            raise HTTPException(502, f"{type(e).__name__}: {e}") from e
 
     @router.delete("/bookorbit/creds")
     def bookorbit_clear_creds(request: Request):

@@ -9,6 +9,20 @@ import respx
 
 from endless_library.bookorbit.doctor import run_doctor
 
+
+def _docs_text() -> str:
+    """Phase 6q: docs moved from README to docs/wiki/. Search both."""
+    root = Path(__file__).parent.parent.parent
+    parts = [(root / "README.md").read_text()]
+    wiki = root / "docs" / "wiki"
+    if wiki.exists():
+        for f in sorted(wiki.glob("*.md")):
+            parts.append(f.read_text())
+    return chr(10).join(parts)
+
+
+
+
 BASE = "http://bookorbit.test"
 
 
@@ -131,19 +145,19 @@ def test_doctor_auth_checks_when_creds_provided(respx_mock, tmp_path):
 
 
 def test_readme_has_puid_pgid_section():
-    readme = (Path(__file__).parent.parent.parent / "README.md").read_text()
+    readme = _docs_text()
     assert "PUID/PGID" in readme or "PUID:PGID" in readme or "PUID" in readme
     assert "UID 1000" in readme or "1000" in readme
 
 
 def test_readme_documents_image_pinning():
-    readme = (Path(__file__).parent.parent.parent / "README.md").read_text()
+    readme = _docs_text()
     assert "sha256" in readme
     assert "bookorbit-doctor" in readme  # the upgrade-checklist references it
 
 
 def test_readme_lists_api_endpoints_biblichor_depends_on():
-    readme = (Path(__file__).parent.parent.parent / "README.md").read_text()
+    readme = _docs_text()
     # Each endpoint biblichor calls is in the table
     for endpoint in (
         "/api/v1/health",
@@ -157,6 +171,6 @@ def test_readme_lists_api_endpoints_biblichor_depends_on():
 
 
 def test_readme_cutover_gotchas_updated():
-    readme = (Path(__file__).parent.parent.parent / "README.md").read_text()
+    readme = _docs_text()
     assert "File ownership flip" in readme or "chown" in readme
     assert "BOOKORBIT_* secrets are NOT in your native" in readme or "fresh" in readme

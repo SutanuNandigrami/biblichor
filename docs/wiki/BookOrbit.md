@@ -126,9 +126,28 @@ or during container restarts.
 
 ## Credentials management
 
-The Library page's **Store creds** / **Update creds** / **Clear
-stored creds** buttons let you manage the admin credentials
-biblichor uses for authenticated BookOrbit calls (Scan, doctor).
+The Library page has two distinct credential surfaces:
+
+### Change password (rotation)
+
+**Change password** rotates the actual BookOrbit admin password.
+biblichor calls BookOrbit's `POST /api/v1/auth/change-password`
+with `{currentPassword, newPassword}`, then updates its own
+encrypted store so Scan / Doctor keep working with the new
+password. Use this after install if you want to pick a password
+you remember instead of the random one `bootstrap.sh` generated.
+
+The current password starts as whatever is in `<repo>/.env` as
+`BOOKORBIT_ADMIN_PASSWORD` — look there if you don't know it.
+
+### Stored creds (what biblichor uses)
+
+**Stored creds** is the local-only copy of `(username, password)`
+biblichor uses to authenticate with BookOrbit for Scan and Doctor.
+It does NOT change BookOrbit's password — it just tells biblichor
+which password to use. If you've changed the BookOrbit password
+through BookOrbit's own UI (and not through biblichor), use
+**Stored creds → Save** to bring biblichor's copy back in sync.
 
 - Stored encrypted in `library.db` (`secrets` table, AES-256-GCM)
 - Encrypted under a 32-byte key biblichor auto-generates on first

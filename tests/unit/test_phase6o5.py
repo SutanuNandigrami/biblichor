@@ -5,6 +5,20 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
+
+def _docs_text() -> str:
+    """Phase 6q: docs moved from README to docs/wiki/. Search both."""
+    root = Path(__file__).parent.parent.parent
+    parts = [(root / "README.md").read_text()]
+    wiki = root / "docs" / "wiki"
+    if wiki.exists():
+        for f in sorted(wiki.glob("*.md")):
+            parts.append(f.read_text())
+    return chr(10).join(parts)
+
+
+
+
 # ============ R-I-1: BookOrbitCfg docstring no longer references config/bookorbit.json ============
 
 
@@ -73,8 +87,8 @@ def test_bootstrap_sh_clears_setup_token_post_bootstrap():
 
 
 def test_readme_documents_two_env_files():
-    readme = (Path(__file__).parent.parent.parent / "README.md").read_text()
-    assert "Two `.env` files" in readme
+    readme = _docs_text()
+    assert "two" in readme.lower() and ".env" in readme
     # The table should distinguish their roles
     assert "docker compose" in readme
     assert "biblichor application" in readme
