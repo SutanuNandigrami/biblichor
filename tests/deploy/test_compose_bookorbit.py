@@ -90,11 +90,10 @@ def test_bookorbit_env_includes_required_secrets(compose):
 # ============ FEATURE-INTACT: Phase 2b services still present ============
 
 
-def test_calibre_web_still_present_in_phase_6a(compose):
-    """Phase 6a runs bookorbit alongside calibre-web for the transition
-    window. Phase 6e drops calibre-web. Until then, the legacy library
-    must keep working."""
-    assert "calibre-web" in compose["services"]
+def test_calibre_web_removed_after_phase_6e(compose):
+    """Phase 6e retires Calibre-Web. This test flipped from "must be
+    present" to "must be absent" when 6e shipped."""
+    assert "calibre-web" not in compose["services"]
 
 
 def test_biblichor_service_unchanged(compose):

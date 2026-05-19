@@ -34,10 +34,16 @@ def test_compose_file_exists():
 
 def test_all_required_services_present(compose: dict):
     """If any of these go missing, bootstrap.sh will silently bring up
-    a half-broken stack."""
+    a half-broken stack. Phase 6e replaced calibre-web with bookorbit."""
     services = set(compose["services"].keys())
-    REQUIRED = {"biblichor", "flaresolverr", "calibre-web", "clamav"}
+    REQUIRED = {"biblichor", "flaresolverr", "bookorbit", "bookorbit-db", "clamav"}
     assert REQUIRED <= services, f"missing services: {REQUIRED - services}"
+
+
+def test_calibre_web_is_gone_after_phase_6e(compose: dict):
+    """Phase 6e retires Calibre-Web in favor of BookOrbit. Catches
+    accidental revert."""
+    assert "calibre-web" not in compose["services"]
 
 
 def test_biblichor_service_has_healthcheck(compose: dict):
@@ -92,15 +98,6 @@ def test_flaresolverr_not_published_to_host(compose: dict):
     assert "ports" not in fl, "flaresolverr ports should NOT be host-published"
 
 
-def test_calibre_web_not_published_to_host(compose: dict):
-    """Internal-only — biblichor reverse-proxies it at /library/*."""
-    cw = compose["services"]["calibre-web"]
-    assert "ports" not in cw, "calibre-web ports should NOT be host-published"
-
-
-# ============ FEATURE-INTACT: volume layout ============
-
-
 def test_biblichor_data_and_config_volumes(compose: dict):
     """The data + config dirs must persist across container restarts.
     A regression that swaps these for tmpfs would lose every queue."""
@@ -109,16 +106,6 @@ def test_biblichor_data_and_config_volumes(compose: dict):
     assert "./data:/data" in joined
     assert "./config:" in joined
     assert "./library:" in joined
-
-
-def test_calibre_web_shares_library_volume(compose: dict):
-    """Both biblichor and calibre-web mount ./library so calibredb add
-    works from biblichor and the reverse-proxy shows the same files."""
-    cw_vols = " ".join(str(v) for v in compose["services"]["calibre-web"]["volumes"])
-    assert "./library:" in cw_vols
-
-
-# ============ FEATURE-INTACT: env-var plumbing ============
 
 
 def test_required_env_vars_referenced(compose: dict):

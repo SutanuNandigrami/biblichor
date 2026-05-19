@@ -6,7 +6,7 @@
 [![Tests: 588](https://img.shields.io/badge/tests-588%20passing-brightgreen.svg)]()
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)](LICENSE)
 
-Self-hosted automation that watches your reading lists, finds the books on Anna's Archive (with Welib, LibGen, archive.org, and KindleBangla fallbacks), converts them where needed, and emails them to your Kindle — with a Vue 3 dashboard, an embedded Calibre-Web library, and a scheduler you control from the browser.
+Self-hosted automation that watches your reading lists, finds the books on Anna's Archive (with Welib, LibGen, archive.org, and KindleBangla fallbacks), converts them where needed, and emails them to your Kindle — with a Vue 3 dashboard, an integrated BookOrbit library (reader + Kobo sync + OPDS), and a scheduler you control from the browser.
 
 > The Python package is named `endless_library` internally; the project / repo is `biblichor`. Both names refer to the same thing.
 
@@ -91,7 +91,7 @@ Self-hosted automation that watches your reading lists, finds the books on Anna'
       │  /schedule    Pause/resume/run/reschedule any job    │
       │  /settings    SMTP, Pushover, Kindle, polling tuning │
       │  /logs        Recent events stream (WebSocket)       │
-      │  /lib         Embedded Calibre-Web (same-origin via  │
+      │  /lib         Library page links to BookOrbit (port  │
       │               reverse proxy at /library/*)           │
       └──────────────────────────────────────────────────────┘
 ```
@@ -108,7 +108,7 @@ Self-hosted automation that watches your reading lists, finds the books on Anna'
 | **Auto mirror discovery** | 6-hour background job scrapes Anna's Wikipedia infobox; new mirrors flow into config automatically without losing the hardcoded baseline |
 | **Format handling** | EPUB native, AZW3/MOBI/PDF converted via Calibre `ebook-convert`, sized-checked against `attachment_max_mb` before SMTP |
 | **Metadata enrichment** | Calibre `ebook-meta` writes author, series, tags, ISBN into the file before Kindle send so it shows up in collections |
-| **Calibre integration** | Files auto-added via `calibredb add`; full Calibre-Web library embedded in the dashboard at `/lib` (same-origin reverse proxy, iframe-safe) |
+| **Library integration** | Files dropped into BookOrbit's watched directory; BookOrbit ingests via embedded metadata. Linked from the dashboard's Library page. `ebook-convert` + `ebook-meta` from Calibre stay as CLI tools for format conversion + metadata writing. |
 | **Kindle email send** | `aiosmtplib` with STARTTLS, app-password support (Gmail), per-attachment size guard |
 | **Scoring** | ISBN match (35) + title rapidfuzz + author rapidfuzz + format bonus + language bonus + filesize sanity + scan penalty + derivative-content (summary/conversation-starters/study-guide) hard-skip |
 | **Resume** | Stage timestamps (`downloaded_at`, `converted_at`, `sent_at`) — resuming picks up at the highest completed stage |
@@ -117,7 +117,7 @@ Self-hosted automation that watches your reading lists, finds the books on Anna'
 | **Notifications** | Pushover per-event (book sent / needs review / failure) and daily summary |
 | **Storage** | SQLite WAL; 7 tables (books, candidates, events, source_accounts, bench_runs, mirrors, sources); idempotent ALTER migrations |
 | **Dashboard** | Vue 3 + Tailwind + shadcn-vue + Pinia + Vue Router + Lucide icons + WebSocket event stream |
-| **Deployment** | Native via systemd unit + uvicorn; FlareSolverr and Calibre-Web in Docker via compose |
+| **Deployment** | Native via systemd unit + uvicorn; FlareSolverr + BookOrbit + Postgres in Docker via compose |
 
 ## Screenshots
 
@@ -143,7 +143,7 @@ Self-hosted automation that watches your reading lists, finds the books on Anna'
 | **Python 3.12** | Backend runtime | Tested on 3.12 only |
 | **Node.js 20+** | Build the Vue 3 SPA | Built once at install time; not needed at runtime |
 | **Calibre** | `ebook-convert`, `ebook-meta`, `calibredb` | Install the host package, not the Docker mod (faster restarts) |
-| **Docker + docker compose** | FlareSolverr and Calibre-Web | Optional but recommended |
+| **Docker + docker compose** | FlareSolverr + BookOrbit + Postgres | Required for the easy-setup path |
 | **An SMTP account** | Send to Kindle | Gmail with an app password is the easy path |
 | **Amazon Kindle email setup** | Whitelist sender, capture `@kindle.com` address | <https://www.amazon.com/sendtokindle> |
 | **Optional: Tailscale** | Private dashboard exposure | Bind the dashboard to your Tailscale IP via `TAILSCALE_IP=` |
@@ -164,7 +164,7 @@ cd biblichor
 `bootstrap.sh` prompts you for three values (Gmail address, Gmail
 **App Password**, your `@kindle.com` send-to-kindle address), writes
 a `.env` file, pulls / builds the four services
-(biblichor + FlareSolverr + Calibre-Web, plus optional ClamAV),
+(biblichor + FlareSolverr + BookOrbit + Postgres, plus optional ClamAV),
 and polls `/healthz` until everything is green.
 
 When it's done you'll have:
@@ -172,7 +172,7 @@ When it's done you'll have:
 | URL | What it is |
 |---|---|
 | `http://localhost:8090` | The biblichor dashboard |
-| `http://localhost:8090/library` | The embedded Calibre-Web library (reverse-proxied) |
+| `http://localhost:3000`         | BookOrbit — library, reader, Kobo/KOReader/OPDS |
 | `http://localhost:8090/healthz` | Component-level health probe (used by docker healthcheck) |
 
 Re-run `./deploy/bootstrap.sh` anytime to reconfigure or refresh
@@ -233,10 +233,12 @@ cp .env.example config/.env
 #    -> Personal Document Settings -> Approved Personal Document E-mail List
 #    Add the email you set as SMTP_USER.
 
-# 7. Start FlareSolverr + Calibre-Web via Docker (optional but recommended)
-docker compose -f deploy/compose.yml up -d flaresolverr calibre-web
+# 7. Start FlareSolverr + BookOrbit + Postgres via Docker
+docker compose -f deploy/compose.yml up -d flaresolverr bookorbit-db bookorbit
 
-#    The first Calibre-Web start needs a tiny bit of UI setup. Open it in a
+#    The first BookOrbit start needs admin bootstrap. Run:
+#       biblichor bookorbit-setup --admin-email you@example.com
+#    Or open BookOrbit directly and
 #    browser at http://localhost:8083 (it's bound to 127.0.0.1 only — the
 #    biblichor dashboard reverse-proxies it at /library/* on its own port),
 #    log in with admin/admin123, set the library path to /books, and
@@ -268,7 +270,7 @@ sudo systemctl status biblichor
 2. **Settings page** → confirm SMTP credentials show as set (the page never echoes the password). Click "Send test" to your Kindle if you want a smoke test.
 3. **Schedule page** → see the live job table. Click Run-now on `poll:<id>` and `process` to kick off immediately.
 4. **Queue page** → watch books transition. Books that auto-pick a candidate sail through. Ones that don't land in `needs_review` — click the book to see candidates and pick manually.
-5. **Library page** (`/lib`) → Calibre-Web embedded; books arrive automatically after they're sent.
+5. **Library page** (`/lib`) → links out to BookOrbit; books arrive there automatically after they're sent. BookOrbit gives you reader, Kobo sync, KOReader two-way, and OPDS.
 
 ## Configuration reference
 
@@ -337,8 +339,6 @@ python -m endless_library bench [--quick]
 | `403` on Anna's | Cloudflare challenge active for your IP | Confirm FlareSolverr is up (`docker compose ps`); check `flaresolverr_url` in config |
 | Kindle send fails with `(0, b'')` | Gmail rejected app password | Strip any spaces from the password — biblichor does this automatically but double-check; regenerate the app password |
 | Kindle send returns 250 OK but nothing arrives | Sender not whitelisted | Add SMTP_USER to Approved Personal Document E-mail List on Amazon |
-| Calibre-Web 502 at `/library/*` | Calibre-Web container not running | `docker compose up -d calibre-web` |
-| Calibre-Web thumbnails missing | Old SPA build | Rebuild: `cd webapp && npm run build` then restart |
 | Scheduler jobs don't fire | systemd unit was running an old build | `sudo systemctl restart biblichor` — the scheduler starts inside FastAPI's lifespan |
 
 ## Security
@@ -398,7 +398,7 @@ security:
 - **Data layout**: everything goes under `data/`:
   - `data/library.db` — SQLite, WAL mode
   - `data/books/` — downloaded files
-  - `data/calibre-library/` — Calibre library (Calibre-Web reads from here)
+  - `library/` — BookOrbit-watched library (Phase 6 onward). Migrated from `data/calibre-library/` via `biblichor migrate-to-bookorbit`.
   - `data/cookies/` — per-domain FlareSolverr cookies
   - `data/logs/` — operation logs
   - `data/wiki_annas_domains.json` — refresh cache
@@ -412,7 +412,7 @@ security:
 - **Anti-bot**: FlareSolverr, optional CloakBrowser stealth Chromium, Playwright (last-resort)
 - **Frontend**: Vue 3 + Vite, TypeScript, Tailwind CSS, shadcn-vue, Pinia, Vue Router, Lucide icons
 - **Conversion**: Calibre (`ebook-convert`, `ebook-meta`, `calibredb`)
-- **Library UI**: Calibre-Web in a container, embedded via reverse proxy
+- **Library UI**: BookOrbit in a container; biblichor drops books into a shared mount; BookOrbit ingests + serves reader/Kobo/KOReader/OPDS
 
 ## Acknowledgements
 

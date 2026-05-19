@@ -11,7 +11,6 @@
 #   flaresolverr    (Cloudflare challenge solver, port 8191 internal)
 #   bookorbit       (library + reader + Kobo/KOReader/OPDS, port 3000)
 #   bookorbit-db    (Postgres 16 + pgvector, internal)
-#   calibre-web     (legacy library UI, internal — being retired in Phase 6e)
 #   clamav          (optional, profile=av — only if BIBLICHOR_USE_CLAMAV=1)
 
 name: biblichor
@@ -43,7 +42,7 @@ services:
     depends_on:
       flaresolverr:
         condition: service_healthy
-      calibre-web:
+      bookorbit:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8090/healthz"]
@@ -67,21 +66,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 15s
-    networks:
-      - biblichor
-
-  calibre-web:
-    image: lscr.io/linuxserver/calibre-web:latest
-    container_name: biblichor-calibre-web
-    restart: unless-stopped
-    environment:
-      PUID: "1000"
-      PGID: "1000"
-      TZ: "${TZ:-Etc/UTC}"
-      DOCKER_MODS: "linuxserver/mods:universal-calibre"
-    volumes:
-      - ./config/calibre-web:/config
-      - ./library:/books
     networks:
       - biblichor
 

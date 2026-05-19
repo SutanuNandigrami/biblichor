@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from endless_library.config import Config, load_config
 from endless_library.pipeline import PipelineDeps
 from endless_library.scheduler import build_scheduler_with_deps
-from endless_library.web import api, proxy_calibre
+from endless_library.web import api
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +45,6 @@ def create_app(*, cfg: Config, deps: PipelineDeps, config_path: Path) -> FastAPI
     app.state.deps = deps
     app.state.config_path = config_path
     api.register(app)
-    proxy_calibre.register(app)
 
     dist = Path(__file__).resolve().parent.parent.parent / "webapp" / "dist"
     if dist.exists():
