@@ -86,6 +86,15 @@ prompt_var TZ                    "Timezone (e.g. America/Los_Angeles)"       "${
 prompt_var CALIBRE_WEB_USER      "Calibre-Web admin username"                 "${CALIBRE_WEB_USER:-admin}"   0
 prompt_var CALIBRE_WEB_PASSWORD  "Calibre-Web admin password (change later)"  "${CALIBRE_WEB_PASSWORD:-admin123}" 1
 
+echo
+say "${C_BOLD}BookOrbit values${C_OFF} — library UI + reader + Kobo/KOReader/OPDS"
+# Generate secrets on first run; reuse on subsequent runs.
+BOOKORBIT_DB_PASSWORD="${BOOKORBIT_DB_PASSWORD:-$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | xxd -p | tr -d '\n')}"
+BOOKORBIT_JWT_SECRET="${BOOKORBIT_JWT_SECRET:-$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p | tr -d '\n')}"
+BOOKORBIT_SETUP_TOKEN="${BOOKORBIT_SETUP_TOKEN:-$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p | tr -d '\n')}"
+prompt_var BOOKORBIT_PORT  "BookOrbit dashboard port"  "${BOOKORBIT_PORT:-3000}"  0
+prompt_var BOOKORBIT_URL   "BookOrbit external URL (Tailscale-friendly)"  "${BOOKORBIT_URL:-http://localhost:${BOOKORBIT_PORT}}"  0
+
 # Write .env atomically
 TMP_ENV="$(mktemp)"
 cat > "$TMP_ENV" <<EOF
@@ -99,6 +108,14 @@ CALIBRE_WEB_USER=$CALIBRE_WEB_USER
 CALIBRE_WEB_PASSWORD=$CALIBRE_WEB_PASSWORD
 FLARESOLVERR_LOG_LEVEL=${FLARESOLVERR_LOG_LEVEL:-info}
 BIBLICHOR_USE_CLAMAV=${BIBLICHOR_USE_CLAMAV:-0}
+BOOKORBIT_PORT=$BOOKORBIT_PORT
+BOOKORBIT_URL=$BOOKORBIT_URL
+BOOKORBIT_DB_USER=${BOOKORBIT_DB_USER:-bookorbit}
+BOOKORBIT_DB_NAME=${BOOKORBIT_DB_NAME:-bookorbit}
+BOOKORBIT_DB_PASSWORD=$BOOKORBIT_DB_PASSWORD
+BOOKORBIT_JWT_SECRET=$BOOKORBIT_JWT_SECRET
+BOOKORBIT_SETUP_TOKEN=$BOOKORBIT_SETUP_TOKEN
+BOOKORBIT_NODE_HEAP_MB=${BOOKORBIT_NODE_HEAP_MB:-2048}
 EOF
 mv "$TMP_ENV" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
@@ -138,9 +155,13 @@ done
 # ---------- report ----------
 echo
 echo "${C_GREEN}${C_BOLD}biblichor is running.${C_OFF}"
-echo "  Dashboard:   http://localhost:${BIBLICHOR_PORT}"
-echo "  Library:     http://localhost:${BIBLICHOR_PORT}/library"
-echo "  Healthz:     $HEALTH_URL"
+echo "  Dashboard:    http://localhost:${BIBLICHOR_PORT}"
+echo "  Library:      http://localhost:${BOOKORBIT_PORT}  (BookOrbit)"
+echo "                http://localhost:${BIBLICHOR_PORT}/library  (legacy Calibre-Web, being retired)"
+echo "  Healthz:      $HEALTH_URL"
+echo
+echo "  ${C_YELLOW}BookOrbit first-run setup:${C_OFF}"
+echo "    biblichor bookorbit-setup --url http://localhost:${BOOKORBIT_PORT}"
 echo
 echo "Useful commands:"
 echo "  docker compose ${COMPOSE_ARGS[*]} logs -f biblichor    # tail logs"

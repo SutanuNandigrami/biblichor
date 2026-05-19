@@ -9,7 +9,9 @@
 # Services:
 #   biblichor       (this app, port 8090)
 #   flaresolverr    (Cloudflare challenge solver, port 8191 internal)
-#   calibre-web     (e-book library UI, port 8083 internal — proxied at /library)
+#   bookorbit       (library + reader + Kobo/KOReader/OPDS, port 3000)
+#   bookorbit-db    (Postgres 16 + pgvector, internal)
+#   calibre-web     (legacy library UI, internal — being retired in Phase 6e)
 #   clamav          (optional, profile=av — only if BIBLICHOR_USE_CLAMAV=1)
 
 name: biblichor
@@ -83,7 +85,62 @@ services:
     networks:
       - biblichor
 
-  # Optional — `docker compose --profile av up -d` to include scanning.
+  # BookOrbit replaces Calibre-Web as the library frontend. We hand books
+  # off via the shared /library mount; @parcel/watcher inside the
+  # container picks them up via embedded metadata. See Phase 6 plan.
+  bookorbit-db:
+    image: pgvector/pgvector:pg16@sha256:7d400e340efb42f4d8c9c12c6427adb253f726881a9985d2a471bf0eed824dff
+    container_name: biblichor-bookorbit-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${BOOKORBIT_DB_USER:-bookorbit}"
+      POSTGRES_PASSWORD: "${BOOKORBIT_DB_PASSWORD}"
+      POSTGRES_DB: "${BOOKORBIT_DB_NAME:-bookorbit}"
+    volumes:
+      - ./data/bookorbit-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${BOOKORBIT_DB_USER:-bookorbit} -d ${BOOKORBIT_DB_NAME:-bookorbit}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - biblichor
+
+  bookorbit:
+    image: ghcr.io/bookorbit/bookorbit:latest
+    container_name: biblichor-bookorbit
+    restart: unless-stopped
+    ports:
+      - "${BOOKORBIT_PORT:-3000}:3000"
+    volumes:
+      - ./library:/books
+      - ./data/bookorbit:/data
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      POSTGRES_HOST: bookorbit-db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: "${BOOKORBIT_DB_USER:-bookorbit}"
+      POSTGRES_PASSWORD: "${BOOKORBIT_DB_PASSWORD}"
+      POSTGRES_DB: "${BOOKORBIT_DB_NAME:-bookorbit}"
+      JWT_SECRET: "${BOOKORBIT_JWT_SECRET}"
+      SETUP_BOOTSTRAP_TOKEN: "${BOOKORBIT_SETUP_TOKEN}"
+      APP_URL: "${BOOKORBIT_URL:-http://localhost:3000}"
+      NODE_MAX_OLD_SPACE_SIZE: "${BOOKORBIT_NODE_HEAP_MB:-2048}"
+    depends_on:
+      bookorbit-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - biblichor
+
+    # Optional — `docker compose --profile av up -d` to include scanning.
   # biblichor falls back to hygiene-only checks if CLAMAV_HOST is unset
   # or unreachable, so this is genuinely optional (see audit batch).
   clamav:
