@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ExternalLink, BookOpen } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
+import { api } from '@/composables/useApi'
 
-// BookOrbit URL is configured server-side via BOOKORBIT_URL env var,
-// surfaced through /api/settings/public. We compute a sensible default
-// at runtime if the value isn't set yet.
+const configured = ref<string | null>(null)
+
+onMounted(async () => {
+  try {
+    const settings = await api<any>('/api/settings')
+    const u = settings?.bookorbit?.url
+    if (typeof u === 'string' && u.length > 0) {
+      configured.value = u
+    }
+  } catch {
+    // best-effort; fall back to runtime guess below
+  }
+})
+
 const bookOrbitUrl = computed(() => {
-  // First check window-level injection (if biblichor's index.html exposes it)
-  const injected = (window as any).__BIBLICHOR_BOOKORBIT_URL__
-  if (typeof injected === 'string' && injected) return injected
-  // Fallback: same host, port 3000
+  if (configured.value) return configured.value
+  // Fallback: same host, default port 3000
   const proto = window.location.protocol
   const host = window.location.hostname
   return `${proto}//${host}:3000`
@@ -38,12 +48,17 @@ function openBookOrbit() {
           Open BookOrbit
         </Button>
         <p class="text-xs text-muted-foreground font-mono">{{ bookOrbitUrl }}</p>
+        <p v-if="!configured" class="text-[11px] text-muted-foreground italic">
+          (default port — set <code class="font-mono">BOOKORBIT_URL</code> in .env to override)
+        </p>
       </div>
       <details class="text-xs text-muted-foreground text-left">
         <summary class="cursor-pointer hover:text-foreground">First-run setup</summary>
         <pre class="mt-2 bg-muted/50 p-3 rounded text-[11px] leading-snug">biblichor bookorbit-setup --admin-email you@example.com</pre>
         <p class="mt-2">
-          Creates the admin account + watched library. Then run
+          Creates the admin account + watched library + flips
+          <code class="font-mono">bookorbit.enabled</code> in your
+          <code class="font-mono">config.yaml</code>. Then run
           <code class="font-mono">migrate-to-bookorbit</code> to import an
           existing Calibre library.
         </p>

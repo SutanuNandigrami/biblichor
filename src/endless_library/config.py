@@ -169,6 +169,9 @@ class BookOrbitCfg(BaseModel):
     """
 
     enabled: bool = False
+    # External URL biblichor's SPA links to. Falls back to
+    # http://localhost:3000 if not set. Override via BOOKORBIT_URL.
+    url: str = ""
     # Host path that BookOrbit sees as /books. Files dropped here are
     # ingested via the BookOrbit scanner.
     library_root_on_host: str = ""
@@ -251,6 +254,8 @@ def _apply_env_overrides(data: dict) -> dict:
         data["pushover"]["app_token"] = v
     if v := os.getenv("WELIB_AUTH_COOKIE"):
         data.setdefault("scrapers", {})["welib_auth_cookie"] = v
+    if v := os.getenv("BOOKORBIT_URL"):
+        data.setdefault("bookorbit", {})["url"] = v
     return data
 
 
@@ -263,6 +268,7 @@ _ENV_KEYS = (
     ("PUSHOVER_USER_KEY", "pushover", "user_key"),
     ("PUSHOVER_APP_TOKEN", "pushover", "app_token"),
     ("WELIB_AUTH_COOKIE", "scrapers", "welib_auth_cookie"),
+    ("BOOKORBIT_URL", "bookorbit", "url"),
 )
 
 
