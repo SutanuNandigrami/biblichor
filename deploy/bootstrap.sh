@@ -90,7 +90,7 @@ BOOKORBIT_DB_PASSWORD="${BOOKORBIT_DB_PASSWORD:-$(openssl rand -hex 24 2>/dev/nu
 BOOKORBIT_JWT_SECRET="${BOOKORBIT_JWT_SECRET:-$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p | tr -d '\n')}"
 BOOKORBIT_SETUP_TOKEN="${BOOKORBIT_SETUP_TOKEN:-$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p | tr -d '\n')}"
 prompt_var BOOKORBIT_PORT  "BookOrbit dashboard port"  "${BOOKORBIT_PORT:-3000}"  0
-prompt_var BOOKORBIT_URL   "BookOrbit external URL (Tailscale-friendly)"  "${BOOKORBIT_URL:-http://localhost:${BOOKORBIT_PORT}}"  0
+prompt_var BOOKORBIT_URL   "BookOrbit internal API URL (compose service name)"  "${BOOKORBIT_URL:-http://bookorbit:${BOOKORBIT_PORT}}"  0
 
 echo
 say "BookOrbit admin (created on first launch)"
@@ -206,12 +206,24 @@ if [[ -z "${BOOKORBIT_SKIPPED:-}" ]]; then
       # place but blanked.
       sed -i "s/^BOOKORBIT_SETUP_TOKEN=.*/BOOKORBIT_SETUP_TOKEN=  # cleared post-bootstrap/" "$ENV_FILE"
       ok "bookorbit-setup complete; SETUP_BOOTSTRAP_TOKEN cleared from .env"
+
+      # Phase 6o.10: doctor run post-setup catches the 3 cutover snags
+      # (URL pointing at the wrong host, library_root path mismatch,
+      # postgres ownership). Non-fatal: if it FAILs, we tell the user.
+      echo
+      echo "  ${C_YELLOW}Running bookorbit-doctor (post-setup sanity check)...${C_OFF}"
+      if ! $BIBLICHOR_BIN bookorbit-doctor 2>&1 | sed "s|^|    |"; then
+        warn "bookorbit-doctor reported failures — see above. If permissions"
+        warn "  are the issue, try: deploy/fix-perms.sh && docker compose"
+        warn "  ${COMPOSE_ARGS[*]} restart biblichor bookorbit"
+      fi
     else
       warn "bookorbit-setup failed; re-run manually with: $BIBLICHOR_BIN bookorbit-setup"
     fi
   else
     warn "biblichor CLI not on PATH and no .venv detected; run manually:"
     warn "  biblichor bookorbit-setup"
+    warn "  biblichor bookorbit-doctor      # sanity-check the stack"
   fi
 fi
 

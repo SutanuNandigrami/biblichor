@@ -38,12 +38,36 @@ def test_127001_in_cfg_url_also_overridden():
     assert urls["dashboard"] == "http://biblichor.tailnet.ts:3000"
 
 
-def test_explicit_real_url_in_cfg_is_honored():
-    """If the operator explicitly sets BOOKORBIT_URL to a real hostname
-    (e.g. behind a reverse proxy), trust it."""
-    req = _fake_request("http", "anywhere-else")
-    urls = _compute_bookorbit_urls(req, _cfg("https://books.example.com"))
+def test_cfg_url_does_not_leak_into_spa_urls():
+    """Phase 6o.10: cfg.bookorbit.url is the INTERNAL API URL only.
+    Even a perfectly-resolvable configured URL must NOT appear in
+    the SPA URLs — those are always request-derived (or set via
+    BOOKORBIT_EXTERNAL_URL). This prevents the container hostname
+    (e.g. http://bookorbit:3000) from ever being shown to the browser."""
+    req = _fake_request("http", "claude-1")
+    urls = _compute_bookorbit_urls(req, _cfg("http://bookorbit:3000"))
+    # The internal docker hostname must NEVER appear in user-facing URLs
+    assert "bookorbit:3000" not in urls["dashboard"]
+    assert urls["dashboard"] == "http://claude-1:3000"
+
+
+def test_bookorbit_external_url_env_overrides_request_host(monkeypatch):
+    """Phase 6o.10: For reverse-proxy setups where BookOrbit is published
+    at a different hostname than biblichor, BOOKORBIT_EXTERNAL_URL is the
+    explicit escape hatch."""
+    monkeypatch.setenv("BOOKORBIT_EXTERNAL_URL", "https://books.example.com")
+    req = _fake_request("http", "biblichor.example.com")
+    urls = _compute_bookorbit_urls(req, _cfg("http://bookorbit:3000"))
     assert urls["dashboard"] == "https://books.example.com"
+    assert urls["opds_catalog"] == "https://books.example.com/api/v1/opds"
+
+
+def test_bookorbit_external_url_strips_trailing_slash(monkeypatch):
+    monkeypatch.setenv("BOOKORBIT_EXTERNAL_URL", "https://books.example.com/")
+    req = _fake_request("http", "host")
+    urls = _compute_bookorbit_urls(req, _cfg(""))
+    assert urls["dashboard"] == "https://books.example.com"
+    assert "//api" not in urls["opds_catalog"]
 
 
 def test_empty_cfg_url_falls_back_to_request_host():

@@ -264,9 +264,9 @@ without losing data. The whole thing is a controlled ~5-minute swap.
 Cutover gotchas you'll hit on a real box (lessons from claude-1):
 - **File ownership flip**: native biblichor writes files as your host
   user (likely UID 1000); compose biblichor (Phase 6o.5) also runs as
-  UID 1000 → no flip. But if you have a pre-Phase-6o.5 image still
-  running as root, run `sudo chown -R 1000:1000 library/` before
-  cutover.
+  UID 1000 → no flip. If your host user has a different UID, or you
+  have a pre-Phase-6o.5 image still running as root, fix with
+  `deploy/fix-perms.sh` (NOT a blanket chown — that bricks postgres).
 - **BOOKORBIT_* secrets are NOT in your native config/.env** — they
   are generated fresh by `bootstrap.sh`. Don'''t expect to carry
   them over.
@@ -377,16 +377,37 @@ by UID 1000 on the host:
   - On Ubuntu/Debian default cloud images: the `ubuntu` user is UID
     1000 → no action needed.
   - On custom cloud images / NAS / Synology: check `id -u <your-user>`
-    and adjust either the host directory ownership (`sudo chown -R 1000:1000 ./library`)
-    OR override `PUID/PGID` in `.env` to match your user.
+    and either override `PUID/PGID` in `.env` to match your user,
+    OR fix ownership with the bundled helper:
 
-Postgres'''s container runs as UID 999 (pgvector convention) and only
-touches `./data/bookorbit-db`. If a `docker compose up` produces
-"could not open file ... Permission denied" from postgres, fix with:
+    ```bash
+    deploy/fix-perms.sh
+    ```
 
-```bash
-sudo chown -R 999:999 data/bookorbit-db
-```
+    The helper chowns `config/`, `library/`, and biblichor-owned
+    subdirs of `data/` to UID 1000, while restoring `data/bookorbit-db`
+    to UID 999 (which postgres requires). **Do NOT use a blanket
+    `sudo chown -R 1000:1000 .` from the repo root** — it will brick
+    postgres.
+
+### How BookOrbit's URL is resolved (internal vs external)
+
+Phase 6o.10 split the BookOrbit URL into two distinct concerns:
+
+| Setting | What it's for | Default |
+|---|---|---|
+| `BOOKORBIT_URL` (.env / config.yaml) | INTERNAL API URL biblichor uses to call BookOrbit | `http://bookorbit:3000` (compose service name) |
+| `BOOKORBIT_EXTERNAL_URL` (env, optional) | USER-FACING URL the SPA links to | unset — SPA auto-derives from `request.url.hostname` |
+
+The SPA's "Open BookOrbit" / OPDS / Kobo / KOReader links use the
+hostname **the user typed into their browser**, with the BookOrbit
+port appended. That means Tailscale names, LAN IPs, and `localhost`
+all Just Work without per-device config — no more "links go to
+localhost" gotcha.
+
+Set `BOOKORBIT_EXTERNAL_URL` ONLY for reverse-proxy / split-DNS
+deployments where BookOrbit is published at a different hostname
+than biblichor. 99% of users should leave it unset.
 
 ### Tag-pinning the BookOrbit image
 

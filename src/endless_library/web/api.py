@@ -81,29 +81,31 @@ def _candidate_mirror(detail_url: str | None) -> str | None:
 
 
 def _compute_bookorbit_urls(request: Request, cfg) -> dict[str, str]:
-    """Compute every URL the SPA needs to surface, based on:
-      1. cfg.bookorbit.url if explicitly set AND not pointing at localhost
-      2. else: derive from the request's host with the BOOKORBIT_PORT
-         taken from the env (default 3000).
+    """Compute every URL the SPA needs to surface.
 
-    Why not always trust cfg.bookorbit.url? Because a single APP_URL
-    can't satisfy both "same host as biblichor" and "Tailscale name"
-    simultaneously. Computing from request.url.hostname means the URL
-    biblichor's SPA sees matches the hostname the SPA was loaded from.
+    cfg.bookorbit.url is the *internal* API URL biblichor uses to
+    talk to BookOrbit (e.g. http://bookorbit:3000 inside docker).
+    It is intentionally NOT used here, because a docker service name
+    or a 127.0.0.1 address won't resolve from a browser.
+
+    The SPA display URL is, in order of preference:
+      1. BOOKORBIT_EXTERNAL_URL env (set this only for reverse-proxy
+         setups where BookOrbit lives at a different hostname than
+         biblichor)
+      2. request.url.hostname + BOOKORBIT_PORT (the published host
+         port from compose) — this matches whatever hostname the
+         user typed into their browser, so Tailscale names, LAN IPs,
+         and localhost all Just Work without per-device config.
     """
     import os
 
-    configured = (cfg.bookorbit.url or "").strip()
+    external = (os.environ.get("BOOKORBIT_EXTERNAL_URL") or "").strip().rstrip("/")
     fallback_port = os.environ.get("BOOKORBIT_PORT", "3000")
     fallback_proto = request.url.scheme or "http"
     fallback_host = request.url.hostname or "localhost"
     fallback_base = f"{fallback_proto}://{fallback_host}:{fallback_port}"
 
-    # If configured URL doesn't contain a hostname OR contains
-    # "localhost" (which the docs explicitly warn against for any
-    # cross-device usage), prefer the request-derived base.
-    use_configured = configured and "localhost" not in configured and "127.0.0.1" not in configured
-    base = configured.rstrip("/") if use_configured else fallback_base
+    base = external or fallback_base
 
     return {
         # Open BookOrbit's dashboard
