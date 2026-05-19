@@ -1,0 +1,237 @@
+"""BookOrbit service layer — shared by the FastAPI handlers and the
+CLI. Wraps ensure_bookorbit_ready / run_doctor / scanner trigger +
+the encrypted secrets store so callers don't need to thread the
+recovery key through every call site.
+
+Phase 6p.2.
+"""
+
+from __future__ import annotations
+
+import logging
+import secrets as stdlib_secrets
+from dataclasses import dataclass
+from pathlib import Path
+
+from endless_library.bookorbit.client import BookOrbitClient
+from endless_library.bookorbit.doctor import DoctorReport, run_doctor
+from endless_library.bookorbit.setup import (
+    SetupResult,
+    ensure_bookorbit_ready,
+)
+from endless_library.config import Config
+from endless_library.db.schema import connect
+from endless_library.secrets_store import (
+    delete_secret,
+    derive_secrets_key,
+    get_secret,
+    init_secrets_table,
+    list_secret_names,
+    set_secret,
+)
+
+log = logging.getLogger(__name__)
+
+
+SECRET_ADMIN_USER = "bookorbit.admin_user"
+SECRET_ADMIN_PASSWORD = "bookorbit.admin_password"
+SECRET_SETUP_TOKEN = "bookorbit.setup_token"
+
+
+@dataclass
+class BookOrbitStatus:
+    """Payload for GET /api/bookorbit/status — drives the SPA's
+    setup-wizard / settings UI."""
+
+    enabled: bool
+    setup_needed: bool
+    has_creds: bool
+    library_id: str | None
+    library_root: str
+    library_root_exists: bool
+    url: str
+    health_ok: bool
+    last_check_error: str | None = None
+
+
+class BookOrbitServiceError(Exception):
+    pass
+
+
+class BookOrbitService:
+    """All BookOrbit ops the SPA + CLI share.
+
+    Construct one per request — it's cheap (a few path lookups +
+    a key derivation cached on first secret-touch)."""
+
+    def __init__(self, cfg: Config, db_path: Path, restore_key_path: Path):
+        self._cfg = cfg
+        self._db_path = db_path
+        self._restore_key_path = restore_key_path
+        self._secrets_key_cache: bytes | None = None
+
+    # ---------- secrets ----------
+
+    @property
+    def _secrets_key(self) -> bytes:
+        if self._secrets_key_cache is None:
+            # Phase 6p.5: prefer to derive from the existing age recovery
+            # key if it's already there (so backups + secrets share a
+            # trust root). Otherwise, generate a dedicated symmetric
+            # secrets key file — independent of age, so we don't require
+            # age-keygen to be installed for the SPA to work out of the
+            # box. The user can later run `biblichor backup-key` to set
+            # up the age key for backup encryption; that doesn't affect
+            # secrets (different concerns, different keys).
+            secrets_dir = self._restore_key_path.parent
+            secrets_key_file = secrets_dir / "secrets.key"
+
+            if self._restore_key_path.exists():
+                self._secrets_key_cache = derive_secrets_key(self._restore_key_path)
+            elif secrets_key_file.exists():
+                self._secrets_key_cache = derive_secrets_key(secrets_key_file)
+            else:
+                # Generate a dedicated 32-byte symmetric key.
+                import os as _os
+                secrets_dir.mkdir(parents=True, exist_ok=True)
+                secrets_key_file.write_bytes(_os.urandom(64))
+                _os.chmod(secrets_key_file, 0o600)
+                self._secrets_key_cache = derive_secrets_key(secrets_key_file)
+        return self._secrets_key_cache
+
+    def has_admin_creds(self) -> bool:
+        with connect(self._db_path) as conn:
+            init_secrets_table(conn)
+            names = list_secret_names(conn)
+        return SECRET_ADMIN_PASSWORD in names
+
+    def get_admin_creds(self) -> tuple[str, str] | None:
+        with connect(self._db_path) as conn:
+            init_secrets_table(conn)
+            user = get_secret(conn, self._secrets_key, SECRET_ADMIN_USER)
+            pw = get_secret(conn, self._secrets_key, SECRET_ADMIN_PASSWORD)
+        if user and pw:
+            return user, pw
+        return None
+
+    def store_admin_creds(self, username: str, password: str) -> None:
+        with connect(self._db_path) as conn:
+            init_secrets_table(conn)
+            set_secret(conn, self._secrets_key, SECRET_ADMIN_USER, username)
+            set_secret(conn, self._secrets_key, SECRET_ADMIN_PASSWORD, password)
+
+    def clear_admin_creds(self) -> None:
+        with connect(self._db_path) as conn:
+            init_secrets_table(conn)
+            delete_secret(conn, SECRET_ADMIN_USER)
+            delete_secret(conn, SECRET_ADMIN_PASSWORD)
+            delete_secret(conn, SECRET_SETUP_TOKEN)
+
+    # ---------- status ----------
+
+    def status(self) -> BookOrbitStatus:
+        cfg = self._cfg
+        bo = cfg.bookorbit
+        library_root_exists = bool(bo.library_root) and Path(bo.library_root).exists()
+        setup_needed = True
+        health_ok = False
+        err: str | None = None
+
+        if bo.enabled and bo.url:
+            try:
+                with BookOrbitClient(bo.url) as client:
+                    health_ok = client.health()
+                    status_payload = client.setup_status()
+                    setup_needed = bool(status_payload.get("needsSetup", True))
+            except Exception as e:
+                err = f"{type(e).__name__}: {e}"
+
+        return BookOrbitStatus(
+            enabled=bo.enabled,
+            setup_needed=setup_needed,
+            has_creds=self.has_admin_creds(),
+            library_id=bo.library_id or None,
+            library_root=bo.library_root or "",
+            library_root_exists=library_root_exists,
+            url=bo.url or "",
+            health_ok=health_ok,
+            last_check_error=err,
+        )
+
+    # ---------- setup ----------
+
+    def run_setup(
+        self,
+        *,
+        admin_username: str,
+        admin_email: str,
+        admin_name: str,
+        admin_password: str,
+        setup_token: str,
+        library_root: str | None = None,
+        biblichor_config_yaml_path: Path,
+    ) -> SetupResult:
+        """Drive BookOrbit's first-run /auth/setup + create the
+        biblichor library + store credentials encrypted.
+
+        Idempotent: if BookOrbit already shows needsSetup=false, this
+        skips the setup call and just refreshes stored credentials.
+        """
+        if not self._cfg.bookorbit.enabled or not self._cfg.bookorbit.url:
+            raise BookOrbitServiceError("BookOrbit is not enabled in config.yaml")
+
+        eff_library_root = library_root or self._cfg.bookorbit.library_root or "/library"
+        result = ensure_bookorbit_ready(
+            url=self._cfg.bookorbit.url,
+            setup_token=setup_token,
+            admin_username=admin_username,
+            admin_name=admin_name,
+            admin_email=admin_email,
+            admin_password=admin_password,
+            library_root=eff_library_root,
+            biblichor_config_yaml_path=biblichor_config_yaml_path,
+        )
+        self.store_admin_creds(admin_username, admin_password)
+        return result
+
+    # ---------- doctor ----------
+
+    def doctor(self) -> DoctorReport:
+        creds = self.get_admin_creds()
+        return run_doctor(
+            bookorbit_url=self._cfg.bookorbit.url or "",
+            library_root=Path(self._cfg.bookorbit.library_root)
+            if self._cfg.bookorbit.library_root
+            else None,
+            library_id=self._cfg.bookorbit.library_id or None,
+            admin_username=creds[0] if creds else None,
+            admin_password=creds[1] if creds else None,
+        )
+
+    # ---------- scan ----------
+
+    def trigger_scan(self) -> dict:
+        """Tell BookOrbit to rescan the library. Auth required."""
+        creds = self.get_admin_creds()
+        if not creds:
+            raise BookOrbitServiceError(
+                "No admin credentials stored — run setup or POST /api/bookorbit/creds first"
+            )
+        library_id = self._cfg.bookorbit.library_id
+        if not library_id:
+            raise BookOrbitServiceError(
+                "No library_id in config — run setup first to create the biblichor library"
+            )
+        with BookOrbitClient(self._cfg.bookorbit.url) as client:
+            client.login(username=creds[0], password=creds[1])
+            client.trigger_scan(library_id=library_id)
+        return {"ok": True, "library_id": library_id}
+
+    # ---------- token rotation (setup_token) ----------
+
+    @staticmethod
+    def generate_setup_token() -> str:
+        """48-char URL-safe token for /auth/setup. Returned to the SPA
+        so the user can show it in the wizard if BookOrbit asks (some
+        setups require it as a bootstrap token)."""
+        return stdlib_secrets.token_urlsafe(48)

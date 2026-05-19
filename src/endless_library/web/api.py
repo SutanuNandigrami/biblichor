@@ -30,6 +30,20 @@ class AddBook(BaseModel):
     isbn13: str | None = None
 
 
+class _BOSetupPayload(BaseModel):
+    admin_username: str
+    admin_email: str
+    admin_name: str
+    admin_password: str
+    setup_token: str
+    library_root: str | None = None
+
+
+class _BOCredsPayload(BaseModel):
+    admin_username: str
+    admin_password: str
+
+
 class AddSource(BaseModel):
     source: str
     identifier: str
@@ -1098,6 +1112,99 @@ def register(app: FastAPI) -> None:
             tags = ",".join(str(t).strip() for t in tags if str(t).strip())
         deps.books.set_tags(book_id, series=series, tags=tags)
         return {"ok": True}
+
+    # ---------- BookOrbit admin (Phase 6p.2) ----------
+
+    def _bookorbit_service(request: Request):
+        """Instantiate a BookOrbitService bound to this app's cfg/db.
+        Each handler gets its own instance — they're cheap."""
+        from endless_library.bookorbit.service import BookOrbitService
+
+        deps = request.app.state.deps
+        cfg = deps.cfg
+        secrets_dir = Path(cfg.general.books_dir).parent / "secrets"
+        return BookOrbitService(
+            cfg=cfg,
+            db_path=deps.db_path,
+            restore_key_path=secrets_dir / "restore.key",
+        )
+
+    @router.get("/bookorbit/status")
+    def bookorbit_status(request: Request):
+        """Drives the SPA's Library page: which card to show, what
+        the doctor would say without round-tripping the full probe."""
+        svc = _bookorbit_service(request)
+        from dataclasses import asdict
+
+        return asdict(svc.status())
+
+    @router.post("/bookorbit/setup")
+    def bookorbit_setup(payload: _BOSetupPayload, request: Request):
+        """First-run admin creation + library creation + creds storage."""
+        from endless_library.bookorbit.service import BookOrbitServiceError
+
+        config_path = request.app.state.config_path
+        svc = _bookorbit_service(request)
+        try:
+            result = svc.run_setup(
+                admin_username=payload.admin_username,
+                admin_email=payload.admin_email,
+                admin_name=payload.admin_name,
+                admin_password=payload.admin_password,
+                setup_token=payload.setup_token,
+                library_root=payload.library_root,
+                biblichor_config_yaml_path=config_path,
+            )
+        except BookOrbitServiceError as e:
+            raise HTTPException(400, str(e)) from e
+        except Exception as e:
+            raise HTTPException(500, f"{type(e).__name__}: {e}") from e
+        return {"ok": True, "library_id": result.library_id}
+
+    @router.post("/bookorbit/creds")
+    def bookorbit_store_creds(payload: _BOCredsPayload, request: Request):
+        """Update stored admin credentials without re-running setup.
+        Use this when you've changed the admin password directly in
+        BookOrbit's own UI and want biblichor to know the new one."""
+        svc = _bookorbit_service(request)
+        svc.store_admin_creds(payload.admin_username, payload.admin_password)
+        return {"ok": True}
+
+    @router.delete("/bookorbit/creds")
+    def bookorbit_clear_creds(request: Request):
+        svc = _bookorbit_service(request)
+        svc.clear_admin_creds()
+        return {"ok": True}
+
+    @router.post("/bookorbit/doctor")
+    def bookorbit_doctor(request: Request):
+        svc = _bookorbit_service(request)
+        report = svc.doctor()
+        return {
+            "ok": report.ok,
+            "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in report.checks],
+        }
+
+    @router.post("/bookorbit/scan")
+    def bookorbit_scan(request: Request):
+        from endless_library.bookorbit.service import BookOrbitServiceError
+
+        svc = _bookorbit_service(request)
+        try:
+            return svc.trigger_scan()
+        except BookOrbitServiceError as e:
+            raise HTTPException(400, str(e)) from e
+        except Exception as e:
+            raise HTTPException(502, f"{type(e).__name__}: {e}") from e
+
+    @router.post("/bookorbit/setup-token")
+    def bookorbit_generate_setup_token():
+        """Return a fresh 48-byte URL-safe setup token. Used by the
+        SPA wizard when the operator doesn't have BOOKORBIT_SETUP_TOKEN
+        in their .env yet."""
+        from endless_library.bookorbit.service import BookOrbitService
+
+        return {"token": BookOrbitService.generate_setup_token()}
 
     app.include_router(router)
 

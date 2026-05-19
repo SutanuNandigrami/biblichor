@@ -8,6 +8,11 @@ import {
   Copy,
   Globe,
   Smartphone,
+  RotateCw,
+  Stethoscope,
+  KeyRound,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
@@ -24,39 +29,155 @@ interface BookOrbitUrls {
   base: string
 }
 
+interface BookOrbitStatus {
+  enabled: boolean
+  setup_needed: boolean
+  has_creds: boolean
+  library_id: string | null
+  library_root: string
+  library_root_exists: boolean
+  url: string
+  health_ok: boolean
+  last_check_error: string | null
+}
+
+interface DoctorCheck {
+  name: string
+  ok: boolean
+  detail: string
+}
+
 const toast = useToast()
 const urls = ref<BookOrbitUrls | null>(null)
-const enabled = ref<boolean>(false)
-const loading = ref<boolean>(true)
+const status = ref<BookOrbitStatus | null>(null)
+const loading = ref(true)
 
-onMounted(async () => {
+const showWizard = ref(false)
+const wizardBusy = ref(false)
+const wizardForm = ref({
+  admin_username: 'admin',
+  admin_email: '',
+  admin_name: 'Admin',
+  admin_password: '',
+  setup_token: '',
+  library_root: '/library',
+})
+
+const showCreds = ref(false)
+const credsBusy = ref(false)
+const credsForm = ref({ admin_username: 'admin', admin_password: '' })
+
+const doctorBusy = ref(false)
+const doctorReport = ref<{ ok: boolean; checks: DoctorCheck[] } | null>(null)
+
+const scanBusy = ref(false)
+
+async function refresh() {
+  loading.value = true
   try {
-    const settings = await api<any>('/api/settings')
-    enabled.value = !!settings?.bookorbit?.enabled
+    const [settings, st] = await Promise.all([
+      api<any>('/api/settings'),
+      api<BookOrbitStatus>('/api/bookorbit/status'),
+    ])
     urls.value = settings?.bookorbit?.urls ?? null
+    status.value = st
   } finally {
     loading.value = false
   }
-})
+}
 
-const bookOrbitUrl = computed(() => {
-  if (urls.value?.base) return urls.value.base
-  const proto = window.location.protocol
-  const host = window.location.hostname
-  return `${proto}//${host}:3000`
-})
+onMounted(refresh)
+
+const bookOrbitUrl = computed(() => urls.value?.base ?? '')
 
 function openBookOrbit() {
-  window.open(bookOrbitUrl.value, '_blank', 'noopener')
+  if (bookOrbitUrl.value) window.open(bookOrbitUrl.value, '_blank', 'noopener')
 }
-
-function open(url: string) {
+function openLink(url: string) {
   window.open(url, '_blank', 'noopener')
 }
-
 async function copy(text: string, label: string) {
   await navigator.clipboard.writeText(text)
-  toast.success(`${label} URL copied`)
+  toast.success(label + ' URL copied')
+}
+
+async function openWizard() {
+  try {
+    const tok = await api<{ token: string }>('/api/bookorbit/setup-token', { method: 'POST' })
+    wizardForm.value.setup_token = tok.token
+  } catch (e) {
+    // non-fatal
+  }
+  showWizard.value = true
+}
+
+async function submitWizard() {
+  wizardBusy.value = true
+  try {
+    await api('/api/bookorbit/setup', {
+      method: 'POST',
+      body: JSON.stringify(wizardForm.value),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    toast.success('BookOrbit setup complete')
+    showWizard.value = false
+    await refresh()
+  } catch (e: any) {
+    toast.error('Setup failed: ' + (e?.message ?? e))
+  } finally {
+    wizardBusy.value = false
+  }
+}
+
+async function submitCreds() {
+  credsBusy.value = true
+  try {
+    await api('/api/bookorbit/creds', {
+      method: 'POST',
+      body: JSON.stringify(credsForm.value),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    toast.success('Credentials updated')
+    showCreds.value = false
+    credsForm.value.admin_password = ''
+    await refresh()
+  } catch (e: any) {
+    toast.error('Update failed: ' + (e?.message ?? e))
+  } finally {
+    credsBusy.value = false
+  }
+}
+
+async function clearCreds() {
+  if (!confirm('Clear stored BookOrbit credentials? Scan + authenticated Doctor checks will stop working until you re-enter them.'))
+    return
+  await api('/api/bookorbit/creds', { method: 'DELETE' })
+  toast.success('Credentials cleared')
+  await refresh()
+}
+
+async function runDoctor() {
+  doctorBusy.value = true
+  doctorReport.value = null
+  try {
+    doctorReport.value = await api('/api/bookorbit/doctor', { method: 'POST' })
+  } catch (e: any) {
+    toast.error('Doctor failed: ' + (e?.message ?? e))
+  } finally {
+    doctorBusy.value = false
+  }
+}
+
+async function runScan() {
+  scanBusy.value = true
+  try {
+    await api('/api/bookorbit/scan', { method: 'POST' })
+    toast.success('Scan triggered')
+  } catch (e: any) {
+    toast.error('Scan failed: ' + (e?.message ?? e))
+  } finally {
+    scanBusy.value = false
+  }
 }
 </script>
 
@@ -67,35 +188,156 @@ async function copy(text: string, label: string) {
         <BookOpen class="w-14 h-14 mx-auto text-primary" />
         <h1 class="text-2xl font-semibold">Library</h1>
         <p class="text-sm text-muted-foreground max-w-xl mx-auto leading-relaxed">
-          Your library lives in <strong>BookOrbit</strong> — a dedicated reader with built-in EPUB/PDF readers,
-          Kobo auto-push, KOReader two-way progress, OPDS feed, and reading statistics. biblichor stays focused
-          on getting books; BookOrbit owns the reading experience.
+          Your library lives in <strong>BookOrbit</strong>. biblichor stays focused on getting books;
+          BookOrbit owns reading, Kobo/KOReader sync, OPDS, and statistics.
         </p>
       </header>
 
       <Card v-if="loading" class="p-8 text-center text-sm text-muted-foreground">
-        Loading library URLs…
+        Loading library status...
       </Card>
 
-      <template v-else-if="urls">
-        <!-- Primary action -->
+      <Card v-else-if="status?.enabled && status.setup_needed && !showWizard"
+            class="p-5 space-y-3 border-amber-500/40">
+        <div class="flex items-center gap-3">
+          <KeyRound class="w-5 h-5 text-amber-500" />
+          <h2 class="font-semibold text-base flex-1">First-run setup needed</h2>
+          <Button size="lg" @click="openWizard">Set up BookOrbit</Button>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          BookOrbit is running but no admin account exists yet. Create one to unlock the library, OPDS,
+          Kobo/KOReader sync, and reading statistics.
+        </p>
+      </Card>
+
+      <Card v-if="showWizard" class="p-5 space-y-4">
+        <h2 class="font-semibold text-base flex items-center gap-2">
+          <KeyRound class="w-5 h-5 text-primary" /> BookOrbit setup
+        </h2>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="text-xs space-y-1">
+            <span class="text-muted-foreground">Admin username</span>
+            <input v-model="wizardForm.admin_username"
+              class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+          </label>
+          <label class="text-xs space-y-1">
+            <span class="text-muted-foreground">Display name</span>
+            <input v-model="wizardForm.admin_name"
+              class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+          </label>
+          <label class="text-xs space-y-1 col-span-2">
+            <span class="text-muted-foreground">Email</span>
+            <input v-model="wizardForm.admin_email" type="email" autocomplete="email"
+              class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+          </label>
+          <label class="text-xs space-y-1 col-span-2">
+            <span class="text-muted-foreground">Password</span>
+            <input v-model="wizardForm.admin_password" type="password" autocomplete="new-password"
+              class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+          </label>
+          <label class="text-xs space-y-1 col-span-2">
+            <span class="text-muted-foreground">Library root (container path)</span>
+            <input v-model="wizardForm.library_root"
+              class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm font-mono" />
+            <span class="text-[10px] text-muted-foreground">
+              Inside docker: <code>/library</code>. Native install: the host directory.
+            </span>
+          </label>
+          <label class="text-xs space-y-1 col-span-2">
+            <span class="text-muted-foreground">Setup token</span>
+            <input v-model="wizardForm.setup_token"
+              class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm font-mono" />
+            <span class="text-[10px] text-muted-foreground">
+              Auto-generated. Must match <code>BOOKORBIT_SETUP_TOKEN</code> if set in <code>.env</code>.
+            </span>
+          </label>
+        </div>
+        <div class="flex gap-2 justify-end">
+          <Button variant="ghost" size="sm" :disabled="wizardBusy" @click="showWizard = false">Cancel</Button>
+          <Button size="sm" :disabled="wizardBusy || !wizardForm.admin_password || !wizardForm.admin_email"
+            @click="submitWizard">
+            {{ wizardBusy ? 'Setting up...' : 'Create admin + library' }}
+          </Button>
+        </div>
+      </Card>
+
+      <template v-else-if="urls && status">
         <Card class="p-5 space-y-3">
           <div class="flex items-center gap-3">
             <BookOpen class="w-5 h-5 text-primary" />
             <h2 class="font-semibold text-base flex-1">Open BookOrbit</h2>
             <Button size="lg" @click="openBookOrbit">
-              <ExternalLink class="w-4 h-4 mr-2" />
-              Launch
+              <ExternalLink class="w-4 h-4 mr-2" /> Launch
             </Button>
           </div>
           <p class="text-xs text-muted-foreground font-mono break-all">{{ urls.dashboard }}</p>
-          <p v-if="!enabled" class="text-[11px] text-amber-500 dark:text-amber-400">
-            Pipeline integration is <strong>disabled</strong> — books won’t auto-land here until you run
-            <code class="font-mono">biblichor bookorbit-setup</code>.
+          <p v-if="!status.enabled" class="text-[11px] text-amber-500 dark:text-amber-400">
+            Pipeline integration is <strong>disabled</strong>. Set
+            <code class="font-mono">bookorbit.enabled = true</code> in config.yaml to enable auto-drop.
           </p>
         </Card>
 
-        <!-- E-reader sync surfaces -->
+        <div class="grid grid-cols-3 gap-3">
+          <Button variant="outline" :disabled="scanBusy" @click="runScan">
+            <RotateCw class="w-4 h-4 mr-2" :class="scanBusy ? 'animate-spin' : ''" />
+            {{ scanBusy ? 'Scanning...' : 'Scan now' }}
+          </Button>
+          <Button variant="outline" :disabled="doctorBusy" @click="runDoctor">
+            <Stethoscope class="w-4 h-4 mr-2" />
+            {{ doctorBusy ? 'Probing...' : 'Run doctor' }}
+          </Button>
+          <Button variant="outline" @click="showCreds = !showCreds">
+            <KeyRound class="w-4 h-4 mr-2" />
+            {{ status.has_creds ? 'Update creds' : 'Store creds' }}
+          </Button>
+        </div>
+
+        <Card v-if="doctorReport" class="p-4 space-y-2">
+          <h3 class="text-sm font-semibold flex items-center gap-2">
+            <Stethoscope class="w-4 h-4" />
+            Doctor -
+            <span :class="doctorReport.ok ? 'text-emerald-500' : 'text-rose-500'">
+              {{ doctorReport.ok ? 'all checks passed' : 'failures found' }}
+            </span>
+          </h3>
+          <ul class="space-y-1 text-xs">
+            <li v-for="c in doctorReport.checks" :key="c.name" class="flex items-start gap-2">
+              <CheckCircle2 v-if="c.ok" class="w-4 h-4 mt-0.5 text-emerald-500 flex-shrink-0" />
+              <XCircle v-else class="w-4 h-4 mt-0.5 text-rose-500 flex-shrink-0" />
+              <span class="font-mono text-[11px]">{{ c.name }}</span>
+              <span class="text-muted-foreground flex-1">{{ c.detail }}</span>
+            </li>
+          </ul>
+        </Card>
+
+        <Card v-if="showCreds" class="p-4 space-y-3">
+          <h3 class="text-sm font-semibold flex items-center gap-2">
+            <KeyRound class="w-4 h-4 text-primary" /> BookOrbit credentials
+          </h3>
+          <p class="text-[11px] text-muted-foreground">
+            Stored encrypted in <code class="font-mono">library.db</code> under the recovery key.
+            Used by Scan and authenticated Doctor checks.
+          </p>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="text-xs space-y-1">
+              <span class="text-muted-foreground">Admin username</span>
+              <input v-model="credsForm.admin_username"
+                class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+            </label>
+            <label class="text-xs space-y-1">
+              <span class="text-muted-foreground">Admin password</span>
+              <input v-model="credsForm.admin_password" type="password" autocomplete="off"
+                class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+            </label>
+          </div>
+          <div class="flex gap-2 justify-end">
+            <Button v-if="status.has_creds" variant="ghost" size="sm" @click="clearCreds">Clear stored creds</Button>
+            <Button size="sm" :disabled="credsBusy || !credsForm.admin_password" @click="submitCreds">
+              {{ credsBusy ? 'Saving...' : 'Save' }}
+            </Button>
+          </div>
+        </Card>
+
         <div class="space-y-3">
           <h3 class="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
             E-reader sync
@@ -108,7 +350,7 @@ async function copy(text: string, label: string) {
               <Button size="sm" variant="outline" @click="copy(urls.opds_catalog, 'OPDS')">
                 <Copy class="w-4 h-4 mr-1.5" /> Copy
               </Button>
-              <Button size="sm" variant="ghost" @click="open(urls.opds_catalog)">
+              <Button size="sm" variant="ghost" @click="openLink(urls.opds_catalog)">
                 <ExternalLink class="w-4 h-4" />
               </Button>
             </div>
@@ -125,13 +367,12 @@ async function copy(text: string, label: string) {
             <div class="flex items-center gap-3">
               <Tablet class="w-5 h-5 text-primary" />
               <h4 class="font-medium flex-1">Kobo sync</h4>
-              <Button size="sm" variant="ghost" @click="open(urls.dashboard + '/settings/kobo')">
+              <Button size="sm" variant="ghost" @click="openLink(urls.dashboard + '/settings/kobo')">
                 <ExternalLink class="w-4 h-4" />
               </Button>
             </div>
             <p class="text-[11px] text-muted-foreground">
-              Set up Kobo auto-push via BookOrbit's Settings → Kobo. Each device gets its own sync token; once
-              registered, new books drop into your Kobo automatically over Wi-Fi.
+              Set up Kobo auto-push via BookOrbit's Settings > Kobo. Each device gets its own sync token.
             </p>
             <p class="font-mono text-[11px] break-all bg-muted/40 px-2 py-1.5 rounded">
               {{ urls.kobo_sync_root }}/&lt;deviceToken&gt;
@@ -147,8 +388,8 @@ async function copy(text: string, label: string) {
               </Button>
             </div>
             <p class="text-[11px] text-muted-foreground">
-              KOReader speaks OPDS for browsing + sync. In KOReader: <strong>OPDS Catalog → Add Catalog</strong>.
-              Use the OPDS URL above; KOReader will sync reading progress two-way through the same channel.
+              KOReader speaks OPDS for browsing + sync. In KOReader:
+              <strong>OPDS Catalog > Add Catalog</strong>. Use the OPDS URL above.
             </p>
           </Card>
 
@@ -156,38 +397,15 @@ async function copy(text: string, label: string) {
             <div class="flex items-center gap-3">
               <ChartLine class="w-5 h-5 text-primary" />
               <h4 class="font-medium flex-1">Reading statistics</h4>
-              <Button size="sm" variant="ghost" @click="open(urls.statistics)">
+              <Button size="sm" variant="ghost" @click="openLink(urls.statistics)">
                 <ExternalLink class="w-4 h-4" />
               </Button>
             </div>
             <p class="text-[11px] text-muted-foreground">
-              Heatmaps, streaks, pages-per-day, time-spent. Surfaces what you've actually read versus what
-              biblichor has just delivered.
+              Heatmaps, streaks, pages-per-day, time-spent.
             </p>
           </Card>
         </div>
-
-        <!-- First-run + advanced -->
-        <details class="text-xs text-muted-foreground rounded-md border border-border p-3">
-          <summary class="cursor-pointer hover:text-foreground select-none">
-            First-run / advanced setup
-          </summary>
-          <div class="mt-3 space-y-2 leading-relaxed">
-            <p>
-              <code class="font-mono">biblichor bookorbit-setup --admin-email you@example.com</code>
-              creates the admin account + watched library, then flips
-              <code class="font-mono">bookorbit.enabled</code> in <code>config.yaml</code>.
-            </p>
-            <p>
-              <code class="font-mono">biblichor migrate-to-bookorbit</code> walks an existing
-              <code>data/calibre-library/</code> and copies every book file into the BookOrbit library.
-            </p>
-            <p>
-              <code class="font-mono">biblichor bookorbit-doctor</code> probes BookOrbit's API before/after
-              upgrades to catch drift in the endpoints biblichor relies on.
-            </p>
-          </div>
-        </details>
       </template>
     </div>
   </div>

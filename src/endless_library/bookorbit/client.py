@@ -60,6 +60,21 @@ class BookOrbitClient:
     def __exit__(self, *exc) -> None:
         self._client.close()
 
+    # ---------- health ----------
+
+    def health(self) -> bool:
+        """GET /api/v1/health -> True if reachable and database "up".
+        Used by the SPA status card. Never raises on connection errors."""
+        try:
+            r = self._client.get("/api/v1/health")
+            if r.status_code != 200:
+                return False
+            payload = r.json()
+            db = payload.get("info", {}).get("database", {}).get("status")
+            return db == "up"
+        except Exception:
+            return False
+
     # ---------- auth ----------
 
     def setup_status(self) -> dict[str, Any]:

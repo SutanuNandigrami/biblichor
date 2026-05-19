@@ -578,6 +578,23 @@ def cmd_bookorbit_setup(args):
         print(f"BookOrbit admin already exists; using existing account ({admin_email})")
     print(f"library id:   {result.library_id}")
     print(f"library root: {library_root}  (path biblichor sees; in container = /library)")
+
+    # Phase 6p.4: also stash creds in the encrypted store so the SPA
+    # buttons + bookorbit-doctor can use them without re-entry.
+    try:
+        from endless_library.bookorbit.service import BookOrbitService
+
+        secrets_dir = Path(cfg.general.books_dir).parent / "secrets"
+        svc = BookOrbitService(
+            cfg=cfg,
+            db_path=Path(cfg.general.books_dir).parent / "library.db",
+            restore_key_path=secrets_dir / "restore.key",
+        )
+        svc.store_admin_creds(admin_user, admin_password)
+        print("credentials stored encrypted in library.db (SPA scan/doctor will use them)")
+    except Exception as e:
+        print(f"warning: could not store creds in encrypted store ({type(e).__name__}: {e})")
+        print("  (you can still use the CLI; the SPA scan/doctor buttons will ask for creds)")
     if result.config_yaml_updated:
         print(f"biblichor config.yaml: bookorbit integration enabled at {result.config_yaml_path}")
     else:
@@ -782,6 +799,24 @@ def cmd_bookorbit_doctor(args):
 
     admin_user = args.admin_user or os.environ.get("BOOKORBIT_ADMIN_USER", "admin")
     admin_password = args.admin_password or os.environ.get("BOOKORBIT_ADMIN_PASSWORD", "")
+
+    # Phase 6p.4: if no creds passed/in env, try the encrypted store
+    # (populated by `biblichor bookorbit-setup` or the SPA wizard).
+    if not admin_password:
+        try:
+            from endless_library.bookorbit.service import BookOrbitService
+
+            secrets_dir = Path(cfg.general.books_dir).parent / "secrets"
+            svc = BookOrbitService(
+                cfg=cfg,
+                db_path=Path(cfg.general.books_dir).parent / "library.db",
+                restore_key_path=secrets_dir / "restore.key",
+            )
+            stored = svc.get_admin_creds()
+            if stored:
+                admin_user, admin_password = stored
+        except Exception:
+            pass
 
     print(f"Probing BookOrbit at: {bo_url}")
     print(f"  library_root: {library_root}")
