@@ -95,6 +95,13 @@ BOOKORBIT_SETUP_TOKEN="${BOOKORBIT_SETUP_TOKEN:-$(openssl rand -hex 32 2>/dev/nu
 prompt_var BOOKORBIT_PORT  "BookOrbit dashboard port"  "${BOOKORBIT_PORT:-3000}"  0
 prompt_var BOOKORBIT_URL   "BookOrbit external URL (Tailscale-friendly)"  "${BOOKORBIT_URL:-http://localhost:${BOOKORBIT_PORT}}"  0
 
+echo
+say "BookOrbit admin (created on first launch)"
+BOOKORBIT_ADMIN_USER="${BOOKORBIT_ADMIN_USER:-admin}"
+prompt_var BOOKORBIT_ADMIN_EMAIL    "BookOrbit admin email"        "${BOOKORBIT_ADMIN_EMAIL:-}"  0
+prompt_var BOOKORBIT_ADMIN_NAME     "BookOrbit admin display name" "${BOOKORBIT_ADMIN_NAME:-${BOOKORBIT_ADMIN_EMAIL%%@*}}"  0
+prompt_var BOOKORBIT_ADMIN_PASSWORD "BookOrbit admin password (8+ chars, upper+lower+digit)" "${BOOKORBIT_ADMIN_PASSWORD:-}" 1
+
 # Write .env atomically
 TMP_ENV="$(mktemp)"
 cat > "$TMP_ENV" <<EOF
@@ -116,6 +123,10 @@ BOOKORBIT_DB_PASSWORD=$BOOKORBIT_DB_PASSWORD
 BOOKORBIT_JWT_SECRET=$BOOKORBIT_JWT_SECRET
 BOOKORBIT_SETUP_TOKEN=$BOOKORBIT_SETUP_TOKEN
 BOOKORBIT_NODE_HEAP_MB=${BOOKORBIT_NODE_HEAP_MB:-2048}
+BOOKORBIT_ADMIN_USER=$BOOKORBIT_ADMIN_USER
+BOOKORBIT_ADMIN_EMAIL=$BOOKORBIT_ADMIN_EMAIL
+BOOKORBIT_ADMIN_NAME=$BOOKORBIT_ADMIN_NAME
+BOOKORBIT_ADMIN_PASSWORD=$BOOKORBIT_ADMIN_PASSWORD
 EOF
 mv "$TMP_ENV" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
@@ -151,6 +162,48 @@ for i in {1..40}; do
     exit 0
   fi
 done
+
+# ---------- wait for BookOrbit + chain admin setup ----------
+BOOKORBIT_HEALTH_URL="http://localhost:${BOOKORBIT_PORT}/api/v1/health"
+say "Waiting for $BOOKORBIT_HEALTH_URL (BookOrbit cold start can take ~60s)..."
+for i in {1..60}; do
+  if curl -fsS "$BOOKORBIT_HEALTH_URL" > /dev/null 2>&1; then
+    ok "BookOrbit is up after ${i}x3s"
+    break
+  fi
+  sleep 3
+  if [[ $i -eq 60 ]]; then
+    warn "BookOrbit healthz didn't go green after 3 minutes — check 'docker compose logs bookorbit'"
+    warn "Skipping bookorbit-setup; run 'biblichor bookorbit-setup' manually once it's up."
+    BOOKORBIT_SKIPPED=1
+  fi
+done
+
+if [[ -z "${BOOKORBIT_SKIPPED:-}" ]]; then
+  say "Bootstrapping BookOrbit admin + watched library..."
+  # We expect biblichor to be installed in a venv (native) OR available
+  # via the biblichor container's exec. Prefer native venv if present.
+  if command -v biblichor > /dev/null 2>&1; then
+    BIBLICHOR_BIN="biblichor"
+  elif [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+    BIBLICHOR_BIN="$REPO_ROOT/.venv/bin/python -m endless_library"
+  else
+    BIBLICHOR_BIN=""
+  fi
+  if [[ -n "$BIBLICHOR_BIN" ]]; then
+    BOOKORBIT_URL="$BOOKORBIT_URL" \
+    BOOKORBIT_SETUP_TOKEN="$BOOKORBIT_SETUP_TOKEN" \
+    BOOKORBIT_ADMIN_USER="$BOOKORBIT_ADMIN_USER" \
+    BOOKORBIT_ADMIN_EMAIL="$BOOKORBIT_ADMIN_EMAIL" \
+    BOOKORBIT_ADMIN_NAME="$BOOKORBIT_ADMIN_NAME" \
+    BOOKORBIT_ADMIN_PASSWORD="$BOOKORBIT_ADMIN_PASSWORD" \
+    $BIBLICHOR_BIN bookorbit-setup --library-root "$REPO_ROOT/library" 2>&1 | sed "s|^|  |" || \
+      warn "bookorbit-setup failed; re-run manually with: $BIBLICHOR_BIN bookorbit-setup"
+  else
+    warn "biblichor CLI not on PATH and no .venv detected; run manually:"
+    warn "  biblichor bookorbit-setup"
+  fi
+fi
 
 # ---------- report ----------
 echo

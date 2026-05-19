@@ -33,6 +33,8 @@ class SetupResult:
     config_path: Path
     library_id: str
     just_created: bool   # admin created right now (False if existing)
+    config_yaml_updated: bool = False  # Phase 6i: bookorbit section enabled
+    config_yaml_path: Path | None = None
 
 
 def ensure_bookorbit_ready(
@@ -46,6 +48,7 @@ def ensure_bookorbit_ready(
     library_root_on_host: str,
     config_path: Path,
     library_mount: str = DEFAULT_LIBRARY_MOUNT,
+    biblichor_config_yaml_path: Path | None = None,
 ) -> SetupResult:
     """First-run bootstrap or no-op resume.
 
@@ -97,8 +100,31 @@ def ensure_bookorbit_ready(
         organization_mode="book_per_folder",
     )
     config.save(config_path)
+
+    # Phase 6i: flip cfg.bookorbit.enabled in the live config.yaml so the
+    # pipeline drop actually fires after setup. Without this step, the
+    # pipeline integration is silently disabled and the integration looks
+    # complete but is wired to nothing.
+    config_yaml_updated = False
+    if biblichor_config_yaml_path is not None and biblichor_config_yaml_path.exists():
+        from endless_library.config import load_config, save_config
+
+        cfg = load_config(biblichor_config_yaml_path)
+        # Only update if any field differs — keeps file mtime stable on idempotent runs
+        if (not cfg.bookorbit.enabled
+                or cfg.bookorbit.library_root_on_host != library_root_on_host
+                or cfg.bookorbit.organization_mode != "book_per_folder"):
+            cfg.bookorbit.enabled = True
+            cfg.bookorbit.library_root_on_host = library_root_on_host
+            cfg.bookorbit.organization_mode = "book_per_folder"
+            save_config(cfg, biblichor_config_yaml_path)
+            log.info("biblichor config.yaml: bookorbit integration enabled")
+            config_yaml_updated = True
+
     return SetupResult(
         config_path=config_path,
         library_id=library_id,
         just_created=just_created,
+        config_yaml_updated=config_yaml_updated,
+        config_yaml_path=biblichor_config_yaml_path,
     )

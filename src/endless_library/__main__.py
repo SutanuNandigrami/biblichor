@@ -532,6 +532,7 @@ def cmd_bookorbit_setup(args):
             admin_password=admin_password,
             library_root_on_host=library_root,
             config_path=bo_cfg_path,
+            biblichor_config_yaml_path=config_path,
         )
     except BookOrbitError as e:
         print(f"bookorbit setup failed: {e}", file=sys.stderr)
@@ -545,6 +546,10 @@ def cmd_bookorbit_setup(args):
     print(f"library id:   {result.library_id}")
     print(f"library root: {library_root} -> /books (mounted)")
     print(f"config saved: {result.config_path}")
+    if result.config_yaml_updated:
+        print(f"biblichor config.yaml: bookorbit integration enabled at {result.config_yaml_path}")
+    elif result.config_yaml_path:
+        print(f"biblichor config.yaml: already configured at {result.config_yaml_path}")
     print()
     print(f"open the library:  {url}")
     return 0
