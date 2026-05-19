@@ -30,7 +30,13 @@ def _probe_bookorbit_health(url: str, timeout: float = 2.5) -> bool:
     import httpx
 
     try:
-        r = httpx.get(url.rstrip("/") + "/api/v1/health", timeout=timeout)
+        # Phase 6o.7 (R-M-2): support reverse-proxy URLs that include
+        # a path prefix (e.g. http://proxy/books). We probe the absolute
+        # path, joining onto whatever path the user configured.
+        from urllib.parse import urljoin
+
+        probe_url = urljoin(url.rstrip("/") + "/", "api/v1/health")
+        r = httpx.get(probe_url, timeout=timeout)
         return r.status_code == 200
     except (httpx.HTTPError, OSError):
         return False

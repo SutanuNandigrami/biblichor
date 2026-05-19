@@ -351,11 +351,13 @@ def cmd_backup(args):
 
     pg_cmd: list[str] | None = None
     if args.postgres_container:
+        # Phase 6o.7 (R-M-6): detect docker/podman compose runner
+        # instead of hardcoding `docker compose`.
+        compose_runner = _detect_compose_runner(args)
         pg_user = args.postgres_user or os.environ.get("BOOKORBIT_DB_USER", "bookorbit")
         pg_db = args.postgres_db or os.environ.get("BOOKORBIT_DB_NAME", "bookorbit")
         pg_cmd = [
-            "docker",
-            "compose",
+            *compose_runner,
             "exec",
             "-T",
             args.postgres_container,
@@ -685,6 +687,76 @@ def cmd_migrate_to_bookorbit(args):
     return 0 if result.failed == 0 else 1
 
 
+def _detect_compose_runner(args) -> list[str]:
+    """Return the argv prefix that runs a command inside a compose service.
+
+    Phase 6o.7 (R-M-6): supports docker compose, docker-compose, podman compose,
+    podman-compose. Picks the first runner whose `<runner> ls` returns 0.
+    Falls back to `docker compose` so unconfigured runs at least produce a
+    clear error.
+    """
+    import shutil as _shutil
+    import subprocess as _subprocess
+
+    candidates = [
+        ["docker", "compose"],
+        ["docker-compose"],
+        ["podman", "compose"],
+        ["podman-compose"],
+    ]
+    if getattr(args, "compose_runner", ""):
+        return args.compose_runner.split()
+    for runner in candidates:
+        if not _shutil.which(runner[0]):
+            continue
+        try:
+            r = _subprocess.run([*runner, "ls"], capture_output=True, timeout=5, check=False)
+            if r.returncode == 0:
+                return runner
+        except (FileNotFoundError, _subprocess.TimeoutExpired):
+            continue
+    return ["docker", "compose"]
+
+
+def cmd_restore_postgres(args):
+    """Restore a Postgres dump into the running BookOrbit database
+    (Phase 6o.7 R-V-3)."""
+    import subprocess as _subprocess
+
+    dump_path = Path(args.dump_path).expanduser()
+    if not dump_path.exists():
+        print(f"error: dump not found: {dump_path}", file=sys.stderr)
+        return 1
+
+    runner = _detect_compose_runner(args)
+    container = args.postgres_container or os.environ.get("BOOKORBIT_DB_CONTAINER", "bookorbit-db")
+    pg_user = args.postgres_user or os.environ.get("BOOKORBIT_DB_USER", "bookorbit")
+    pg_db = args.postgres_db or os.environ.get("BOOKORBIT_DB_NAME", "bookorbit")
+
+    if not args.yes:
+        print(f"About to restore {dump_path.name} ({dump_path.stat().st_size:,} bytes) into:")
+        print(f"  runner:    {' '.join(runner)}")
+        print(f"  container: {container}")
+        print(f"  user:      {pg_user}")
+        print(f"  database:  {pg_db}")
+        print()
+        print("This will replace BookOrbit's current database contents.")
+        confirm = input("proceed? [y/N] ").strip().lower()
+        if confirm != "y":
+            print("aborted")
+            return 1
+
+    cmd = [*runner, "exec", "-T", container, "psql", "-U", pg_user, "-d", pg_db]
+    with open(dump_path, "rb") as f:
+        proc = _subprocess.run(cmd, stdin=f, capture_output=True, check=False)
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout)[-400:].decode("utf-8", errors="replace")
+        print(f"psql restore failed (exit {proc.returncode}):\n{tail}", file=sys.stderr)
+        return 1
+    print(f"ok: restored {dump_path.name} into {container}/{pg_db}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="endless-library", description="Self-hosted books -> kindle")
     p.add_argument("--config", help="Path to config.yaml")
@@ -770,6 +842,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     s_mig.set_defaults(func=cmd_migrate_to_bookorbit)
 
+    s_restore_pg = sub.add_parser(
+        "restore-postgres",
+        help="Restore a pg_dump SQL file into the running bookorbit-db",
+    )
+    s_restore_pg.add_argument("dump_path", help="Path to the postgres.sql dump file")
+    s_restore_pg.add_argument("--postgres-container", default="")
+    s_restore_pg.add_argument("--postgres-user", default="")
+    s_restore_pg.add_argument("--postgres-db", default="")
+    s_restore_pg.add_argument("--compose-runner", default="")
+    s_restore_pg.add_argument("--yes", action="store_true")
+    s_restore_pg.set_defaults(func=cmd_restore_postgres)
+
     s_backup = sub.add_parser("backup", help="Create a disaster-recovery backup (Phase 5a)")
     s_backup.add_argument("--secrets", default="", help="Path to .env (defaults to none)")
     s_backup.add_argument(
@@ -795,6 +879,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     s_backup.add_argument(
         "--bookorbit-data", default="", help="Path to BookOrbit /data dir (covers + book-bucket)"
+    )
+    s_backup.add_argument(
+        "--compose-runner",
+        default="",
+        help="Override compose runner for pg_dump (default: auto-detect docker/podman)",
     )
     s_backup.set_defaults(func=cmd_backup)
 

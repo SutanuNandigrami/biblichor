@@ -32,10 +32,27 @@ class BookOrbitError(Exception):
 
 
 class BookOrbitClient:
-    def __init__(self, base_url: str, *, timeout: float = DEFAULT_TIMEOUT) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        timeout: float = DEFAULT_TIMEOUT,
+        verify: bool | str = True,
+    ) -> None:
+        """`verify`: passed through to httpx. Default True (system CA
+        bundle). Set to a path string for a custom CA bundle (private
+        CA), or False to disable verification (dev only — Phase 6o.7
+        R-M-8). Override via BOOKORBIT_TLS_CA_BUNDLE env: a non-empty
+        path is treated as the CA bundle, the literal string 'false'
+        disables verification entirely."""
+        import os
+
+        env_override = os.environ.get("BOOKORBIT_TLS_CA_BUNDLE", "").strip()
+        if env_override:
+            verify = False if env_override.lower() in ("false", "no", "0", "off") else env_override
         self.base_url = base_url.rstrip("/")
         self._jwt: str | None = None
-        self._client = httpx.Client(base_url=self.base_url, timeout=timeout)
+        self._client = httpx.Client(base_url=self.base_url, timeout=timeout, verify=verify)
 
     def __enter__(self) -> BookOrbitClient:
         return self
