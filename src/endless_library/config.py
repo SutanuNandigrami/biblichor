@@ -103,6 +103,11 @@ class ScrapersCfg(BaseModel):
     request_delay_seconds: float = 6.0
     slow_download_timeout_seconds: int = 180
     flaresolverr_url: str = "http://flaresolverr:8191/v1"
+    # Phase 6s.6: route Anna's onion fallback through the optional
+    # torproxy sidecar at tor:9050. Off by default; opt in via
+    # `docker compose --profile tor up -d` + setting this flag.
+    tor_enabled: bool = False
+    tor_proxy_url: str = "socks5h://tor:9050"
     annas_mirrors: list[str] = Field(default_factory=list)
     # Optional Welib auth cookie. Paste as the literal Cookie: header value
     # the browser would send after logging into welib.org

@@ -40,6 +40,7 @@ class Candidate:
         "oapen",
         "doab",
         "wikisource",
+        "zlib",
     ]
     md5: str | None
     title: str | None

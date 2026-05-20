@@ -18,6 +18,7 @@ from endless_library.scrapers.standard_ebooks import StandardEbooks
 from endless_library.scrapers.welib_curl import WelibCurl
 from endless_library.scrapers.welib_playwright import WelibPlaywright
 from endless_library.scrapers.wikisource import Wikisource
+from endless_library.scrapers.zlib_singlelogin import ZlibSingleLogin
 
 _REGISTRY = {
     "annas_curl": AnnasArchiveCurl,
@@ -33,6 +34,7 @@ _REGISTRY = {
     "standard_ebooks": StandardEbooks,
     "oapen_doab": OapenDoab,
     "wikisource": Wikisource,
+    "zlib_singlelogin": ZlibSingleLogin,
 }
 
 _PD_PRIORITY = ("standard_ebooks", "gutendex", "wikisource", "oapen_doab")

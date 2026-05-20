@@ -8,6 +8,7 @@ import time
 from typing import Any
 from urllib.parse import quote_plus, urljoin
 
+import httpx
 from bs4 import BeautifulSoup
 
 from endless_library.config import ScrapersCfg

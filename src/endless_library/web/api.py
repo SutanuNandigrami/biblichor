@@ -49,6 +49,11 @@ class _BOChangePasswordPayload(BaseModel):
     current_password: str | None = None
 
 
+class _ZlibCredsPayload(BaseModel):
+    email: str
+    password: str
+
+
 class AddSource(BaseModel):
     source: str
     identifier: str
@@ -1191,6 +1196,56 @@ def register(app: FastAPI) -> None:
             raise HTTPException(400, str(e)) from e
         except Exception as e:
             raise HTTPException(502, f"{type(e).__name__}: {e}") from e
+
+    @router.post("/scrapers/zlibrary/creds")
+    def zlibrary_store_creds(payload: _ZlibCredsPayload, request: Request):
+        """Phase 6s.5: store Z-Library SingleLogin creds in the encrypted
+        secrets store. SPA Scrapers page card uses this."""
+        svc = _bookorbit_service(request)
+        svc.store_zlib_creds(payload.email, payload.password)
+        return {"ok": True}
+
+    @router.delete("/scrapers/zlibrary/creds")
+    def zlibrary_clear_creds(request: Request):
+        svc = _bookorbit_service(request)
+        svc.clear_zlib_creds()
+        return {"ok": True}
+
+    @router.post("/scrapers/cookies")
+    async def upload_cookies(request: Request):
+        """Phase 6s.5: accept a Netscape-format cookies.txt upload.
+        Parses with http.cookiejar.MozillaCookieJar and stores per-
+        domain in the encrypted secrets store."""
+        import http.cookiejar
+        import json as _json
+        import tempfile
+        from pathlib import Path as _Path
+
+        form = await request.form()
+        upfile = form.get("file")
+        if upfile is None or not hasattr(upfile, "read"):
+            raise HTTPException(400, "missing form field 'file'")
+        raw = await upfile.read()
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as fh:
+            fh.write(raw)
+            fh.flush()
+            path = _Path(fh.name)
+        try:
+            jar = http.cookiejar.MozillaCookieJar(str(path))
+            jar.load(ignore_discard=True, ignore_expires=True)
+        except Exception as e:
+            raise HTTPException(400, f"could not parse Netscape cookies.txt: {e}") from e
+        finally:
+            path.unlink(missing_ok=True)
+
+        by_domain: dict[str, list[tuple[str, str]]] = {}
+        for c in jar:
+            by_domain.setdefault(c.domain.lstrip("."), []).append((c.name, c.value))
+
+        svc = _bookorbit_service(request)
+        for domain, pairs in by_domain.items():
+            svc.set_secret_value(f"cookies.{domain}", _json.dumps(pairs))
+        return {"ok": True, "domains": list(by_domain.keys())}
 
     @router.delete("/bookorbit/creds")
     def bookorbit_clear_creds(request: Request):

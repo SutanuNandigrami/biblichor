@@ -157,6 +157,24 @@ services:
     networks:
       - biblichor
 
+  # Phase 6s.6 - optional Tor SOCKS5 sidecar for Anna's onion fallback.
+  # Off by default; `docker compose --profile tor up -d` to include.
+  # When running, set scrapers.tor_enabled=true in config.yaml and
+  # the annas_curl ladder routes through socks5h://tor:9050 as a
+  # last rung.
+  tor:
+    image: dperson/torproxy:latest
+    container_name: biblichor-tor
+    restart: unless-stopped
+    profiles:
+      - tor
+    networks:
+      - biblichor
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
 networks:
   biblichor:
     driver: bridge

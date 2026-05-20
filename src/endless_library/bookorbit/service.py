@@ -340,6 +340,57 @@ class BookOrbitService:
             client.trigger_scan(library_id=library_id)
         return {"ok": True, "library_id": library_id}
 
+    # ---------- Phase 6s.5: generic secret API (used by zlib + cookies) ----------
+
+    def set_secret_value(self, name: str, value: str) -> None:
+        """Store any string value in the encrypted secrets store
+        under the given key. Used by Phase 6s.5 for Z-Library creds
+        and browser cookie jars."""
+        from endless_library.db.schema import connect
+        from endless_library.secrets_store import init_secrets_table, set_secret
+
+        with connect(self._db_path) as conn:
+            init_secrets_table(conn)
+            set_secret(conn, self._secrets_key, name, value)
+
+    def get_secret_value(self, name: str) -> str | None:
+        from endless_library.db.schema import connect
+        from endless_library.secrets_store import get_secret, init_secrets_table
+
+        with connect(self._db_path) as conn:
+            init_secrets_table(conn)
+            return get_secret(conn, self._secrets_key, name)
+
+    def delete_secret_value(self, name: str) -> None:
+        from endless_library.db.schema import connect
+        from endless_library.secrets_store import delete_secret, init_secrets_table
+
+        with connect(self._db_path) as conn:
+            init_secrets_table(conn)
+            delete_secret(conn, name)
+
+    # ---------- Z-Library credentials ----------
+
+    def store_zlib_creds(self, email: str, password: str) -> None:
+        self.set_secret_value("zlib.email", email)
+        self.set_secret_value("zlib.password", password)
+
+    def get_zlib_creds(self) -> tuple[str, str] | None:
+        email = self.get_secret_value("zlib.email")
+        pw = self.get_secret_value("zlib.password")
+        if email and pw:
+            return email, pw
+        return None
+
+    def clear_zlib_creds(self) -> None:
+        for key in (
+            "zlib.email",
+            "zlib.password",
+            "zlib.personal_domain",
+            "zlib.domain_expires_at",
+        ):
+            self.delete_secret_value(key)
+
     # ---------- token rotation (setup_token) ----------
 
     def recreate_watched_library(self) -> dict:

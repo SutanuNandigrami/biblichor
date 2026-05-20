@@ -155,9 +155,10 @@ def test_provider_literal_only_lists_implemented_scrapers() -> None:
         "oapen",
         "doab",
         "wikisource",
+        # Phase 6s.5 — Z-Library SingleLogin
+        "zlib",
     }
     assert "ebanglalibrary" not in provider_values
-    assert "zlib" not in provider_values
 
 
 def test_candidate_accepts_all_registered_providers() -> None:
