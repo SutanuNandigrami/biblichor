@@ -319,7 +319,68 @@ class BookOrbitService:
             client.apply_password_reset(token, new_password)
 
         self.store_admin_creds(username, new_password)
+
+        # Phase 6s.8: also mirror into config/.env so a future
+        # container restart's auto-seed validator picks up the
+        # rotated password. config/.env is bind-mounted (Phase
+        # 6o.5 two-.env model) and is biblichor's runtime env-
+        # override file. The compose-level <repo>/.env stays as
+        # the bootstrap value, but the auto-seed validator now
+        # refuses to seed with a stale value (Phase 6s.8 fix-a),
+        # so a fresh start will use these config/.env values via
+        # the load_config env-override path.
+        try:
+            env_path = self._config_env_path()
+            if env_path and env_path.exists():
+                self._update_env_file(
+                    env_path,
+                    {
+                        "BOOKORBIT_ADMIN_USER": username,
+                        "BOOKORBIT_ADMIN_PASSWORD": new_password,
+                    },
+                )
+        except Exception as e:
+            import logging as _l
+
+            _l.getLogger(__name__).warning(
+                "bookorbit: could not mirror rotated password to config/.env: %s", e
+            )
         return {"ok": True, "username": username}
+
+    def _config_env_path(self) -> Path | None:
+        """Return the path to config/.env (the runtime env-override
+        file). Returns None if the path can't be determined."""
+        try:
+            # cfg.general.books_dir is /data/books; config/.env is in
+            # the host's <repo>/config dir which is mounted at
+            # /app/config inside the container.
+            return Path("/app/config/.env")
+        except Exception:
+            return None
+
+    @staticmethod
+    def _update_env_file(path: Path, kv: dict[str, str]) -> None:
+        """Idempotently set key=value pairs in a .env-style file."""
+        lines: list[str] = []
+        if path.exists():
+            lines = path.read_text(encoding="utf-8").splitlines()
+        existing_keys: set[str] = set()
+        out: list[str] = []
+        for line in lines:
+            stripped = line.lstrip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                out.append(line)
+                continue
+            k = stripped.split("=", 1)[0].strip()
+            if k in kv:
+                existing_keys.add(k)
+                out.append(f"{k}={kv[k]}")
+            else:
+                out.append(line)
+        for k, v in kv.items():
+            if k not in existing_keys:
+                out.append(f"{k}={v}")
+        path.write_text(chr(10).join(out) + chr(10), encoding="utf-8")
 
     # ---------- scan ----------
 

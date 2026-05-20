@@ -105,12 +105,41 @@ async def _lifespan(app: FastAPI):
                 )
                 if not svc.has_admin_creds():
                     env_user = _os.environ.get("BOOKORBIT_ADMIN_USER") or "admin"
-                    svc.store_admin_creds(env_user, env_pw)
-                    log.info(
-                        "bookorbit: seeded encrypted admin creds from env "
-                        "(user=%s) — Scan/Doctor/Change-password now work from the GUI",
-                        env_user,
+                    # Phase 6s.8 hardening: validate env creds with a live
+                    # login before storing. If the env password is stale
+                    # (user rotated via SPA but .env wasn't updated), we
+                    # would otherwise poison the store with a wrong value
+                    # that fails every subsequent Doctor check. Now we
+                    # only seed when the env value actually works.
+                    from endless_library.bookorbit.client import (
+                        BookOrbitClient,
+                        BookOrbitError,
                     )
+
+                    validated = False
+                    try:
+                        with BookOrbitClient(cfg.bookorbit.url) as _c:
+                            _c.login(username=env_user, password=env_pw)
+                        validated = True
+                    except BookOrbitError as _e:
+                        log.warning(
+                            "bookorbit: env BOOKORBIT_ADMIN_PASSWORD does not log "
+                            "into BookOrbit (%s). Skipping auto-seed; enter the "
+                            "current password via the Library page Stored creds card.",
+                            _e,
+                        )
+                    except Exception as _e:
+                        log.warning(
+                            "bookorbit: auto-seed login probe failed: %s — skipping",
+                            _e,
+                        )
+                    if validated:
+                        svc.store_admin_creds(env_user, env_pw)
+                        log.info(
+                            "bookorbit: seeded encrypted admin creds from env "
+                            "(user=%s) — Scan/Doctor/Change-password now work from the GUI",
+                            env_user,
+                        )
             except Exception as e:
                 log.warning("bookorbit: failed to seed admin creds from env: %s", e)
 
