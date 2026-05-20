@@ -623,8 +623,7 @@ def register(app: FastAPI) -> None:
     @router.post("/bench/run")
     async def run_bench_endpoint(request: Request, mode: str = "quick"):
         deps = request.app.state.deps
-        bench_path = Path("bench/queries.yaml")
-        qs, quick_idx = load_queries(bench_path)
+        qs, quick_idx = load_queries()
         if mode == "quick":
             qs = [qs[i] for i in quick_idx if i < len(qs)]
         outcomes = await asyncio.to_thread(run_bench, deps.cfg, qs, deps.bench)

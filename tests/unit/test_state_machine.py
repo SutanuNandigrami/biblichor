@@ -149,6 +149,12 @@ def test_provider_literal_only_lists_implemented_scrapers() -> None:
         "libgen",
         "archive",
         "kindlebangla",
+        # Phase 6s.1 — public-domain curated sources
+        "gutendex",
+        "standard_ebooks",
+        "oapen",
+        "doab",
+        "wikisource",
     }
     assert "ebanglalibrary" not in provider_values
     assert "zlib" not in provider_values

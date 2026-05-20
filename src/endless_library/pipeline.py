@@ -192,7 +192,14 @@ def _search_with_strategies(
     pool: list[Candidate] = []
     seen_md5: set[str] = set()
     last_strategy: str | None = None
-    for s_name in scrapers_registry.enabled_order_for_query(deps.cfg.scrapers, book.title or ""):
+    _is_pd = bool(getattr(book, "is_public_domain", None)) or (
+        getattr(book, "pub_year", None) is not None
+        and (book.pub_year or 0) > 0
+        and book.pub_year < 1928
+    )
+    for s_name in scrapers_registry.pd_aware_order(
+        deps.cfg.scrapers, query_title=book.title or "", is_pd=_is_pd
+    ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
             cands = scraper.search(sq)
@@ -299,7 +306,14 @@ def _score_and_persist(deps: PipelineDeps, book: BookRow, candidates: list[Candi
 
 def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Path | None:
     """Find a scraper that can resolve this candidate's CDN URL and stream the file down."""
-    for s_name in scrapers_registry.enabled_order_for_query(deps.cfg.scrapers, book.title or ""):
+    _is_pd = bool(getattr(book, "is_public_domain", None)) or (
+        getattr(book, "pub_year", None) is not None
+        and (book.pub_year or 0) > 0
+        and book.pub_year < 1928
+    )
+    for s_name in scrapers_registry.pd_aware_order(
+        deps.cfg.scrapers, query_title=book.title or "", is_pd=_is_pd
+    ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
             handle = scraper.resolve_cdn(c)

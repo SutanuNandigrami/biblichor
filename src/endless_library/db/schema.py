@@ -150,6 +150,9 @@ def _migrate(conn) -> None:
         ("searched_at", "ALTER TABLE books ADD COLUMN searched_at TEXT"),
         ("downloaded_at", "ALTER TABLE books ADD COLUMN downloaded_at TEXT"),
         ("converted_at", "ALTER TABLE books ADD COLUMN converted_at TEXT"),
+        # Phase 6s.1: PD pre-chain hook columns
+        ("pub_year", "ALTER TABLE books ADD COLUMN pub_year INTEGER"),
+        ("is_public_domain", "ALTER TABLE books ADD COLUMN is_public_domain INTEGER"),
     ):
         if new_col not in cols:
             conn.execute(ddl)

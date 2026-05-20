@@ -35,7 +35,12 @@ class BenchOutcome:
     note: str = ""
 
 
-def load_queries(path: Path) -> tuple[list[BenchQuery], list[int]]:
+def load_queries(path: Path | None = None) -> tuple[list[BenchQuery], list[int]]:
+    """Load queries.yaml. When path is None, resolve relative to the
+    repo root so it works regardless of cwd — fixes the container
+    HTTP 500 where the cwd-relative path missed the bundled file."""
+    if path is None:
+        path = Path(__file__).resolve().parent.parent.parent / "bench" / "queries.yaml"
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     qs = [BenchQuery(**q) for q in raw.get("queries", [])]
     quick = list(raw.get("quick_indices", []))

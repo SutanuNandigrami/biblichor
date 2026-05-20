@@ -51,9 +51,8 @@ def test_dockerfile_installs_all_required_binaries():
     for pkg in REQUIRED_BINARIES:
         if pkg not in dockerfile:
             missing.append(pkg)
-    assert not missing, (
-        "Dockerfile missing apt packages required by code:\n"
-        + "\n".join(f"  - {p}: {REQUIRED_BINARIES[p]}" for p in missing)
+    assert not missing, "Dockerfile missing apt packages required by code:\n" + "\n".join(
+        f"  - {p}: {REQUIRED_BINARIES[p]}" for p in missing
     )
 
 
