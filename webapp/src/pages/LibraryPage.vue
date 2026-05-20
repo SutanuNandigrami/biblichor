@@ -343,7 +343,7 @@ async function submitChangePassword() {
           </Button>
           <Button variant="outline" @click="showCreds = !showCreds">
             <KeyRound class="w-4 h-4 mr-2" />
-            {{ status.has_creds ? 'Stored creds' : 'Store creds' }}
+            Stored creds
           </Button>
         </div>
 
@@ -419,13 +419,55 @@ async function submitChangePassword() {
         <Card v-if="showCreds" class="p-4 space-y-3">
           <h3 class="text-sm font-semibold flex items-center gap-2">
             <KeyRound class="w-4 h-4 text-primary" /> Stored BookOrbit credentials
+            <span class="text-[10px] text-muted-foreground font-normal ml-1">(advanced / recovery)</span>
           </h3>
-          <p class="text-[11px] text-muted-foreground">
-            What biblichor uses to authenticate with BookOrbit for Scan and Doctor checks.
-            Stored encrypted in <code class="font-mono">library.db</code>.
-            <strong>This does NOT change BookOrbit's password</strong> — it just tells biblichor what password
-            to use. To actually rotate the password, use <strong>Change password</strong> above.
-          </p>
+
+          <div class="text-[11px] text-muted-foreground space-y-2 leading-relaxed">
+            <p>
+              <strong>What it does:</strong> directly writes or wipes the
+              <code class="font-mono">(username, password)</code> pair biblichor uses to authenticate with
+              BookOrbit for Scan and Doctor. Stored encrypted in <code class="font-mono">library.db</code>.
+              <strong>It does NOT change BookOrbit's password</strong> — for that, use
+              <strong>Change password</strong> above.
+            </p>
+
+            <p>
+              <strong>When you need it (rare):</strong>
+            </p>
+            <ul class="list-disc list-inside ml-1 space-y-0.5">
+              <li>
+                You changed BookOrbit's admin password through BookOrbit's own dashboard (not via
+                biblichor). Biblichor's stored copy is now stale and Scan/Doctor will fail
+                with <em>"Invalid credentials"</em> — enter the new password here to bring biblichor back in sync.
+              </li>
+              <li>
+                You want to wipe stored creds for some reason (decommissioning, moving hosts, debugging).
+              </li>
+            </ul>
+
+            <p>
+              <strong>When you don't need it (most cases):</strong>
+            </p>
+            <ul class="list-disc list-inside ml-1 space-y-0.5">
+              <li>First container start — auto-seeded from compose env; creds populate themselves.</li>
+              <li>After clicking <strong>Change password</strong> — rotation flow updates stored creds automatically.</li>
+              <li>BookOrbit upgrades — stored creds are unaffected.</li>
+            </ul>
+
+            <p>
+              <strong>What happens on Save:</strong> biblichor stores the username + password
+              you type here (encrypted) and Scan/Doctor immediately start using them.
+              No call is made to BookOrbit — if the password you enter doesn't match BookOrbit's
+              actual current password, Scan/Doctor will fail with 401 next time.
+            </p>
+
+            <p>
+              <strong>What happens on Clear:</strong> stored creds are removed. Scan and authenticated Doctor
+              checks stop working until either a) the container restarts and re-seeds from env, or b) you save
+              new creds here, or c) you click Change password (which writes them as part of rotation).
+            </p>
+          </div>
+
           <div class="grid grid-cols-2 gap-3">
             <label class="text-xs space-y-1">
               <span class="text-muted-foreground">Admin username</span>

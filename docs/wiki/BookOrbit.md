@@ -155,13 +155,50 @@ You pick a password you'll remember; biblichor handles the rest.
 
 ### Stored creds (advanced)
 
-**Stored creds** is the local-only copy biblichor uses for API
-authentication. The card lets you save credentials directly (e.g.
-if you changed the BookOrbit password through BookOrbit's own UI
-and need to bring biblichor back in sync) or clear them. Under
-normal use you won't need this — the env-var auto-seed at startup
-and the Change-password flow keep stored creds correct without
-manual edits.
+**What it does**
+
+The Stored creds card directly writes or wipes the
+`(username, password)` pair biblichor uses to authenticate with
+BookOrbit for Scan and Doctor. Stored encrypted in `library.db`.
+**It does NOT change BookOrbit's password** — for that, use
+Change password.
+
+**When you need it (rare)**
+
+- You changed BookOrbit's admin password through BookOrbit's own
+  dashboard (not via biblichor). Biblichor's stored copy is now
+  stale and Scan / Doctor will fail with *"Invalid credentials"* —
+  enter the new password here to bring biblichor back in sync.
+- You want to wipe stored creds for some reason
+  (decommissioning, moving hosts, debugging).
+
+**When you don't need it (most cases)**
+
+- First container start — auto-seeded from compose env; creds
+  populate themselves.
+- After clicking Change password — rotation flow updates stored
+  creds automatically.
+- BookOrbit upgrades — stored creds are unaffected.
+
+**What happens on Save**
+
+biblichor stores the username + password you type (encrypted)
+and Scan / Doctor immediately start using them. No call is made
+to BookOrbit — if the password you enter doesn't match
+BookOrbit's actual current password, Scan / Doctor will fail
+with 401 next time. The "Stored creds" card is purely a local
+sync surface.
+
+**What happens on Clear stored creds**
+
+Stored creds are removed. Scan and authenticated Doctor checks
+stop working until one of:
+
+- the container restarts and re-seeds from the
+  `BOOKORBIT_ADMIN_PASSWORD` env var
+- you Save new creds in this card
+- you click Change password (which writes them as part of the
+  rotation flow)
 
 ### Recovery actions (advanced)
 
