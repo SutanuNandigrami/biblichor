@@ -54,14 +54,19 @@ find "$WORK/wiki" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 cp docs/wiki/*.md "$WORK/wiki/"
 
 echo "[3/4] commit"
+# Inherit author identity from the main repo's last commit so this
+# works on a fresh VM / CI runner without git config --global.
+MAIN_DIR=$(pwd)
+AUTHOR=$(git -C "$MAIN_DIR" log -1 --format="%an")
+EMAIL=$(git -C "$MAIN_DIR" log -1 --format="%ae")
+SHA=$(git -C "$MAIN_DIR" rev-parse --short HEAD)
 cd "$WORK/wiki"
-git add -A
+git -c user.name="$AUTHOR" -c user.email="$EMAIL" -c init.defaultBranch=master add -A
 if git diff --cached --quiet; then
     echo "  no changes — wiki already in sync"
     exit 0
 fi
-SHA=$(cd - >/dev/null && git rev-parse --short HEAD)
-git commit -m "Sync wiki from main @ $SHA" >/dev/null
+git -c user.name="$AUTHOR" -c user.email="$EMAIL" commit     -m "Sync wiki from main @ $SHA" >/dev/null
 
 echo "[4/4] push"
 git push origin HEAD
