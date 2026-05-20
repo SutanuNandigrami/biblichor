@@ -23,11 +23,17 @@ CDX_URL = "https://web.archive.org/cdx/search/cdx"
 IPFS_CID_RE = re.compile(r"(?:ipfs[:/](?://)?)(Qm[A-Za-z0-9]{40,46}|bafy[a-z0-9]+)")
 
 
-def recover_links(md5: str, *, limit: int = 5) -> list[DownloadHandle]:
+def recover_links(md5: str, *, limit: int = 5, db_path: Path | None = None) -> list[DownloadHandle]:
     """Return DownloadHandles extracted from the last `limit` Wayback
-    snapshots of the Anna's md5 page. Empty on any failure (caller
-    falls through to the next strategy).
+    snapshots of the Anna's md5 page. Each recovered IPFS CID is
+    expanded into one handle per gateway (from ipfs_gateways), so the
+    download pipeline can try the next gateway on failure.
+
+    Empty on any failure (caller falls through to the next strategy).
     """
+    from endless_library.ipfs_gateways import list_gateways
+
+    gateways = list_gateways(db_path)
     if not md5:
         return []
     try:
@@ -70,12 +76,13 @@ def recover_links(md5: str, *, limit: int = 5) -> list[DownloadHandle]:
                 if cid in seen_cids:
                     continue
                 seen_cids.add(cid)
-                out.append(
-                    DownloadHandle(
-                        url=f"https://ipfs.io/ipfs/{cid}",
-                        headers={},
+                for gw in gateways:
+                    out.append(
+                        DownloadHandle(
+                            url=f"{gw.rstrip('/')}/ipfs/{cid}",
+                            headers={},
+                        )
                     )
-                )
         except httpx.HTTPError:
             continue
     return out

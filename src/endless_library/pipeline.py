@@ -85,10 +85,23 @@ def poll_source_account(deps: PipelineDeps, account_id: int) -> int:
         return 0
     for ref in refs:
         existing = deps.books.count()
+        # Phase 6s.8: best-effort ISBN backfill via OpenLibrary for
+        # sources that don't provide one (StoryGraph public profiles
+        # often lack ISBN; same for some Wikidata results).
+        isbn = ref.isbn13
+        if not isbn and ref.title and ref.author:
+            try:
+                from endless_library.metadata.openlibrary import resolve_by_title_author
+
+                meta = resolve_by_title_author(ref.title, ref.author, db_path=deps.db_path)
+                if meta and meta.get("isbn"):
+                    isbn = meta["isbn"].replace("-", "").strip() or None
+            except Exception:
+                pass
         bid = deps.books.upsert(
             title=ref.title,
             author=ref.author,
-            isbn13=ref.isbn13,
+            isbn13=isbn,
             source=ref.source,
             source_id=ref.source_id,
             source_added_at=ref.source_added_at,

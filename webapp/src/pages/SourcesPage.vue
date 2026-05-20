@@ -10,13 +10,17 @@ import { api } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 
 type Source = { id: number; source: string; identifier: string; enabled: boolean; poll_interval_minutes: number; last_polled_at: string | null; token: string | null }
-type SourceType = 'goodreads' | 'goodreads_listopia' | 'goodreads_series' | 'hardcover'
+type SourceType = 'goodreads' | 'goodreads_listopia' | 'goodreads_series' | 'hardcover' | 'nyt' | 'storygraph' | 'bookwyrm' | 'wikidata'
 
 const TYPE_OPTIONS: { value: SourceType; label: string }[] = [
   { value: 'goodreads',          label: 'Goodreads shelf' },
   { value: 'goodreads_listopia', label: 'Listopia' },
   { value: 'goodreads_series',   label: 'Series' },
   { value: 'hardcover',          label: 'Hardcover' },
+  { value: 'nyt',                label: 'NYT Best Sellers' },
+  { value: 'storygraph',         label: 'StoryGraph' },
+  { value: 'bookwyrm',           label: 'BookWyrm (Fediverse)' },
+  { value: 'wikidata',           label: 'Wikidata follow author' },
 ]
 
 const sources = ref<Source[]>([])
@@ -143,7 +147,7 @@ async function del(s: Source) {
           </p>
         </div>
 
-        <div v-else>
+        <div v-else-if="newType === 'hardcover'">
           <label class="text-xs text-muted-foreground">Identifier (use <code>me</code>)</label>
           <Input v-model="newId" placeholder="me" />
           <label class="text-xs text-muted-foreground mt-3 block">API token</label>
@@ -151,6 +155,38 @@ async function del(s: Source) {
           <p class="text-xs text-muted-foreground mt-1">
             Generate at
             <a class="underline text-primary" href="https://hardcover.app/account/api" target="_blank">hardcover.app/account/api</a>.
+          </p>
+        </div>
+        <div v-else-if="newType === 'nyt'">
+          <label class="block text-xs text-muted-foreground mb-1">NYT list slug</label>
+          <Input v-model="newId" placeholder="hardcover-fiction" />
+          <p class="text-[11px] text-muted-foreground mt-1">
+            E.g. <code>hardcover-fiction</code>, <code>combined-print-and-e-book-nonfiction</code>.
+            Token = your NYT API key from <a class="underline text-primary" href="https://developer.nytimes.com" target="_blank">developer.nytimes.com</a>.
+          </p>
+          <label class="block text-xs text-muted-foreground mt-2 mb-1">NYT API key</label>
+          <Input v-model="newToken" placeholder="NYT API key" />
+        </div>
+        <div v-else-if="newType === 'storygraph'">
+          <label class="block text-xs text-muted-foreground mb-1">StoryGraph username</label>
+          <Input v-model="newId" placeholder="testuser" />
+          <p class="text-[11px] text-muted-foreground mt-1">
+            Profile must be public. Polls <code>/to-read</code> and <code>/currently-reading</code> daily.
+          </p>
+        </div>
+        <div v-else-if="newType === 'bookwyrm'">
+          <label class="block text-xs text-muted-foreground mb-1">BookWyrm instance + username</label>
+          <Input v-model="newId" placeholder="bookwyrm.social:alice" />
+          <p class="text-[11px] text-muted-foreground mt-1">
+            Format: <code>&lt;instance-host&gt;:&lt;username&gt;</code>. Uses the public ActivityPub outbox; no token.
+          </p>
+        </div>
+        <div v-else-if="newType === 'wikidata'">
+          <label class="block text-xs text-muted-foreground mb-1">Wikidata Q-ID</label>
+          <Input v-model="newId" placeholder="Q36322" />
+          <p class="text-[11px] text-muted-foreground mt-1">
+            E.g. <code>Q36322</code> for Jane Austen, <code>Q5950</code> for Charles Dickens.
+            Returns every literary work by the author via SPARQL.
           </p>
         </div>
 

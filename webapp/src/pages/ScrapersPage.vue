@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Cpu, Play, ArrowUp, ArrowDown } from 'lucide-vue-next'
+import { Cpu, Play, ArrowUp, ArrowDown, KeyRound } from "lucide-vue-next"
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import Badge from '@/components/ui/Badge.vue'
@@ -23,6 +23,64 @@ const data = ref<ScrapersResp | null>(null)
 const history = ref<Record<string, BenchHistoryEntry[]>>({})
 const benchOutput = ref<string>('')
 const benching = ref(false)
+
+// Phase 6s.8 — Z-Library + cookies cards
+const zlibEmail = ref('')
+const zlibPassword = ref('')
+const zlibBusy = ref(false)
+const cookieFile = ref<File | null>(null)
+const cookieBusy = ref(false)
+const cookieResult = ref('')
+
+async function saveZlibCreds() {
+  if (!zlibEmail.value || !zlibPassword.value) return
+  zlibBusy.value = true
+  try {
+    await api('/api/scrapers/zlibrary/creds', {
+      method: 'POST',
+      body: JSON.stringify({ email: zlibEmail.value, password: zlibPassword.value }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    zlibEmail.value = ''
+    zlibPassword.value = ''
+    toast.success('Z-Library credentials saved (encrypted)')
+  } catch (e: any) {
+    toast.error('Save failed: ' + (e?.message ?? e))
+  } finally {
+    zlibBusy.value = false
+  }
+}
+
+async function clearZlibCreds() {
+  if (!confirm('Clear stored Z-Library credentials?')) return
+  await api('/api/scrapers/zlibrary/creds', { method: 'DELETE' })
+  toast.success('Z-Library credentials cleared')
+}
+
+function pickCookieFile(e: Event) {
+  const f = (e.target as HTMLInputElement).files?.[0] ?? null
+  cookieFile.value = f
+}
+
+async function uploadCookies() {
+  if (!cookieFile.value) return
+  cookieBusy.value = true
+  cookieResult.value = ''
+  try {
+    const form = new FormData()
+    form.append('file', cookieFile.value)
+    const r = await fetch('/api/scrapers/cookies', { method: 'POST', body: form })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const body: any = await r.json()
+    const domains: string[] = body.domains ?? []
+    cookieResult.value = `Saved cookies for ${domains.length} domain(s): ${domains.join(', ')}`
+    cookieFile.value = null
+  } catch (e: any) {
+    toast.error('Cookie upload failed: ' + (e?.message ?? e))
+  } finally {
+    cookieBusy.value = false
+  }
+}
 const toast = useToast()
 
 async function load() {
@@ -144,6 +202,57 @@ async function bench(mode: 'quick' | 'full') {
         <Button :loading="benching" variant="outline" @click="bench('full')">Full (10 queries)</Button>
       </div>
       <pre v-if="benchOutput" class="bg-secondary p-3 rounded text-xs whitespace-pre-wrap overflow-x-auto">{{ benchOutput }}</pre>
+    </Card>
+
+    <Card class="p-4 space-y-3">
+      <h2 class="font-semibold flex items-center gap-2 text-sm">
+        <KeyRound class="w-4 h-4 text-primary" /> Z-Library credentials (optional)
+      </h2>
+      <p class="text-[11px] text-muted-foreground leading-relaxed">
+        Save Z-Library email + password to enable the <code class="font-mono">zlib_singlelogin</code>
+        scraper. biblichor logs into <code>singlelogin.re</code>, captures the per-user personal
+        domain, and caches it for ~30 days. Stored encrypted in <code class="font-mono">library.db</code>;
+        only used when zlib_singlelogin is in the scraper chain.
+      </p>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="text-xs space-y-1">
+          <span class="text-muted-foreground">Z-Library email</span>
+          <input v-model="zlibEmail" type="email" autocomplete="email"
+            class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+        </label>
+        <label class="text-xs space-y-1">
+          <span class="text-muted-foreground">Z-Library password</span>
+          <input v-model="zlibPassword" type="password" autocomplete="off"
+            class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+        </label>
+      </div>
+      <div class="flex gap-2 justify-end">
+        <Button variant="ghost" size="sm" @click="clearZlibCreds">Clear stored creds</Button>
+        <Button size="sm" :disabled="zlibBusy || !zlibEmail || !zlibPassword" @click="saveZlibCreds">
+          {{ zlibBusy ? 'Saving...' : 'Save' }}
+        </Button>
+      </div>
+    </Card>
+
+    <Card class="p-4 space-y-3">
+      <h2 class="font-semibold flex items-center gap-2 text-sm">
+        <KeyRound class="w-4 h-4 text-primary" /> Browser cookies (advanced)
+      </h2>
+      <p class="text-[11px] text-muted-foreground leading-relaxed">
+        Upload a Netscape-format <code class="font-mono">cookies.txt</code> file (export via the
+        Cookie Editor browser extension or yt-dlp's <code>--cookies-from-browser</code>).
+        Cookies are stored per-domain in the encrypted secrets store and reused by scrapers
+        for that domain — useful for sites that solve Cloudflare Turnstile interactively in your
+        browser but block our headless requests.
+      </p>
+      <input type="file" accept=".txt,text/plain" @change="pickCookieFile"
+        class="text-xs" />
+      <div class="flex gap-2 justify-end">
+        <Button size="sm" :disabled="cookieBusy || !cookieFile" @click="uploadCookies">
+          {{ cookieBusy ? 'Uploading...' : 'Upload' }}
+        </Button>
+      </div>
+      <p v-if="cookieResult" class="text-[11px] text-emerald-500 font-mono">{{ cookieResult }}</p>
     </Card>
   </div>
 </template>
