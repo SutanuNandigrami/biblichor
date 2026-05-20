@@ -632,6 +632,7 @@ def register(app: FastAPI) -> None:
         if mode == "quick":
             qs = [qs[i] for i in quick_idx if i < len(qs)]
         from functools import partial
+
         outcomes = await asyncio.to_thread(partial(run_bench, deps.cfg, qs, repo=deps.bench))
         return {
             "outcomes": [asdict(o) for o in outcomes],
