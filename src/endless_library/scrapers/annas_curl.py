@@ -89,7 +89,24 @@ class AnnasArchiveCurl:
             return None
         slow_url = urljoin(self.mirrors.current, slow_url)
         # 2. poll slow_download page
-        return self._poll_slow_download(slow_url)
+        handle = self._poll_slow_download(slow_url)
+        if handle:
+            return handle
+        # Phase 6s.2: Wayback CDX last-resort recovery for dead md5 pages
+        try:
+            from endless_library.scrapers.wayback_fallback import recover_links
+
+            recovered = recover_links(md5)
+            if recovered:
+                log.info(
+                    "annas_curl: Wayback CDX recovered %d link(s) for md5=%s",
+                    len(recovered),
+                    md5,
+                )
+                return recovered[0]
+        except Exception as e:
+            log.info("annas_curl: wayback fallback failed: %s", e)
+        return None
 
     # ----- Internals -----
 
@@ -272,9 +289,19 @@ class AnnasArchiveCurl:
                     return None
                 time.sleep(8)
                 continue
-            cdn = self._first_cdn(html)
-            if cdn:
-                return DownloadHandle(url=cdn, headers={}, expected_filename=None)
+            cdns = self._all_cdns(html)
+            if cdns:
+                import asyncio
+
+                # If only one, no point in racing
+                if len(cdns) == 1:
+                    return DownloadHandle(url=cdns[0], headers={}, expected_filename=None)
+                # Race them in parallel - first 200 wins
+                winner = asyncio.run(_probe_slow_servers_async(cdns))
+                if winner:
+                    return DownloadHandle(url=winner, headers={}, expected_filename=None)
+                # Fall through to the first one even if probes failed
+                return DownloadHandle(url=cdns[0], headers={}, expected_filename=None)
             # Honor countdown if present
             soup = BeautifulSoup(html, "lxml")
             cd = soup.select_one(".js-partner-countdown")
@@ -286,6 +313,28 @@ class AnnasArchiveCurl:
             log.info("slow_download wait %ds for %s", wait, url)
             time.sleep(wait)
         return None
+
+    @staticmethod
+    def _all_cdns(html: str) -> list[str]:
+        """Phase 6s.2: extract every CDN-looking URL from a slow_download
+        page so they can be probed in parallel by
+        _probe_slow_servers_async."""
+        soup = BeautifulSoup(html, "lxml")
+        urls: list[str] = []
+        for span in soup.select("span.bg-gray-200.break-all"):
+            t = span.get_text(strip=True)
+            if t.startswith("http") and url_has_book_ext(t):
+                urls.append(t)
+        for a in soup.find_all("a", href=True):
+            if re.search(r"download\s*now|fast.*partner|slow.*partner", a.get_text(), re.I):
+                href = a["href"]
+                if href.startswith("http") and href not in urls:
+                    urls.append(href)
+        for m in ANNAS_CDN_REGEX.finditer(html):
+            url = m.group(0).rstrip(".,;)\"'")
+            if url_has_book_ext(url) and url not in urls:
+                urls.append(url)
+        return urls
 
     @staticmethod
     def _first_cdn(html: str) -> str | None:
@@ -306,3 +355,48 @@ class AnnasArchiveCurl:
             if url_has_book_ext(url):
                 return url
         return None
+
+
+async def _probe_slow_servers_async(urls: list[str], *, timeout: float = 15.0) -> str | None:
+    """Phase 6s.2: race a set of slow-server CDN URLs in parallel.
+    Returns the first URL that yields HTTP 200 with a non-trivial
+    body. Greasyfork userscript #544083 pattern; 3-5x median
+    latency drop vs sequential probing."""
+    import asyncio
+
+    if not urls:
+        return None
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        headers={"User-Agent": "endless-library/0.1"},
+        follow_redirects=True,
+    ) as client:
+
+        async def probe(url: str) -> str | None:
+            try:
+                # HEAD first to avoid downloading the whole file
+                r = await client.head(url)
+                if r.status_code in (200, 206):
+                    return url
+                # Some CDNs reject HEAD; fall back to ranged GET
+                r = await client.get(url, headers={"Range": "bytes=0-1023"})
+                if r.status_code in (200, 206) and len(r.content) > 0:
+                    return url
+            except httpx.HTTPError:
+                pass
+            return None
+
+        tasks = [asyncio.create_task(probe(u)) for u in urls]
+        try:
+            for coro in asyncio.as_completed(tasks):
+                res = await coro
+                if res:
+                    for t in tasks:
+                        if not t.done():
+                            t.cancel()
+                    return res
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+    return None

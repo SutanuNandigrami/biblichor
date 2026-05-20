@@ -111,6 +111,19 @@ CREATE TABLE IF NOT EXISTS bench_runs (
   http_code  INTEGER,
   notes      TEXT
 );
+
+CREATE TABLE IF NOT EXISTS ipfs_gateways (
+    url             TEXT PRIMARY KEY,
+    origin_isolation INTEGER DEFAULT 0,
+    last_ok          INTEGER,
+    last_check       INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS metadata_cache (
+    key         TEXT PRIMARY KEY,
+    payload     BLOB NOT NULL,
+    fetched_at  INTEGER NOT NULL
+);
 """
 
 

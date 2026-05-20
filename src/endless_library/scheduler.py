@@ -96,6 +96,24 @@ def _attach_system_jobs(sched: AsyncIOScheduler, cfg: Config, deps: PipelineDeps
         replace_existing=True,
         max_instances=1,
     )
+
+    # Phase 6s.2: daily IPFS gateway list refresh from
+    # ipfs/public-gateway-checker. Silent on failure (offline-safe).
+    def _ipfs_gateway_refresh_job() -> None:
+        from endless_library.ipfs_gateways import refresh_gateway_list
+
+        n = refresh_gateway_list(db_path=deps.db_path)
+        log.info("ipfs gateway refresh: %d entries persisted", n)
+
+    sched.add_job(
+        _ipfs_gateway_refresh_job,
+        "interval",
+        hours=24,
+        id="ipfs_gateway_refresh",
+        name="Refresh IPFS gateway list (Phase 6s.2)",
+        replace_existing=True,
+        max_instances=1,
+    )
     sched.add_job(
         _summary_job,
         "cron",
