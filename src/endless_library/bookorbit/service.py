@@ -175,11 +175,36 @@ class BookOrbitService:
         """Drive BookOrbit's first-run /auth/setup + create the
         biblichor library + store credentials encrypted.
 
-        Idempotent: if BookOrbit already shows needsSetup=false, this
-        skips the setup call and just refreshes stored credentials.
+        ONLY for the first-run case (BookOrbit reports needsSetup=true).
+        If BookOrbit is already set up, raises a BookOrbitServiceError
+        directing the caller to Change-password / Stored-creds /
+        recreate_watched_library instead — otherwise we'd fail with an
+        opaque 401 on the login step.
         """
         if not self._cfg.bookorbit.enabled or not self._cfg.bookorbit.url:
             raise BookOrbitServiceError("BookOrbit is not enabled in config.yaml")
+
+        # Pre-check: refuse to run setup if BookOrbit is already
+        # bootstrapped. Otherwise ensure_bookorbit_ready will try to
+        # login with the supplied (likely-wrong) password and 401.
+        try:
+            with BookOrbitClient(self._cfg.bookorbit.url) as client:
+                status_payload = client.setup_status()
+                if not status_payload.get("needsSetup", True):
+                    raise BookOrbitServiceError(
+                        "BookOrbit is already set up. Use 'Change password' "
+                        "to rotate the admin password, 'Stored creds' to "
+                        "save existing credentials biblichor can authenticate "
+                        "with, or 'Recreate watched library' if the library "
+                        "is missing in BookOrbit. The setup wizard is only "
+                        "for the first-run case."
+                    )
+        except BookOrbitServiceError:
+            raise
+        except Exception as e:
+            raise BookOrbitServiceError(
+                f"could not contact BookOrbit at {self._cfg.bookorbit.url}: {type(e).__name__}: {e}"
+            ) from e
 
         eff_library_root = library_root or self._cfg.bookorbit.library_root or "/library"
         result = ensure_bookorbit_ready(
@@ -253,6 +278,51 @@ class BookOrbitService:
         return {"ok": True, "library_id": library_id}
 
     # ---------- token rotation (setup_token) ----------
+
+    def recreate_watched_library(self) -> dict:
+        """Use stored credentials to login and ensure the biblichor
+        library exists in BookOrbit. The recovery path when the
+        library was deleted in BookOrbit's own UI, or when the
+        library_id in config.yaml has drifted from what BookOrbit
+        actually has.
+
+        Does NOT touch admin credentials. Requires stored creds.
+        """
+        creds = self.get_admin_creds()
+        if not creds:
+            raise BookOrbitServiceError(
+                "No stored credentials. Open 'Stored creds' first, "
+                "save your BookOrbit admin username + password, then "
+                "retry."
+            )
+        username, password = creds
+        from endless_library.bookorbit.setup import (
+            DEFAULT_LIBRARY_ICON,
+            DEFAULT_LIBRARY_NAME,
+        )
+
+        with BookOrbitClient(self._cfg.bookorbit.url) as client:
+            client.login(username=username, password=password)
+            libs = client.list_libraries()
+            existing = next(
+                (lib for lib in libs if lib.get("name") == DEFAULT_LIBRARY_NAME),
+                None,
+            )
+            if existing:
+                return {
+                    "ok": True,
+                    "library_id": existing["id"],
+                    "created": False,
+                }
+            new_lib = client.create_library(
+                name=DEFAULT_LIBRARY_NAME,
+                icon=DEFAULT_LIBRARY_ICON,
+                folders=[self._cfg.bookorbit.library_root or "/library"],
+                watch=True,
+                organization_mode=self._cfg.bookorbit.organization_mode or "book_per_folder",
+                auto_scan_cron_expression="0 * * * *",
+            )
+            return {"ok": True, "library_id": new_lib["id"], "created": True}
 
     @staticmethod
     def generate_setup_token() -> str:

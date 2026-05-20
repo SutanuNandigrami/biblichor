@@ -75,6 +75,7 @@ const doctorBusy = ref(false)
 const doctorReport = ref<{ ok: boolean; checks: DoctorCheck[] } | null>(null)
 
 const scanBusy = ref(false)
+const recreateBusy = ref(false)
 
 async function refresh() {
   loading.value = true
@@ -184,6 +185,19 @@ async function runScan() {
   }
 }
 
+async function runRecreateLibrary() {
+  recreateBusy.value = true
+  try {
+    const out: any = await api('/api/bookorbit/recreate-library', { method: 'POST' })
+    toast.success(out.created ? `Library created (id=${out.library_id})` : `Library OK (id=${out.library_id})`)
+    await refresh()
+  } catch (e: any) {
+    toast.error('Recreate failed: ' + (e?.message ?? e))
+  } finally {
+    recreateBusy.value = false
+  }
+}
+
 async function submitChangePassword() {
   if (changePwForm.value.new_password !== changePwForm.value.confirm_password) {
     toast.error('New password and confirmation do not match')
@@ -246,8 +260,14 @@ async function submitChangePassword() {
 
       <Card v-if="showWizard" class="p-5 space-y-4">
         <h2 class="font-semibold text-base flex items-center gap-2">
-          <KeyRound class="w-5 h-5 text-primary" /> BookOrbit setup
+          <KeyRound class="w-5 h-5 text-primary" /> BookOrbit setup (first run only)
         </h2>
+        <p class="text-[11px] text-muted-foreground">
+          Creates the BookOrbit admin account + the biblichor watched library.
+          Only works if BookOrbit reports <code>needsSetup=true</code> (i.e. no admin yet).
+          If BookOrbit is already set up, use <strong>Change password</strong> to rotate the admin
+          password, or <strong>Stored creds</strong> to tell biblichor the existing one.
+        </p>
         <div class="grid grid-cols-2 gap-3">
           <label class="text-xs space-y-1">
             <span class="text-muted-foreground">Admin username</span>
@@ -330,10 +350,26 @@ async function submitChangePassword() {
           </Button>
         </div>
 
-        <div class="text-[11px] text-muted-foreground text-center -mt-2">
-          Need to re-run setup or rebuild the watched library?
-          <button class="underline hover:text-foreground" @click="openWizard">Re-open setup wizard</button>
-        </div>
+        <details class="text-[11px] text-muted-foreground -mt-2">
+          <summary class="cursor-pointer hover:text-foreground select-none">
+            Recovery actions (advanced)
+          </summary>
+          <div class="mt-3 space-y-2 pl-3 border-l-2 border-border">
+            <p>
+              <strong>Library missing in BookOrbit?</strong>
+              If you deleted the watched library in BookOrbit's own UI, or its <code class="font-mono">library_id</code>
+              has drifted from <code class="font-mono">config.yaml</code>, biblichor can recreate it using your stored
+              credentials.
+            </p>
+            <Button variant="ghost" size="sm" :disabled="recreateBusy || !status.has_creds" @click="runRecreateLibrary">
+              <KeyRound class="w-4 h-4 mr-2" />
+              {{ recreateBusy ? 'Working...' : 'Recreate watched library' }}
+            </Button>
+            <p v-if="!status.has_creds" class="text-[10px] text-amber-500">
+              Requires stored credentials. Save them under "Stored creds" first.
+            </p>
+          </div>
+        </details>
 
         <Card v-if="doctorReport" class="p-4 space-y-2">
           <h3 class="text-sm font-semibold flex items-center gap-2">

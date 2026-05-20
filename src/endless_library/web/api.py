@@ -1208,6 +1208,22 @@ def register(app: FastAPI) -> None:
             "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in report.checks],
         }
 
+    @router.post("/bookorbit/recreate-library")
+    def bookorbit_recreate_library(request: Request):
+        """Use stored credentials to login + ensure the biblichor
+        library exists. Recovery path for: library deleted in
+        BookOrbit's own UI, or library_id drift between config.yaml
+        and BookOrbit's actual state."""
+        from endless_library.bookorbit.service import BookOrbitServiceError
+
+        svc = _bookorbit_service(request)
+        try:
+            return svc.recreate_watched_library()
+        except BookOrbitServiceError as e:
+            raise HTTPException(400, str(e)) from e
+        except Exception as e:
+            raise HTTPException(502, f"{type(e).__name__}: {e}") from e
+
     @router.post("/bookorbit/scan")
     def bookorbit_scan(request: Request):
         from endless_library.bookorbit.service import BookOrbitServiceError
