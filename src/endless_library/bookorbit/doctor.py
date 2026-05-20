@@ -50,6 +50,7 @@ def run_doctor(
     library_id: str | None,
     admin_username: str = "",
     admin_password: str = "",
+    flaresolverr_url: str | None = None,
 ) -> DoctorReport:
     """Run every check biblichor cares about. Doesn't raise on failure;
     every issue is reported as a CheckResult so the CLI can print a
@@ -165,6 +166,32 @@ def run_doctor(
                 True,
                 "skipped authenticated checks (no creds passed)",
             )
+
+        # FlareSolverr reachability (Phase 6r): catches the container-vs-
+        # native URL bug where yaml/.env carry 127.0.0.1:8191, which
+        # inside the biblichor container points at biblichor itself.
+        if flaresolverr_url:
+            try:
+                base = flaresolverr_url.rstrip("/").rsplit("/v1", 1)[0]
+                fs_resp = httpx.get(base, timeout=3.0)
+                if fs_resp.status_code in (200, 405):
+                    report.add(
+                        "flaresolverr.reachable",
+                        True,
+                        f"{base} -> {fs_resp.status_code}",
+                    )
+                else:
+                    report.add(
+                        "flaresolverr.reachable",
+                        False,
+                        f"{base} returned {fs_resp.status_code}",
+                    )
+            except Exception as e:
+                report.add(
+                    "flaresolverr.reachable",
+                    False,
+                    f"{flaresolverr_url}: {type(e).__name__}: {e}",
+                )
 
         # 7. OPDS endpoint responds (with or without auth — 401 is fine, means
         # the endpoint exists and just wants credentials)

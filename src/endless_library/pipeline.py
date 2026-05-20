@@ -568,7 +568,8 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
     if inflated > cap_bytes and file_path.suffix.lower() == ".pdf":
         # Try ebook-convert PDF -> EPUB; text-only PDFs compress ~5-10x
         try:
-            epub_path = convert_to_epub(file_path)
+            convert_result = convert_to_epub(file_path)
+            epub_path = convert_result.path
             new_inflated = int(epub_path.stat().st_size * 1.4)
             if new_inflated <= cap_bytes:
                 deps.events.append(

@@ -232,6 +232,7 @@ class BookOrbitService:
             library_id=self._cfg.bookorbit.library_id or None,
             admin_username=creds[0] if creds else None,
             admin_password=creds[1] if creds else None,
+            flaresolverr_url=getattr(self._cfg.scrapers, "flaresolverr_url", None),
         )
 
     # ---------- admin password change ----------

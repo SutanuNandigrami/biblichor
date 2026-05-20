@@ -42,6 +42,11 @@ services:
       # that, the encrypted store is the source of truth.
       BOOKORBIT_ADMIN_USER: "${BOOKORBIT_ADMIN_USER}"
       BOOKORBIT_ADMIN_PASSWORD: "${BOOKORBIT_ADMIN_PASSWORD}"
+      # Container-internal hostnames. These override config.yaml /
+      # config/.env, which may carry stale localhost values from
+      # pre-compose installs.
+      FLARESOLVERR_URL: "http://flaresolverr:8191/v1"
+      BOOKORBIT_URL: "${BOOKORBIT_URL:-http://bookorbit:3000}"
     depends_on:
       flaresolverr:
         condition: service_healthy

@@ -266,6 +266,8 @@ def _apply_env_overrides(data: dict) -> dict:
         data.setdefault("scrapers", {})["welib_auth_cookie"] = v
     if v := os.getenv("BOOKORBIT_URL"):
         data.setdefault("bookorbit", {})["url"] = v
+    if v := os.getenv("FLARESOLVERR_URL"):
+        data.setdefault("scrapers", {})["flaresolverr_url"] = v
     return data
 
 

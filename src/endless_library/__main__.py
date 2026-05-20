@@ -830,6 +830,7 @@ def cmd_bookorbit_doctor(args):
         library_id=library_id,
         admin_username=admin_user,
         admin_password=admin_password,
+        flaresolverr_url=getattr(cfg.scrapers, "flaresolverr_url", None),
     )
     for check in report.checks:
         mark = "[OK]" if check.ok else "[FAIL]"

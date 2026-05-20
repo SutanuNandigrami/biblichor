@@ -97,9 +97,7 @@ def test_change_password_uses_stored_creds_when_current_not_supplied(respx_mock,
     assert b"RTK" in reset_body  # the reset token from mint_reset_url
 
     # And the stored creds were rotated — Scan now uses the NEW password
-    respx_mock.post("/api/v1/scanner/libraries/1/scan").mock(
-        return_value=httpx.Response(202)
-    )
+    respx_mock.post("/api/v1/scanner/libraries/1/scan").mock(return_value=httpx.Response(202))
     login_route = respx_mock.post("/api/v1/auth/login")
     login_route.reset()
     login_route.mock(return_value=httpx.Response(200, json={"accessToken": JWT}))

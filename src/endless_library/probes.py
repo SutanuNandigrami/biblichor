@@ -104,7 +104,7 @@ def _probe_via_flaresolverr(url: str, *, timeout: float) -> ProbeResult:
     from endless_library.flaresolverr import FlareSolverr, FlareSolverrError
 
     started = _time.monotonic()
-    fs_url = os.environ.get("FLARESOLVERR_URL") or "http://127.0.0.1:8191/v1"
+    fs_url = os.environ.get("FLARESOLVERR_URL") or "http://flaresolverr:8191/v1"
     fs = FlareSolverr(fs_url, max_timeout_ms=int(timeout * 1000))
     try:
         r = fs.get(url)
