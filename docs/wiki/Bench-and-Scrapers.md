@@ -145,3 +145,96 @@ Failures are usually one of:
 - Book genuinely doesn't exist on any source biblichor knows about
 - ISBN search returned nothing and title-only matches are below
   threshold
+
+## New sources (Phase 6s)
+
+biblichor's acquisition chain and reading-list ingestion both
+gained additions in this phase. Everything below ships in the
+default container image; nothing requires manual installation.
+
+### Acquisition scrapers (where biblichor looks for the file)
+
+| Scraper | Auth | Notes |
+|---|---|---|
+| `gutendex` | None | Project Gutenberg via [Gutendex JSON API](https://gutendex.com). Cleanest public-domain source. detail_url IS the CDN URL. |
+| `standard_ebooks` | None | [standardebooks.org](https://standardebooks.org) — hand-typeset EPUB classics. Scrapes the public OPDS Atom feed. |
+| `oapen_doab` | None | Academic open-access. Queries OAPEN + DOAB REST APIs in parallel, deduped by DOI. Mostly PDF; some EPUB. |
+| `wikisource` | None | Multi-lingual via Wikidata SPARQL -> ws-export.wmcloud.org. Best for non-English public-domain works Gutenberg lacks. |
+| `zlib_singlelogin` | Z-Library account | Logs into singlelogin.re, caches the per-user personal domain, scrapes search results. Credentials in encrypted secrets store via `POST /api/scrapers/zlibrary/creds`. |
+
+**PD pre-chain hook (automatic).** biblichor checks each book's
+metadata for `pub_year < 1928` OR an explicit `is_public_domain`
+flag. When set, the four PD-curated scrapers (Standard Ebooks,
+Gutendex, Wikisource, OAPEN/DOAB) are promoted to the front of
+the chain so a high-quality EPUB wins before Anna's gets a turn.
+Modern / copyrighted books use the existing chain unchanged.
+
+### Reading-list sources (where biblichor watches for new titles)
+
+| Source | Identifier | Token |
+|---|---|---|
+| `nyt` | NYT list slug, e.g. `hardcover-fiction` | NYT API key (free) |
+| `storygraph` | username | none (public profiles) |
+| `bookwyrm` | `<instance>:<username>` e.g. `bookwyrm.social:alice` | none |
+| `wikidata` | Wikidata Q-ID, e.g. `Q36322` for Jane Austen | none |
+
+The Sources page lists these alongside the existing Goodreads /
+Hardcover sources. Each source has its own polling schedule
+(NYT weekly, the rest daily).
+
+### Novel techniques (improvements to existing scrapers)
+
+- **IPFS gateway auto-refresh** — biblichor pulls the canonical
+  gateway list from `ipfs/public-gateway-checker` daily and rotates
+  through them. Falls back to a 7-URL hardcoded bootstrap when
+  offline. New `ipfs_gateways` sqlite table.
+- **Parallel Anna's slow-server probes** — when Anna's
+  slow_download page exposes multiple CDN URLs, biblichor races
+  them via `asyncio.gather` + HEAD-then-ranged-GET. 3-5x median
+  latency drop. Greasyfork userscript #544083 pattern.
+- **Wayback CDX fallback** — when Anna's md5 page returns 404,
+  query Wayback CDX for the last 5 snapshots and extract IPFS
+  CIDs from archived HTML. Hooks into `annas_curl.resolve_cdn`
+  as the very-last rung.
+- **Centralized OpenLibrary metadata** — new `metadata/` package
+  caches OL responses in `metadata_cache` (30-day TTL) so every
+  source/scraper gets ISBN-to-everything resolution without
+  reimplementing.
+
+### Optional Tor onion fallback
+
+Default OFF. To opt in:
+
+```bash
+# Start the torproxy sidecar
+docker compose --profile tor up -d tor
+# Enable the routing flag
+# (Settings page or edit config.yaml directly)
+scrapers.tor_enabled: true
+```
+
+When enabled, Anna's clearnet chain falls back to the `.onion`
+mirror via `socks5h://tor:9050`. Adds 5-30s latency per request;
+only useful when clearnet is rate-limited or blocked.
+
+### Z-Library setup
+
+1. Go to `/library` (or `/scrapers` once the dedicated page is
+   built) and find the **Z-Library credentials** card.
+2. Enter email + password from your Z-Library account.
+3. biblichor logs in, captures the per-user personal domain,
+   and stores both in the encrypted secrets store.
+4. Future searches use the cached personal domain; biblichor
+   re-logs-in transparently if it expires.
+
+### Browser cookie upload (advanced)
+
+For sites where biblichor can't easily log in itself (e.g. those
+behind Cloudflare Turnstile that needs human interaction once):
+
+1. In your browser, export cookies for the target domain to a
+   Netscape-format `cookies.txt` file (the [Cookie Editor](https://cookie-editor.com/)
+   extension or yt-dlp's `--cookies-from-browser` produce this).
+2. Upload via `POST /api/scrapers/cookies` (file form-field).
+3. Cookies are stored per-domain in the encrypted secrets store
+   and biblichor adds them to outbound requests for that domain.

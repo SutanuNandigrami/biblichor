@@ -631,7 +631,8 @@ def register(app: FastAPI) -> None:
         qs, quick_idx = load_queries()
         if mode == "quick":
             qs = [qs[i] for i in quick_idx if i < len(qs)]
-        outcomes = await asyncio.to_thread(run_bench, deps.cfg, qs, deps.bench)
+        from functools import partial
+        outcomes = await asyncio.to_thread(partial(run_bench, deps.cfg, qs, repo=deps.bench))
         return {
             "outcomes": [asdict(o) for o in outcomes],
             "table": format_table(outcomes),

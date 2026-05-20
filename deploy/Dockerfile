@@ -69,6 +69,7 @@ WORKDIR /app
 # Install Python deps first so the layer caches across code changes
 COPY pyproject.toml ruff.toml ./
 COPY src/ ./src/
+COPY bench/ ./bench/
 RUN pip install --no-cache-dir -e .
 
 # Bring in the built SPA from the build stage
