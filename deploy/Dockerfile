@@ -39,6 +39,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jpegoptim \
     qpdf \
     mupdf-tools \
+    age \
+    zstd \
     && rm -rf /var/lib/apt/lists/*
 
 # jbig2enc isn't packaged for Debian — build it from source. It's
