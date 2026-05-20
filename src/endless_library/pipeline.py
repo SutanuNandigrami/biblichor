@@ -207,6 +207,12 @@ def _search_with_strategies(
             )
             continue
         if not cands:
+            deps.events.append(
+                book_id=book.id,
+                kind="scrape",
+                scraper=s_name,
+                message="0 candidates; trying next scraper",
+            )
             continue
 
         # Dedup by md5 against what we already have
@@ -241,7 +247,10 @@ def _search_with_strategies(
             book_id=book.id,
             kind="scrape",
             scraper=last_strategy,
-            message=f"chain exhausted; using union of {len(pool)} candidates",
+            message=(
+                f"chain exhausted (no scraper >= floor {floor:.0f}); "
+                f"using union of {len(pool)} candidates from {len(seen_md5) or 'pool'} dedup"
+            ),
         )
     return pool, last_strategy
 
