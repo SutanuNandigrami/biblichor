@@ -132,6 +132,49 @@ class BookOrbitClient:
         if r.status_code not in (200, 201, 204):
             raise BookOrbitError(f"change-password failed ({r.status_code}): {r.text[:300]}")
 
+    def mint_reset_url(self, user_id: int | str) -> str:
+        """POST /users/{id}/reset-password -> {resetUrl: "...?token=XXX"}.
+        Requires an authenticated admin. Returns the resetUrl which
+        contains a one-time token usable in apply_password_reset()."""
+        r = self._client.post(
+            f"/api/v1/users/{user_id}/reset-password",
+            headers=self._auth_headers(),
+            json={},
+        )
+        if r.status_code not in (200, 201):
+            raise BookOrbitError(f"mint reset-url ({r.status_code}): {r.text[:300]}")
+        url = r.json().get("resetUrl")
+        if not url:
+            raise BookOrbitError(f"reset-password response missing resetUrl: {r.text[:300]}")
+        return url
+
+    def apply_password_reset(self, token: str, new_password: str) -> None:
+        """POST /auth/reset-password with the token from mint_reset_url
+        and the new password. Public endpoint (no auth) — the token
+        IS the auth, one-time use."""
+        r = self._client.post(
+            "/api/v1/auth/reset-password",
+            json={"token": token, "newPassword": new_password},
+        )
+        if r.status_code not in (200, 201, 204):
+            raise BookOrbitError(f"apply reset ({r.status_code}): {r.text[:300]}")
+
+    def current_user_id(self) -> int:
+        """Returns the id of the currently-authenticated user, decoded
+        from the JWT (the `sub` claim). No extra round-trip needed."""
+        if not self._jwt:
+            raise BookOrbitError("not authenticated — call login() first")
+        import base64
+        import json as _json
+
+        try:
+            payload_b64 = self._jwt.split(".")[1]
+            padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+            payload = _json.loads(base64.urlsafe_b64decode(padded))
+            return int(payload["sub"])
+        except Exception as e:
+            raise BookOrbitError(f"could not parse JWT sub: {e}") from e
+
     def _auth_headers(self) -> dict[str, str]:
         if not self._jwt:
             raise BookOrbitError("not authenticated — call login() first")

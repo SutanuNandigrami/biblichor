@@ -17,8 +17,6 @@ def _docs_text() -> str:
     return chr(10).join(parts)
 
 
-
-
 # ============ R-I-1: BookOrbitCfg docstring no longer references config/bookorbit.json ============
 
 

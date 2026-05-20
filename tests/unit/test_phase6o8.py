@@ -21,8 +21,6 @@ def _docs_text() -> str:
     return chr(10).join(parts)
 
 
-
-
 BASE = "http://bookorbit.test"
 
 

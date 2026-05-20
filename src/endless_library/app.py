@@ -81,6 +81,39 @@ async def _lifespan(app: FastAPI):
                 "from the correct context (e.g. `docker compose exec biblichor ...`).",
                 cfg.bookorbit.library_root,
             )
+    # Phase 6p.8: if BOOKORBIT_ADMIN_PASSWORD is in the container env
+    # and biblichor doesn'''t have stored creds yet, store them now so
+    # the GUI Scan / Doctor / Change-password flows work out of the
+    # box without the user ever opening the .env file. Silent on
+    # failure (e.g. wrong password) — Doctor surfaces the error
+    # if needed.
+    if cfg.bookorbit.enabled and cfg.bookorbit.url:
+        import os as _os
+
+        env_pw = _os.environ.get("BOOKORBIT_ADMIN_PASSWORD")
+        if env_pw:
+            from pathlib import Path as _Path
+
+            from endless_library.bookorbit.service import BookOrbitService
+
+            try:
+                secrets_dir = _Path(cfg.general.books_dir).parent / "secrets"
+                svc = BookOrbitService(
+                    cfg=cfg,
+                    db_path=_Path(cfg.general.books_dir).parent / "library.db",
+                    restore_key_path=secrets_dir / "restore.key",
+                )
+                if not svc.has_admin_creds():
+                    env_user = _os.environ.get("BOOKORBIT_ADMIN_USER") or "admin"
+                    svc.store_admin_creds(env_user, env_pw)
+                    log.info(
+                        "bookorbit: seeded encrypted admin creds from env "
+                        "(user=%s) — Scan/Doctor/Change-password now work from the GUI",
+                        env_user,
+                    )
+            except Exception as e:
+                log.warning("bookorbit: failed to seed admin creds from env: %s", e)
+
     try:
         yield
     finally:

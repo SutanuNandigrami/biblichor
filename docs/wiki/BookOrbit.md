@@ -126,28 +126,51 @@ or during container restarts.
 
 ## Credentials management
 
-The Library page has two distinct credential surfaces:
+biblichor's GUI handles BookOrbit credentials end-to-end. You
+never need to type a current password or look at any `.env` file.
 
-### Change password (rotation)
+### How biblichor knows the current password
 
-**Change password** rotates the actual BookOrbit admin password.
-biblichor calls BookOrbit's `POST /api/v1/auth/change-password`
-with `{currentPassword, newPassword}`, then updates its own
-encrypted store so Scan / Doctor keep working with the new
-password. Use this after install if you want to pick a password
-you remember instead of the random one `bootstrap.sh` generated.
+At container startup, biblichor reads `BOOKORBIT_ADMIN_PASSWORD`
+from its environment (passed in via `compose.yml`) and, if it
+doesn't already have credentials in its encrypted store, seeds
+them silently. After that, the encrypted store is the source of
+truth — biblichor never reads the env var again unless the store
+is wiped.
 
-The current password starts as whatever is in `<repo>/.env` as
-`BOOKORBIT_ADMIN_PASSWORD` — look there if you don't know it.
+### Change password (one field)
 
-### Stored creds (what biblichor uses)
+The **Change password** card on the Library page asks for one
+thing: the new password (with a confirm field). Under the hood,
+biblichor:
 
-**Stored creds** is the local-only copy of `(username, password)`
-biblichor uses to authenticate with BookOrbit for Scan and Doctor.
-It does NOT change BookOrbit's password — it just tells biblichor
-which password to use. If you've changed the BookOrbit password
-through BookOrbit's own UI (and not through biblichor), use
-**Stored creds → Save** to bring biblichor's copy back in sync.
+  1. logs into BookOrbit using its stored credentials
+  2. mints a one-time reset token via
+     `POST /api/v1/users/{id}/reset-password`
+  3. applies the new password via
+     `POST /api/v1/auth/reset-password` with that token
+  4. updates its encrypted store so Scan / Doctor keep working
+
+You pick a password you'll remember; biblichor handles the rest.
+
+### Stored creds (advanced)
+
+**Stored creds** is the local-only copy biblichor uses for API
+authentication. The card lets you save credentials directly (e.g.
+if you changed the BookOrbit password through BookOrbit's own UI
+and need to bring biblichor back in sync) or clear them. Under
+normal use you won't need this — the env-var auto-seed at startup
+and the Change-password flow keep stored creds correct without
+manual edits.
+
+### Recovery actions (advanced)
+
+Under the **Recovery actions (advanced)** disclosure on the
+Library page:
+
+- **Recreate watched library** — if you deleted the BookOrbit
+  library through its own UI and need biblichor to recreate it.
+  Uses stored creds; doesn't touch passwords.
 
 - Stored encrypted in `library.db` (`secrets` table, AES-256-GCM)
 - Encrypted under a 32-byte key biblichor auto-generates on first

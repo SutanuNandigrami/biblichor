@@ -236,25 +236,87 @@ class BookOrbitService:
 
     # ---------- admin password change ----------
 
-    def change_admin_password(self, *, current_password: str, new_password: str) -> dict:
-        """Calls BookOrbit POST /auth/change-password with the supplied
-        current_password, then stores the new_password in the encrypted
-        secrets store. The username comes from stored creds (or defaults
-        to "admin" if none are stored).
+    def _resolve_current_credentials(self) -> tuple[str, str] | None:
+        """Best-effort lookup of the password biblichor should use to
+        authenticate as admin. Order:
+          1. Encrypted stored creds (the normal case once bootstrap
+             has run or the user has saved them).
+          2. Env-var fallback (BOOKORBIT_ADMIN_USER / _PASSWORD), for
+             the first container start before stored creds exist.
+        Returns (username, password) or None if neither path yields
+        credentials biblichor can try."""
+        import os as _os
 
-        This is the ACTUAL password change — the BookOrbit hash gets
-        rotated. After this returns, current_password no longer works
-        against BookOrbit; only new_password does.
+        stored = self.get_admin_creds()
+        if stored:
+            return stored
+        env_user = _os.environ.get("BOOKORBIT_ADMIN_USER") or "admin"
+        env_pw = _os.environ.get("BOOKORBIT_ADMIN_PASSWORD")
+        if env_pw:
+            return (env_user, env_pw)
+        return None
+
+    def change_admin_password(
+        self,
+        *,
+        new_password: str,
+        current_password: str | None = None,
+    ) -> dict:
+        """Rotate the BookOrbit admin password without requiring the
+        user to know or type the current one.
+
+        Mechanism: biblichor authenticates with its stored credentials
+        (or env-var fallback), mints a one-time reset token via
+        POST /users/{id}/reset-password, then applies the new password
+        via POST /auth/reset-password. After success, the new password
+        is saved into the encrypted store so Scan / Doctor keep
+        working.
+
+        current_password is optional: if supplied (e.g. when the user
+        knows it and biblichor doesn't), it's used directly for the
+        login step instead of stored/env credentials.
         """
-        creds = self.get_admin_creds()
-        username = creds[0] if creds else "admin"
-        with BookOrbitClient(self._cfg.bookorbit.url) as client:
-            client.login(username=username, password=current_password)
-            client.change_password(
-                current_password=current_password,
-                new_password=new_password,
+        if current_password:
+            creds: tuple[str, str] | None = ("admin", current_password)
+            stored = self.get_admin_creds()
+            if stored:
+                creds = (stored[0], current_password)
+        else:
+            creds = self._resolve_current_credentials()
+
+        if not creds:
+            raise BookOrbitServiceError(
+                "biblichor cannot find any credentials to authenticate "
+                "with BookOrbit. The container env var "
+                "BOOKORBIT_ADMIN_PASSWORD is not set and no credentials "
+                "are stored. Restart with the password in the compose "
+                "env, OR use 'Stored creds' to save the current "
+                "BookOrbit admin password first."
             )
-        # Persist the new password for future Scan/Doctor calls
+        username, current_pw = creds
+
+        with BookOrbitClient(self._cfg.bookorbit.url) as client:
+            try:
+                client.login(username=username, password=current_pw)
+            except Exception as e:
+                raise BookOrbitServiceError(
+                    "biblichor could not authenticate with BookOrbit using its "
+                    "stored credentials. Either save the current admin password "
+                    "via 'Stored creds' and retry, or rotate the password "
+                    "out-of-band first."
+                ) from e
+            user_id = client.current_user_id()
+            reset_url = client.mint_reset_url(user_id)
+            # token=XXX query param
+            from urllib.parse import parse_qs, urlparse
+
+            token = parse_qs(urlparse(reset_url).query).get("token", [""])[0]
+            if not token:
+                raise BookOrbitServiceError(
+                    f"BookOrbit returned a reset URL with no token: {reset_url}"
+                )
+            client.apply_password_reset(token, new_password)
+
         self.store_admin_creds(username, new_password)
         return {"ok": True, "username": username}
 

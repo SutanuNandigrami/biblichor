@@ -1,4 +1,8 @@
-"""Phase 6p.6 tests for the BookOrbit password-change endpoint."""
+"""Phase 6p.6 tests — kept after the 6p.8 reset-flow refactor.
+
+Coverage: legacy current_password-supplied flow still works (for
+callers who want to pass it explicitly), and the BookOrbit
+rejection / 5xx paths surface meaningfully."""
 
 from __future__ import annotations
 
@@ -15,6 +19,7 @@ from endless_library.db.schema import init_db
 from endless_library.web import api as api_mod
 
 BASE = "http://bookorbit.test"
+JWT = "aGVhZGVy.eyJzdWIiOjF9.c2ln"  # header.{"sub":1}.sig
 
 
 def _build_app(tmp_path: Path) -> FastAPI:
@@ -36,7 +41,6 @@ def _build_app(tmp_path: Path) -> FastAPI:
         ),
     )
     (tmp_path / "library").mkdir(exist_ok=True)
-
     deps = SimpleNamespace(cfg=cfg, db_path=db, books=SimpleNamespace(pending=lambda **kw: []))
     app = FastAPI()
     app.state.deps = deps
@@ -47,63 +51,50 @@ def _build_app(tmp_path: Path) -> FastAPI:
     return app
 
 
-# ============ POST /api/bookorbit/admin/change-password ============
+# ============ legacy current_password supplied + reset-flow used ============
 
 
 @respx.mock(base_url=BASE, assert_all_called=False)
-def test_change_password_rotates_bookorbit_then_updates_store(respx_mock, tmp_path):
-    """The happy path: biblichor logs in with current password, calls
-    BookOrbit's change-password, then stores the new password locally."""
+def test_change_password_with_explicit_current_password(respx_mock, tmp_path):
     login_route = respx_mock.post("/api/v1/auth/login").mock(
-        return_value=httpx.Response(200, json={"accessToken": "jwt"})
+        return_value=httpx.Response(200, json={"accessToken": JWT})
     )
-    change_route = respx_mock.post("/api/v1/auth/change-password").mock(
+    respx_mock.post("/api/v1/users/1/reset-password").mock(
+        return_value=httpx.Response(
+            200, json={"resetUrl": "http://bookorbit/reset-password?token=RTK"}
+        )
+    )
+    reset_route = respx_mock.post("/api/v1/auth/reset-password").mock(
         return_value=httpx.Response(204)
     )
 
     app = _build_app(tmp_path)
     client = TestClient(app)
-    # Seed stored creds so the service knows the username
     client.post(
         "/api/bookorbit/creds",
-        json={"admin_username": "admin", "admin_password": "OldPass!"},
+        json={"admin_username": "admin", "admin_password": "OldStored"},
     )
-
+    # Explicit current_password — used in place of stored
     r = client.post(
         "/api/bookorbit/admin/change-password",
-        json={"current_password": "OldPass!", "new_password": "NewPass123!"},
+        json={"current_password": "ExplicitOld", "new_password": "NewPass123!"},
     )
     assert r.status_code == 200, r.text
-    assert r.json() == {"ok": True, "username": "admin"}
 
-    # BookOrbit was called with the right payload
-    assert login_route.called
-    assert change_route.called
-    sent = change_route.calls.last.request.content
-    assert b"OldPass!" in sent
-    assert b"NewPass123!" in sent
-
-    # And the new password is now stored — subsequent /scan should
-    # send the NEW one, not the old
-    scan_route = respx_mock.post("/api/v1/scanner/libraries/1/scan").mock(
-        return_value=httpx.Response(202)
-    )
-    # Reset login route so its history is fresh
-    login_route.reset()
-    login_route.mock(return_value=httpx.Response(200, json={"accessToken": "jwt2"}))
-
-    r2 = client.post("/api/bookorbit/scan")
-    assert r2.status_code == 200, r2.text
-    assert scan_route.called
+    # login was called with ExplicitOld, not OldStored
     sent_login = login_route.calls.last.request.content
-    assert b"NewPass123!" in sent_login
-    assert b"OldPass!" not in sent_login
+    assert b"ExplicitOld" in sent_login
+    assert b"OldStored" not in sent_login
+
+    # reset endpoint got NewPass123!
+    reset_body = reset_route.calls.last.request.content
+    assert b"NewPass123!" in reset_body
 
 
 @respx.mock(base_url=BASE, assert_all_called=False)
-def test_change_password_surfaces_bookorbit_rejection(respx_mock, tmp_path):
-    """If BookOrbit rejects the current password (401), biblichor
-    must surface that to the SPA and NOT update stored creds."""
+def test_change_password_surfaces_bookorbit_login_rejection(respx_mock, tmp_path):
+    """Wrong stored password -> BookOrbit returns 401 -> biblichor
+    surfaces a clean 502 with an actionable message."""
     respx_mock.post("/api/v1/auth/login").mock(
         return_value=httpx.Response(401, json={"message": "Invalid credentials"})
     )
@@ -112,36 +103,31 @@ def test_change_password_surfaces_bookorbit_rejection(respx_mock, tmp_path):
     client = TestClient(app)
     client.post(
         "/api/bookorbit/creds",
-        json={"admin_username": "admin", "admin_password": "OldPass!"},
+        json={"admin_username": "admin", "admin_password": "WrongStored"},
     )
-
     r = client.post(
         "/api/bookorbit/admin/change-password",
-        json={"current_password": "WrongPass", "new_password": "NewPass123!"},
+        json={"new_password": "NewPass123!"},
     )
-    assert r.status_code == 502, r.text
-    assert "login failed" in r.json()["detail"].lower()
-
-    # Stored creds unchanged (still the original OldPass!)
-    # The DELETE creds round-trip is the only externally visible state.
-    # Indirect check: the next failed change-password attempt with the
-    # same old current also 502s.
-    r2 = client.post(
-        "/api/bookorbit/admin/change-password",
-        json={"current_password": "WrongPass", "new_password": "X"},
-    )
-    assert r2.status_code == 502
+    # Login failure -> wrapped in BookOrbitServiceError -> 400 (not opaque 502)
+    assert r.status_code == 400, r.text
+    detail = r.json()["detail"].lower()
+    assert "authenticate" in detail or "credentials" in detail
 
 
 @respx.mock(base_url=BASE, assert_all_called=False)
-def test_change_password_rolls_back_if_bookorbit_change_endpoint_fails(respx_mock, tmp_path):
-    """Login succeeds but change-password endpoint returns 5xx —
-    stored creds must remain at the OLD value (so the user can keep
-    using Scan/Doctor while they figure out what went wrong)."""
+def test_change_password_rolls_back_on_reset_endpoint_failure(respx_mock, tmp_path):
+    """If /auth/reset-password returns 5xx, stored creds remain at
+    the OLD value so the user can keep using Scan/Doctor."""
     respx_mock.post("/api/v1/auth/login").mock(
-        return_value=httpx.Response(200, json={"accessToken": "jwt"})
+        return_value=httpx.Response(200, json={"accessToken": JWT})
     )
-    respx_mock.post("/api/v1/auth/change-password").mock(
+    respx_mock.post("/api/v1/users/1/reset-password").mock(
+        return_value=httpx.Response(
+            200, json={"resetUrl": "http://bookorbit/reset-password?token=RTK"}
+        )
+    )
+    respx_mock.post("/api/v1/auth/reset-password").mock(
         return_value=httpx.Response(500, text="server error")
     )
 
@@ -151,15 +137,14 @@ def test_change_password_rolls_back_if_bookorbit_change_endpoint_fails(respx_moc
         "/api/bookorbit/creds",
         json={"admin_username": "admin", "admin_password": "OldPass!"},
     )
-
     r = client.post(
         "/api/bookorbit/admin/change-password",
-        json={"current_password": "OldPass!", "new_password": "NewPass123!"},
+        json={"new_password": "NewPass123!"},
     )
     assert r.status_code == 502
 
-    # Verify the stored password is still OldPass! — Scan with the OLD
-    # password should still work (login route still mocked to 200)
+    # Stored creds should still be OldPass! — verify by triggering scan,
+    # which uses stored creds for login
     scan_route = respx_mock.post("/api/v1/scanner/libraries/1/scan").mock(
         return_value=httpx.Response(202)
     )

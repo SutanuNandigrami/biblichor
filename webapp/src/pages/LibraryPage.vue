@@ -69,7 +69,7 @@ const credsForm = ref({ admin_username: 'admin', admin_password: '' })
 
 const showChangePw = ref(false)
 const changePwBusy = ref(false)
-const changePwForm = ref({ current_password: '', new_password: '', confirm_password: '' })
+const changePwForm = ref({ new_password: '', confirm_password: '' })
 
 const doctorBusy = ref(false)
 const doctorReport = ref<{ ok: boolean; checks: DoctorCheck[] } | null>(null)
@@ -203,23 +203,20 @@ async function submitChangePassword() {
     toast.error('New password and confirmation do not match')
     return
   }
-  if (!changePwForm.value.current_password || !changePwForm.value.new_password) {
-    toast.error('Both current and new password are required')
+  if (changePwForm.value.new_password.length < 8) {
+    toast.error('Password must be at least 8 characters')
     return
   }
   changePwBusy.value = true
   try {
     await api('/api/bookorbit/admin/change-password', {
       method: 'POST',
-      body: JSON.stringify({
-        current_password: changePwForm.value.current_password,
-        new_password: changePwForm.value.new_password,
-      }),
+      body: JSON.stringify({ new_password: changePwForm.value.new_password }),
       headers: { 'Content-Type': 'application/json' },
     })
     toast.success('BookOrbit admin password changed')
     showChangePw.value = false
-    changePwForm.value = { current_password: '', new_password: '', confirm_password: '' }
+    changePwForm.value = { new_password: '', confirm_password: '' }
     await refresh()
   } catch (e: any) {
     toast.error('Change failed: ' + (e?.message ?? e))
@@ -394,21 +391,12 @@ async function submitChangePassword() {
             <KeyRound class="w-4 h-4 text-primary" /> Change BookOrbit admin password
           </h3>
           <p class="text-[11px] text-muted-foreground">
-            Rotates the actual password on BookOrbit's account (calls
-            <code class="font-mono">/auth/change-password</code>) and updates biblichor's stored copy.
-            Use this when you want to pick a password you remember instead of the bootstrap-generated one.
+            Pick a password you'll remember. biblichor handles the authentication with BookOrbit
+            for you — you only need to type the new password below.
           </p>
           <div class="space-y-3">
             <label class="text-xs space-y-1 block">
-              <span class="text-muted-foreground">Current password</span>
-              <input v-model="changePwForm.current_password" type="password" autocomplete="current-password"
-                class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
-              <span class="text-[10px] text-muted-foreground">
-                The original is in <code class="font-mono">.env</code> as <code class="font-mono">BOOKORBIT_ADMIN_PASSWORD</code>.
-              </span>
-            </label>
-            <label class="text-xs space-y-1 block">
-              <span class="text-muted-foreground">New password (8+ chars, mixed case + digit)</span>
+              <span class="text-muted-foreground">New password (8+ characters)</span>
               <input v-model="changePwForm.new_password" type="password" autocomplete="new-password"
                 class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
             </label>
@@ -421,9 +409,9 @@ async function submitChangePassword() {
           <div class="flex gap-2 justify-end">
             <Button variant="ghost" size="sm" :disabled="changePwBusy" @click="showChangePw = false">Cancel</Button>
             <Button size="sm"
-              :disabled="changePwBusy || !changePwForm.current_password || !changePwForm.new_password"
+              :disabled="changePwBusy || !changePwForm.new_password || changePwForm.new_password !== changePwForm.confirm_password"
               @click="submitChangePassword">
-              {{ changePwBusy ? 'Rotating...' : 'Change password' }}
+              {{ changePwBusy ? 'Changing...' : 'Change password' }}
             </Button>
           </div>
         </Card>

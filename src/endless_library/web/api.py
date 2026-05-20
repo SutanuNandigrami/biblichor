@@ -45,8 +45,8 @@ class _BOCredsPayload(BaseModel):
 
 
 class _BOChangePasswordPayload(BaseModel):
-    current_password: str
     new_password: str
+    current_password: str | None = None
 
 
 class AddSource(BaseModel):
@@ -1185,8 +1185,8 @@ def register(app: FastAPI) -> None:
         svc = _bookorbit_service(request)
         try:
             return svc.change_admin_password(
-                current_password=payload.current_password,
                 new_password=payload.new_password,
+                current_password=payload.current_password,
             )
         except BookOrbitServiceError as e:
             raise HTTPException(400, str(e)) from e

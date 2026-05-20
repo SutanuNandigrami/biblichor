@@ -37,6 +37,11 @@ services:
       GMAIL_USER: "${GMAIL_USER}"
       GMAIL_APP_PASSWORD: "${GMAIL_APP_PASSWORD}"
       KINDLE_EMAIL: "${KINDLE_EMAIL}"
+      # Pass BookOrbit admin creds so biblichor can auto-seed its
+      # encrypted secrets store on first start (Phase 6p.8). After
+      # that, the encrypted store is the source of truth.
+      BOOKORBIT_ADMIN_USER: "${BOOKORBIT_ADMIN_USER}"
+      BOOKORBIT_ADMIN_PASSWORD: "${BOOKORBIT_ADMIN_PASSWORD}"
     depends_on:
       flaresolverr:
         condition: service_healthy
