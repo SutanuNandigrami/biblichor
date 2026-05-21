@@ -75,7 +75,8 @@ async function del(s: Source) {
       </Button>
     </div>
 
-    <Card v-if="sources.length" class="overflow-hidden">
+    <!-- Desktop table (md+) -->
+    <Card v-if="sources.length" class="overflow-hidden hidden md:block">
       <table class="w-full text-sm">
         <thead class="text-xs text-muted-foreground border-b border-border">
           <tr class="text-left">
@@ -103,7 +104,35 @@ async function del(s: Source) {
         </tbody>
       </table>
     </Card>
-    <Card v-else class="p-10 text-center">
+
+    <!-- Mobile card list (<md) -->
+    <div v-if="sources.length" class="md:hidden space-y-2">
+      <article
+        v-for="src in sources"
+        :key="src.id"
+        class="bg-card border border-border rounded-lg p-3 space-y-2"
+      >
+        <div class="flex items-center gap-2 flex-wrap">
+          <Badge variant="info">{{ src.source }}</Badge>
+          <Badge :variant="src.enabled ? 'success' : 'muted'">{{ src.enabled ? 'on' : 'off' }}</Badge>
+        </div>
+        <p class="font-mono text-xs break-all">{{ src.identifier }}</p>
+        <p class="text-[11px] text-muted-foreground">
+          Last poll: {{ src.last_polled_at ?? 'never' }} | every {{ src.poll_interval_minutes }} min
+        </p>
+        <div class="flex gap-2 pt-1">
+          <Button size="sm" variant="outline" class="flex-1" @click="poll(src)">
+            <RefreshCw class="w-3.5 h-3.5 mr-1" /> Poll
+          </Button>
+          <Button size="sm" variant="ghost" @click="toggle(src)"><Power class="w-3.5 h-3.5" /></Button>
+          <Button size="sm" variant="ghost" class="text-destructive" @click="del(src)">
+            <Trash2 class="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </article>
+    </div>
+
+    <Card v-if="!sources.length" class="p-10 text-center">
       <Database class="w-8 h-8 mx-auto mb-3 opacity-50" />
       <p class="text-muted-foreground">No sources configured. Add a Goodreads shelf, Listopia list, series, or Hardcover list.</p>
     </Card>

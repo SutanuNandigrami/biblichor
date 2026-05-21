@@ -179,7 +179,8 @@ async function bulkDeleteByStatus(opts: { hard: boolean }) {
       <Button size="sm" variant="ghost" @click="selected = new Set()">Clear</Button>
     </div>
 
-    <Card class="overflow-hidden">
+    <!-- Desktop table (md+) -->
+    <Card class="overflow-hidden hidden md:block">
       <table class="w-full text-sm">
         <thead class="text-xs text-muted-foreground border-b border-border">
           <tr class="text-left">
@@ -230,6 +231,52 @@ async function bulkDeleteByStatus(opts: { hard: boolean }) {
         </tbody>
       </table>
     </Card>
+
+    <!-- Mobile card list (<md) -->
+    <div class="md:hidden space-y-2">
+      <article
+        v-for="b in books"
+        :key="b.id"
+        :class="[
+          'bg-card border border-border rounded-lg p-3 active:bg-accent/40',
+          selected.has(b.id) ? 'ring-2 ring-primary' : '',
+        ]"
+        @click="detailId = b.id"
+      >
+        <div class="flex items-start gap-3">
+          <input
+            type="checkbox"
+            class="w-5 h-5 mt-1 rounded border-input shrink-0"
+            :checked="selected.has(b.id)"
+            @click.stop
+            @change="toggleOne(b.id)"
+          />
+          <div class="flex-1 min-w-0">
+            <h3 class="font-medium text-sm break-words">{{ b.title }}</h3>
+            <p class="text-xs text-muted-foreground break-words">{{ b.author ?? '—' }}</p>
+            <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+              <StatusPill :status="b.status" />
+              <span class="text-[10px] text-muted-foreground uppercase tracking-wide">
+                {{ b.source }}
+              </span>
+              <span v-if="b.format" class="text-[10px] text-muted-foreground">
+                {{ b.format }}
+              </span>
+              <span v-if="b.attempts > 0" class="text-[10px] text-muted-foreground">
+                {{ b.attempts }} attempt{{ b.attempts > 1 ? 's' : '' }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="flex gap-2 mt-2.5" @click.stop>
+          <Button size="sm" variant="outline" class="flex-1" @click="retry(b)">Retry</Button>
+          <Button size="sm" variant="ghost" class="text-destructive" @click="del(b)">Delete</Button>
+        </div>
+      </article>
+      <p v-if="!books.length" class="text-center text-sm text-muted-foreground py-8">
+        Nothing in the queue yet. Add a book or configure a source.
+      </p>
+    </div>
 
     <Drawer :open="addOpen" title="Add a book manually" @close="addOpen = false">
       <div class="space-y-3">

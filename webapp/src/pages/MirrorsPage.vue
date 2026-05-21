@@ -145,15 +145,19 @@ function latencyColor(ms: number | null): 'success' | 'warning' | 'danger' | 'mu
     </p>
 
     <Card v-if="effective" class="p-4 space-y-3">
-      <div class="flex items-center gap-2">
-        <Activity class="w-4 h-4 text-primary" />
-        <h2 class="font-semibold">Effective Anna's Archive mirrors</h2>
-        <span class="text-xs text-muted-foreground">— what scrapers actually use right now</span>
-        <div class="flex-1"></div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <Activity class="w-4 h-4 text-primary shrink-0" />
+        <h2 class="font-semibold">Effective mirrors</h2>
+        <div class="flex-1 min-w-0"></div>
         <Button size="sm" variant="outline" :loading="refreshingMirrors" @click="refreshWikiNow">
-          <RefreshCw class="w-3.5 h-3.5" /> Refresh from Wikipedia now
+          <RefreshCw class="w-3.5 h-3.5 mr-1" />
+          <span class="hidden sm:inline">Refresh from Wikipedia</span>
+          <span class="sm:hidden">Refresh</span>
         </Button>
       </div>
+      <p class="text-xs text-muted-foreground -mt-2">
+        What the pipeline actually uses right now.
+      </p>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
         <div>
           <div class="text-xs text-muted-foreground mb-1">Merged ({{ effective.merged.length }})</div>
@@ -188,7 +192,8 @@ function latencyColor(ms: number | null): 'success' | 'warning' | 'danger' | 'mu
       </div>
     </Card>
 
-    <Card class="overflow-hidden">
+    <!-- Desktop table (md+) -->
+    <Card class="overflow-hidden hidden md:block">
       <table class="w-full text-sm">
         <thead class="text-xs text-muted-foreground border-b border-border">
           <tr class="text-left">
@@ -248,6 +253,45 @@ function latencyColor(ms: number | null): 'success' | 'warning' | 'danger' | 'mu
         </tbody>
       </table>
     </Card>
+
+    <!-- Mobile card list (<md) -->
+    <div class="md:hidden space-y-2">
+      <article
+        v-for="m in mirrors"
+        :key="m.id"
+        class="bg-card border border-border rounded-lg p-3 space-y-2"
+      >
+        <div class="flex items-center gap-2 flex-wrap">
+          <Badge variant="info">{{ m.kind }}</Badge>
+          <Badge :variant="m.enabled ? 'success' : 'muted'">
+            {{ m.enabled ? 'enabled' : 'disabled' }}
+          </Badge>
+          <span
+            v-if="m.last_status !== null"
+            :class="[
+              'text-xs font-mono',
+              m.last_status < 400 ? 'text-emerald-500' : 'text-destructive',
+            ]"
+          >{{ m.last_status }}</span>
+        </div>
+        <p class="font-mono text-xs break-all">{{ m.url }}</p>
+        <p v-if="m.label" class="text-[11px] text-muted-foreground">{{ m.label }}</p>
+        <p class="text-[11px] text-muted-foreground">
+          Latency: {{ m.last_latency_ms !== null ? m.last_latency_ms + 'ms' : '—' }}
+          | failures: {{ m.consecutive_failures }}
+        </p>
+        <div class="flex gap-2 pt-1">
+          <Button size="sm" variant="outline" class="flex-1" @click="probeOne(m)">Probe</Button>
+          <Button size="sm" variant="ghost" @click="toggle(m)"><Power class="w-3.5 h-3.5" /></Button>
+          <Button size="sm" variant="ghost" class="text-destructive" @click="del(m)">
+            <Trash2 class="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </article>
+      <p v-if="!mirrors.length" class="text-center text-sm text-muted-foreground py-8">
+        No mirrors yet.
+      </p>
+    </div>
 
     <Drawer :open="addOpen" title="Add a mirror" @close="addOpen = false">
       <div class="space-y-3">

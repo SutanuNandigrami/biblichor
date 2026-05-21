@@ -105,7 +105,8 @@ function fmtNext(iso: string | null): string {
       <p class="text-muted-foreground">No jobs registered.</p>
     </Card>
 
-    <Card v-else class="overflow-hidden">
+    <!-- Desktop table (md+) -->
+    <Card v-else class="overflow-hidden hidden md:block">
       <table class="w-full text-sm">
         <thead class="text-xs text-muted-foreground border-b border-border">
           <tr class="text-left">
@@ -148,6 +149,46 @@ function fmtNext(iso: string | null): string {
         </tbody>
       </table>
     </Card>
+
+    <!-- Mobile card list -->
+    <div v-if="jobs.length" class="md:hidden space-y-2">
+      <article
+        v-for="j in jobs"
+        :key="j.id"
+        class="bg-card border border-border rounded-lg p-3 space-y-2"
+      >
+        <div class="flex items-start gap-2 flex-wrap">
+          <div class="flex-1 min-w-0">
+            <h3 class="font-medium text-sm break-words">{{ j.name }}</h3>
+            <p class="font-mono text-[10px] text-muted-foreground">{{ j.id }}</p>
+          </div>
+          <Badge :variant="j.paused ? 'warning' : 'success'">
+            {{ j.paused ? 'paused' : 'active' }}
+          </Badge>
+        </div>
+        <p class="text-[11px] text-muted-foreground">
+          {{ j.trigger }}
+        </p>
+        <p class="text-[11px] text-muted-foreground">
+          Next: {{ j.next_run_at ? new Date(j.next_run_at).toLocaleString() : '—' }}
+          <span v-if="j.next_run_at" class="opacity-70">({{ fmtNext(j.next_run_at) }})</span>
+        </p>
+        <div class="flex gap-2 pt-1">
+          <Button size="sm" variant="outline" class="flex-1" @click="runNow(j)">
+            <Zap class="w-3.5 h-3.5 mr-1" /> Run now
+          </Button>
+          <Button v-if="!j.paused" size="sm" variant="ghost" @click="pause(j)">
+            <Pause class="w-3.5 h-3.5" />
+          </Button>
+          <Button v-else size="sm" variant="ghost" @click="resume(j)">
+            <Play class="w-3.5 h-3.5" />
+          </Button>
+          <Button size="sm" variant="ghost" @click="openEdit(j)">
+            <Cog class="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </article>
+    </div>
 
     <p class="text-xs text-muted-foreground">
       Reschedule applies immediately and persists for the lifetime of the process. To survive a restart, also update <code>poll_interval_minutes</code> / <code>daily_summary_hour_utc</code> in Settings.
