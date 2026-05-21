@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Save, Mail, Bell, AlertTriangle, ExternalLink, Cookie, Sliders, ChevronDown } from 'lucide-vue-next'
+import { Save, Mail, Bell, AlertTriangle, ExternalLink, Cookie, Sliders, ChevronDown, Palette } from 'lucide-vue-next'
 import { useMediaQuery } from '@vueuse/core'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
@@ -8,8 +8,30 @@ import Card from '@/components/ui/Card.vue'
 import Badge from '@/components/ui/Badge.vue'
 import { api } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
+import { applyTint, readSavedTint } from '@/composables/useTint'
 
 const isDesktop = useMediaQuery('(min-width: 768px)')
+
+const tintH = ref(265)
+const tintPresets = [
+  { name: 'Blue',    h: 265 },
+  { name: 'Indigo',  h: 240 },
+  { name: 'Purple',  h: 292 },
+  { name: 'Pink',    h: 340 },
+  { name: 'Red',     h: 22 },
+  { name: 'Amber',   h: 60 },
+  { name: 'Green',   h: 142 },
+  { name: 'Teal',    h: 180 },
+]
+
+function setTint(h: number) {
+  tintH.value = h
+  applyTint(h)
+}
+function onTintInput(e: Event) {
+  const v = Number((e.target as HTMLInputElement).value)
+  setTint(v)
+}
 
 const form = reactive({
   poll_interval_minutes: 60,
@@ -51,7 +73,10 @@ async function load() {
   form.pushover_app_token    = ''
   form.welib_auth_cookie     = ''
 }
-onMounted(load)
+onMounted(() => {
+  load()
+  tintH.value = readSavedTint()
+})
 
 async function save() {
   saving.value = true
@@ -101,6 +126,39 @@ async function testPushover() {
       <div class="flex-1"></div>
       <Button :loading="saving" @click="save"><Save class="w-4 h-4" /> Save all</Button>
     </div>
+
+    <Card class="p-5 space-y-3">
+      <h2 class="font-semibold flex items-center gap-2 text-sm">
+        <Palette class="w-4 h-4 text-primary" /> Accent color
+      </h2>
+      <p class="text-xs text-muted-foreground">
+        Pick a hue. Same palette as BookOrbit so the two apps feel like one. The
+        whole UI re-tints instantly and your choice is remembered in this browser.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <button
+          v-for="p in tintPresets"
+          :key="p.h"
+          type="button"
+          class="w-9 h-9 rounded-full border-2 transition-transform hover:scale-110"
+          :class="tintH === p.h ? 'border-foreground' : 'border-border'"
+          :style="{ background: `oklch(0.6 0.18 ${p.h})` }"
+          :title="`${p.name} (${p.h}°)`"
+          @click="setTint(p.h)"
+        />
+      </div>
+      <label class="block text-xs space-y-1">
+        <span class="text-muted-foreground">Custom hue: {{ tintH }}°</span>
+        <input
+          type="range"
+          min="0"
+          max="360"
+          :value="tintH"
+          class="w-full accent-primary"
+          @input="onTintInput"
+        />
+      </label>
+    </Card>
 
     <Card class="p-5" v-if="form.smtp_user">
       <div class="flex gap-3">
