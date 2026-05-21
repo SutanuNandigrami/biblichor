@@ -134,7 +134,7 @@ function size(b?: number | null) {
           Scrapers try in order; the first one to return candidates wins. Within a scraper,
           mirror rotation is failover-only (other mirrors only get tried if the first fails).
         </p>
-        <Card class="overflow-hidden mb-4">
+        <Card class="overflow-hidden mb-4 hidden md:block">
           <table class="w-full text-xs">
             <tbody>
               <tr v-for="ev in scrapeTrace" :key="ev.id" class="border-t border-border/40">
@@ -148,8 +148,19 @@ function size(b?: number | null) {
             </tbody>
           </table>
         </Card>
+        <div class="md:hidden space-y-1.5 mb-4">
+          <article v-for="ev in scrapeTrace" :key="ev.id"
+                   class="bg-card border border-border rounded-lg p-2.5 text-xs">
+            <div class="flex items-center gap-2 mb-0.5">
+              <span class="font-mono text-[10px] text-muted-foreground">{{ ev.ts.slice(11,19) }}</span>
+              <Badge variant="info">{{ ev.scraper ?? '—' }}</Badge>
+            </div>
+            <p class="break-words">{{ ev.message }}</p>
+          </article>
+          <p v-if="!scrapeTrace.length" class="text-xs text-muted-foreground px-1">No scraper events yet.</p>
+        </div>
         <h3 class="text-sm font-semibold mb-2">Candidates</h3>
-        <Card v-if="candidates.length" class="overflow-hidden">
+        <Card v-if="candidates.length" class="overflow-hidden hidden md:block">
           <table class="w-full text-xs">
             <thead class="text-muted-foreground">
               <tr class="text-left">
@@ -211,7 +222,55 @@ function size(b?: number | null) {
             </tbody>
           </table>
         </Card>
-        <p v-else class="text-xs text-muted-foreground">No candidates yet. Try retrying.</p>
+        <div v-if="candidates.length" class="md:hidden space-y-2">
+          <article v-for="c in candidates" :key="c.id"
+                   class="bg-card border border-border rounded-lg p-3 active:bg-accent/40">
+            <button class="w-full text-left" @click="toggleRow(c.id)">
+              <div class="flex items-start gap-2 mb-1.5">
+                <div class="font-mono text-sm font-semibold tabular-nums">
+                  <span class="mr-0.5 text-muted-foreground">{{ expandedRow === c.id ? '▾' : '▸' }}</span>
+                  {{ c.score?.toFixed(1) ?? '—' }}
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium break-words">{{ c.title ?? c.md5 }}</p>
+                  <p class="text-[11px] text-muted-foreground font-medium">{{ c.provider }}</p>
+                  <a v-if="c.detail_url" :href="c.detail_url" target="_blank" rel="noopener" @click.stop
+                     class="text-[11px] text-muted-foreground hover:text-primary underline-offset-2 hover:underline break-all">{{ c.mirror ?? c.detail_url }}</a>
+                  <span v-else-if="c.mirror" class="text-[11px] text-muted-foreground break-all">{{ c.mirror }}</span>
+                </div>
+              </div>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <Badge v-if="c.format" variant="muted">{{ c.format }}</Badge>
+                <Badge variant="muted">{{ size(c.filesize_bytes) }}</Badge>
+              </div>
+            </button>
+            <div class="flex justify-end mt-2">
+              <Button size="sm" variant="outline" @click.stop="pick(c)">Pick</Button>
+            </div>
+            <div v-if="expandedRow === c.id" class="mt-3 pt-3 border-t border-border/60">
+              <div class="text-xs text-muted-foreground mb-2">Score breakdown</div>
+              <div v-if="c.score_breakdown?.error" class="text-xs text-destructive font-mono break-words">
+                {{ c.score_breakdown.error }}
+              </div>
+              <div v-else-if="c.score_breakdown?.is_hard_skip" class="text-xs">
+                <Badge variant="danger">Hard-skipped</Badge>
+                <span class="ml-2 text-muted-foreground break-words">{{ c.score_breakdown.skip_reason }}</span>
+              </div>
+              <ul v-else-if="c.score_breakdown?.components" class="text-xs space-y-1">
+                <li v-for="(value, key) in c.score_breakdown.components" :key="key"
+                    class="flex justify-between gap-3">
+                  <span class="text-muted-foreground">{{ fmtComponent(String(key), value).label }}</span>
+                  <span class="font-mono"
+                        :class="value < 0 ? 'text-destructive' : value > 0 ? 'text-emerald-500' : 'text-muted-foreground'">
+                    {{ value >= 0 ? '+' : '' }}{{ value.toFixed(2) }}
+                  </span>
+                </li>
+              </ul>
+              <div v-else class="text-xs text-muted-foreground">No breakdown available.</div>
+            </div>
+          </article>
+        </div>
+        <p v-if="!candidates.length" class="text-xs text-muted-foreground">No candidates yet. Try retrying.</p>
       </section>
 
       <section>
