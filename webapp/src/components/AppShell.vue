@@ -30,6 +30,18 @@ import MobileHeader from "@/components/MobileHeader.vue"
 import { useToast } from "@/composables/useToast"
 import { useEventStream } from "@/composables/useWebSocket"
 import { useCycleStore } from "@/stores/cycle"
+import { api } from "@/composables/useApi"
+
+type SmtpQuota = { sent_24h: number; cap: number; remaining: number; exhausted: boolean }
+const smtpQuota = ref<SmtpQuota | null>(null)
+async function refreshSmtpQuota() {
+  try {
+    const h = await api<{ smtp?: SmtpQuota }>("/healthz")
+    if (h && typeof h.smtp === "object") smtpQuota.value = h.smtp as SmtpQuota
+  } catch {
+    /* healthz down -> nothing to show */
+  }
+}
 
 const toast = useToast()
 const cycle = useCycleStore()
@@ -64,6 +76,9 @@ onMounted(() => {
   } catch {
     /* private mode */
   }
+  refreshSmtpQuota()
+  // Refresh once a minute so the user sees the counter climb during a backfill
+  setInterval(refreshSmtpQuota, 60_000)
 })
 
 function toggleTheme() {
@@ -167,6 +182,21 @@ async function onRun() {
             class="ml-1 text-foreground"
           >{{ k }}={{ v }}</span>
         </div>
+        <span
+          v-if="smtpQuota && smtpQuota.cap > 0"
+          class="text-xs font-mono px-2 py-1 rounded border"
+          :class="
+            smtpQuota.exhausted
+              ? 'border-destructive/40 text-destructive'
+              : smtpQuota.remaining <= Math.max(5, smtpQuota.cap / 10)
+                ? 'border-amber-500/40 text-amber-500'
+                : 'border-border text-muted-foreground'
+          "
+          :title="`SMTP: ${smtpQuota.sent_24h} sent in last 24h, cap ${smtpQuota.cap}. ` +
+                  (smtpQuota.exhausted ? 'Pipeline is deferring sends.' : 'New books queue freely.')"
+        >
+          📧 {{ smtpQuota.sent_24h }}/{{ smtpQuota.cap }}
+        </span>
         <button
           type="button"
           class="w-9 h-9 inline-flex items-center justify-center

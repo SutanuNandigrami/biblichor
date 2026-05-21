@@ -225,9 +225,11 @@ async function del(s: Source) {
           <p class="text-[11px] text-muted-foreground mt-1">
             Use <code>full</code> for the whole kindlebangla.com catalog, or
             <code>category:&lt;slug&gt;</code> to limit (e.g. <code>category:উপন্যাস</code>).
-            First poll walks every category — can queue thousands of books and
-            run for ~1–2 hours. Subsequent polls only re-walk to dedup.
-            Each book is auto-picked and sent to Kindle + BookOrbit.
+            First poll walks every category and queues everything in one shot —
+            no pacing on the source side. The pipeline self-paces actual Kindle
+            delivery against your SMTP daily cap (see the 📧 indicator in the
+            header); books that exceed the cap stay queued and ship next cycle.
+            Each book is auto-picked and routed to Kindle + BookOrbit.
           </p>
         </div>
 

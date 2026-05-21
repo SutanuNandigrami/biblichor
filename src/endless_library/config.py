@@ -74,6 +74,14 @@ class SmtpCfg(BaseModel):
     # NOTE: Gmail's 50 MB number applies to *inbound*; outbound is 25.
     # Other providers: SES 40 MB, SendGrid 30 MB. Kindle inbound: 50.
     max_attachment_mb: int = 24
+    # Phase 6u: rolling-24h send cap. Gmail free ≈ 100/day, Workspace
+    # ≈ 2000/day. We default to 80 to leave headroom for non-Kindle
+    # outbound (test emails, doctor probes, etc). 0 disables the gate.
+    # When the cap is hit, the pipeline defers the send to the next
+    # cycle instead of marking the book failed — books self-pace into
+    # the SMTP budget over multiple cycles instead of all dying
+    # together when one big source backfill hits the wall.
+    daily_cap: int = 80
 
 
 class PushoverEventsCfg(BaseModel):

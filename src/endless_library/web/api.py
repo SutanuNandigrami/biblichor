@@ -853,6 +853,22 @@ def register(app: FastAPI) -> None:
         except Exception:
             components["db_size_bytes"] = 0
 
+        # Phase 6u: SMTP quota visibility. Counts kind='send' events in
+        # the last 24h vs cfg.smtp.daily_cap so the dashboard can warn
+        # before Gmail throttles the pipeline.
+        try:
+            from endless_library.smtp_rate import quota_status as _smtp_quota
+
+            q = _smtp_quota(deps.db_path, daily_cap=deps.cfg.smtp.daily_cap)
+            components["smtp"] = {
+                "sent_24h": q.sent_24h,
+                "cap": q.cap,
+                "remaining": q.remaining,
+                "exhausted": q.exhausted,
+            }
+        except Exception as e:  # pragma: no cover
+            components["smtp"] = f"unknown: {type(e).__name__}: {e}"
+
         body = {"ok": ok, **components}
         if not ok:
             return JSONResponse(status_code=503, content=body)

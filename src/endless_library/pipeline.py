@@ -23,7 +23,8 @@ from endless_library.domain.models import Candidate, ScoreBreakdown, SearchQuery
 from endless_library.domain.scoring import score_candidate
 from endless_library.domain.state_machine import decide_auto_pick
 from endless_library.download import DownloadError, download
-from endless_library.kindle import KindleSendError, send_to_kindle
+from endless_library.kindle import KindleRateLimited, KindleSendError, send_to_kindle
+from endless_library.smtp_rate import quota_status
 from endless_library.notifier import Notifier
 from endless_library.scrapers import registry as scrapers_registry
 from endless_library.security.archive_safety import SafetyLimits
@@ -687,6 +688,20 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
         deps.events.append(book_id=book.id, kind="error", message=msg)
         return "needs_review"
 
+    # Phase 6u: pre-flight SMTP rate-limit check. Counts kind='send'
+    # events in the last 24h and defers the send if we're at/over the
+    # configured Gmail-safe cap. Deferred books keep their picked
+    # state (file_path already set) and the next pipeline cycle retries
+    # — self-paces the queue into the daily budget.
+    quota = quota_status(deps.db_path, daily_cap=deps.cfg.smtp.daily_cap)
+    if quota.exhausted:
+        msg = (
+            f"smtp daily cap reached ({quota.sent_24h}/{quota.cap} in last 24h); "
+            f"deferring send to next cycle"
+        )
+        deps.events.append(book_id=book.id, kind="send_deferred", message=msg)
+        return "deferred"
+
     try:
         send_to_kindle(
             attachment=file_path,
@@ -695,6 +710,12 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
             title=book.title,
             author=book.author,
         )
+    except KindleRateLimited as e:
+        # Server-side throttle, even though we thought we were under the
+        # cap. Defer the same way as the pre-flight gate.
+        msg = f"smtp throttled by server; deferring: {e}"
+        deps.events.append(book_id=book.id, kind="send_deferred", message=msg)
+        return "deferred"
     except KindleSendError as e:
         deps.books.set_failed(book.id, error=f"kindle send failed: {e}")
         return "failed"

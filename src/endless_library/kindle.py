@@ -19,6 +19,36 @@ class KindleSendError(Exception):
     pass
 
 
+class KindleRateLimited(KindleSendError):
+    """SMTP server returned a temporary rate-limit response (421/452/550 5.4.5).
+
+    Phase 6u: pipeline catches this separately from a hard failure so the
+    book stays queued for the next cycle instead of burning a retry slot.
+    """
+
+
+# Substrings Gmail and others use to signal a rate-limit refusal. We match
+# on the message body since aiosmtplib doesn't always surface the smtp code
+# cleanly for SMTPDataError vs SMTPException.
+_RATE_LIMIT_SIGNALS = (
+    "421",                                  # generic 4.7.0 throttle
+    "4.7.0",
+    "452",                                  # 4.5.3 domain msg limit
+    "4.5.3",
+    "4.7.28",                               # gmail per-IP throttle
+    "550 5.4.5",                            # daily user sending limit
+    "5.4.5",
+    "try again later",
+    "sending limit exceeded",
+    "rate limit",
+)
+
+
+def _looks_like_rate_limit(err_text: str) -> bool:
+    low = err_text.lower()
+    return any(sig in low for sig in _RATE_LIMIT_SIGNALS)
+
+
 @dataclass(frozen=True, slots=True)
 class SendResult:
     accepted: bool
@@ -94,6 +124,12 @@ async def _send_smtp(
                 f"(Gmail caps outbound at ~25 MB). Lower smtp.max_attachment_mb "
                 f"or switch SMTP provider: {e}"
             ) from e
+        # 421/452/550 5.4.5 / 4.7.28 — rate-limit codes. Surface separately
+        # so the pipeline defers instead of marking the book failed.
+        if code in (421, 450, 451, 452) or _looks_like_rate_limit(str(e)):
+            raise KindleRateLimited(
+                f"SMTP rate-limited (code={code}); deferring: {e}"
+            ) from e
         raise KindleSendError(f"SMTP data error (code={code}): {e}") from e
     except aiosmtplib.SMTPConnectError as e:
         raise KindleSendError(
@@ -105,6 +141,8 @@ async def _send_smtp(
         raise KindleSendError(f"SMTP server disconnected mid-send: {e}") from e
     except aiosmtplib.SMTPException as e:
         # Catch-all for any other aiosmtplib subclass we didn\'t enumerate
+        if _looks_like_rate_limit(str(e)):
+            raise KindleRateLimited(f"SMTP rate-limited; deferring: {e}") from e
         raise KindleSendError(f"SMTP error: {e}") from e
 
     if errors:

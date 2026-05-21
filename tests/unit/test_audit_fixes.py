@@ -101,7 +101,7 @@ def test_smtp_generic_smtp_exception_still_caught(tmp_path):
     msg = _build_dummy_msg(tmp_path)
     smtp = SmtpCfg(host="x.example.com", port=587, user="u", password="p")
 
-    err = aiosmtplib.SMTPHeloError(421, "Service not available")
+    err = aiosmtplib.SMTPHeloError(530, "Must issue a STARTTLS command first")
     with (
         patch("aiosmtplib.send", side_effect=err),
         pytest.raises(KindleSendError, match="SMTP error"),
