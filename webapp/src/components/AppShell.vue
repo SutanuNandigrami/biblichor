@@ -19,6 +19,8 @@ import {
   Sliders,
   Library as LibraryIcon,
   Clock,
+  Moon,
+  Sun,
 } from "lucide-vue-next"
 import { Toaster } from 'vue-sonner'
 import 'vue-sonner/style.css'
@@ -63,6 +65,16 @@ onMounted(() => {
     /* private mode */
   }
 })
+
+function toggleTheme() {
+  document.documentElement.classList.toggle("dark")
+  try {
+    const isDark = document.documentElement.classList.contains("dark")
+    localStorage.setItem("biblichor.theme", isDark ? "dark" : "light")
+  } catch {
+    /* private mode */
+  }
+}
 
 async function onRun() {
   triggering.value = true
@@ -155,6 +167,16 @@ async function onRun() {
             class="ml-1 text-foreground"
           >{{ k }}={{ v }}</span>
         </div>
+        <button
+          type="button"
+          class="w-9 h-9 inline-flex items-center justify-center
+                 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground"
+          aria-label="Toggle theme"
+          @click="toggleTheme"
+        >
+          <Moon class="w-4 h-4 dark:hidden" />
+          <Sun class="w-4 h-4 hidden dark:block" />
+        </button>
         <Button
           :loading="triggering || cycle.running"
           :disabled="cycle.running"
