@@ -18,6 +18,7 @@ type Job = {
 }
 
 const jobs = ref<Job[]>([])
+const loaded = ref(false)
 const schedulerRunning = ref(false)
 const editing = ref<Job | null>(null)
 const editMinutes = ref<string>('')
@@ -30,6 +31,7 @@ async function load() {
   const r = await api<{ jobs: Job[]; scheduler_running: boolean }>('/api/schedule/jobs')
   jobs.value = r.jobs
   schedulerRunning.value = r.scheduler_running
+  loaded.value = true
 }
 
 onMounted(() => {
@@ -100,7 +102,12 @@ function fmtNext(iso: string | null): string {
       <Badge variant="muted">{{ jobs.length }} jobs</Badge>
     </div>
 
-    <Card v-if="!jobs.length" class="p-10 text-center">
+    <Card v-if="!loaded" class="p-10 text-center">
+      <Clock class="w-8 h-8 mx-auto mb-3 opacity-50 animate-pulse" />
+      <p class="text-muted-foreground">Loading schedule…</p>
+    </Card>
+
+    <Card v-else-if="!jobs.length" class="p-10 text-center">
       <Clock class="w-8 h-8 mx-auto mb-3 opacity-50" />
       <p class="text-muted-foreground">No jobs registered.</p>
     </Card>
