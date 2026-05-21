@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { Save, Mail, Bell, AlertTriangle, ExternalLink } from 'lucide-vue-next'
+import { Save, Mail, Bell, AlertTriangle, ExternalLink, Cookie, Sliders, ChevronDown } from 'lucide-vue-next'
+import { useMediaQuery } from '@vueuse/core'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
 import Card from '@/components/ui/Card.vue'
 import Badge from '@/components/ui/Badge.vue'
 import { api } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
+
+const isDesktop = useMediaQuery('(min-width: 768px)')
 
 const form = reactive({
   poll_interval_minutes: 60,
@@ -117,104 +120,133 @@ async function testPushover() {
       </div>
     </Card>
 
-    <Card class="p-5">
-      <h2 class="font-semibold mb-4 flex items-center gap-2"><Mail class="w-4 h-4 text-primary" /> Kindle delivery (SMTP)</h2>
-      <div class="grid grid-cols-2 gap-4">
-        <div class="col-span-2">
-          <label class="text-xs text-muted-foreground mb-1 block">Kindle recipient</label>
-          <Input v-model="form.kindle_recipient" placeholder="yourname@kindle.com" />
+    <details :open="isDesktop" class="settings-section group bg-card border border-border rounded-lg overflow-hidden">
+      <summary class="cursor-pointer md:cursor-default select-none px-5 py-3 font-semibold flex items-center gap-2 text-sm">
+        <Mail class="w-4 h-4 text-primary" />
+        Kindle delivery (SMTP)
+        <ChevronDown class="w-4 h-4 ml-auto md:hidden transition-transform group-open:rotate-180" />
+      </summary>
+      <div class="p-5 pt-0 space-y-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="sm:col-span-2">
+            <label class="text-xs text-muted-foreground mb-1 block">Kindle recipient</label>
+            <Input v-model="form.kindle_recipient" placeholder="yourname@kindle.com" />
+          </div>
+          <div>
+            <label class="text-xs text-muted-foreground mb-1 block">SMTP host</label>
+            <Input v-model="form.smtp_host" placeholder="smtp.gmail.com" />
+          </div>
+          <div>
+            <label class="text-xs text-muted-foreground mb-1 block">Port</label>
+            <Input v-model="form.smtp_port" type="number" />
+          </div>
+          <div>
+            <label class="text-xs text-muted-foreground mb-1 block">SMTP user (this is what you whitelist at Amazon)</label>
+            <Input v-model="form.smtp_user" placeholder="you@gmail.com" />
+          </div>
+          <div>
+            <label class="text-xs text-muted-foreground mb-1 block">Password (leave blank to keep existing)</label>
+            <Input v-model="form.smtp_password" type="password" placeholder="(unchanged)" />
+            <p class="text-xs text-muted-foreground mt-1">Spaces in Gmail app passwords are auto-stripped.</p>
+          </div>
         </div>
-        <div>
-          <label class="text-xs text-muted-foreground mb-1 block">SMTP host</label>
-          <Input v-model="form.smtp_host" placeholder="smtp.gmail.com" />
-        </div>
-        <div>
-          <label class="text-xs text-muted-foreground mb-1 block">Port</label>
-          <Input v-model="form.smtp_port" type="number" />
-        </div>
-        <div>
-          <label class="text-xs text-muted-foreground mb-1 block">SMTP user (this is what you whitelist at Amazon)</label>
-          <Input v-model="form.smtp_user" placeholder="you@gmail.com" />
-        </div>
-        <div>
-          <label class="text-xs text-muted-foreground mb-1 block">Password (leave blank to keep existing)</label>
-          <Input v-model="form.smtp_password" type="password" placeholder="(unchanged)" />
-          <p class="text-xs text-muted-foreground mt-1">Spaces in Gmail app passwords are auto-stripped.</p>
+        <div class="flex items-center gap-3 flex-wrap">
+          <Button variant="outline" :loading="testingSmtp" @click="testSmtp">Send test email</Button>
+          <Badge v-if="smtpResult" :variant="smtpResult.ok ? 'success' : 'danger'">
+            {{ smtpResult.ok ? '✓' : '✗' }} {{ smtpResult.msg }}
+          </Badge>
         </div>
       </div>
-      <div class="mt-4 flex items-center gap-3">
-        <Button variant="outline" :loading="testingSmtp" @click="testSmtp">Send test email</Button>
-        <Badge v-if="smtpResult" :variant="smtpResult.ok ? 'success' : 'danger'">
-          {{ smtpResult.ok ? '✓' : '✗' }} {{ smtpResult.msg }}
-        </Badge>
-      </div>
-    </Card>
+    </details>
 
-    <Card class="p-5">
-      <h2 class="font-semibold mb-4 flex items-center gap-2"><Bell class="w-4 h-4 text-primary" /> Pushover</h2>
-      <div class="grid grid-cols-2 gap-4">
-        <div class="col-span-2 flex items-center gap-2">
-          <input type="checkbox" v-model="form.pushover_enabled" id="po" class="rounded" />
-          <label for="po" class="text-sm">Enabled</label>
+    <details :open="isDesktop" class="settings-section group bg-card border border-border rounded-lg overflow-hidden">
+      <summary class="cursor-pointer md:cursor-default select-none px-5 py-3 font-semibold flex items-center gap-2 text-sm">
+        <Bell class="w-4 h-4 text-primary" />
+        Pushover
+        <ChevronDown class="w-4 h-4 ml-auto md:hidden transition-transform group-open:rotate-180" />
+      </summary>
+      <div class="p-5 pt-0 space-y-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="sm:col-span-2 flex items-center gap-2">
+            <input type="checkbox" v-model="form.pushover_enabled" id="po" class="rounded" />
+            <label for="po" class="text-sm">Enabled</label>
+          </div>
+          <div>
+            <label class="text-xs text-muted-foreground mb-1 block">User key</label>
+            <Input v-model="form.pushover_user_key" placeholder="(unchanged)" />
+          </div>
+          <div>
+            <label class="text-xs text-muted-foreground mb-1 block">App token</label>
+            <Input v-model="form.pushover_app_token" placeholder="(unchanged)" />
+          </div>
         </div>
-        <div>
-          <label class="text-xs text-muted-foreground mb-1 block">User key</label>
-          <Input v-model="form.pushover_user_key" placeholder="(unchanged)" />
-        </div>
-        <div>
-          <label class="text-xs text-muted-foreground mb-1 block">App token</label>
-          <Input v-model="form.pushover_app_token" placeholder="(unchanged)" />
+        <div class="flex items-center gap-3 flex-wrap">
+          <Button variant="outline" :loading="testingPushover" @click="testPushover">Send test push</Button>
+          <Badge v-if="pushoverResult" :variant="pushoverResult.ok ? 'success' : 'danger'">
+            {{ pushoverResult.ok ? '✓' : '✗' }} {{ pushoverResult.msg }}
+          </Badge>
         </div>
       </div>
-      <div class="mt-4 flex items-center gap-3">
-        <Button variant="outline" :loading="testingPushover" @click="testPushover">Send test push</Button>
-        <Badge v-if="pushoverResult" :variant="pushoverResult.ok ? 'success' : 'danger'">
-          {{ pushoverResult.ok ? '✓' : '✗' }} {{ pushoverResult.msg }}
-        </Badge>
-      </div>
-    </Card>
+    </details>
 
-    <Card class="p-5">
-      <h2 class="font-semibold mb-4">Welib auth cookie (optional)</h2>
-      <p class="text-xs text-muted-foreground mb-3">
-        Paste the literal <code>Cookie:</code> header value from your browser
-        after signing in to <code>welib.org</code> — open devtools → Application → Cookies,
-        select all rows, "Copy with name=value;…". With this set, welib uses
-        <code>/fast_download/</code> instead of the slow-countdown anonymous path.
-        Stored only in <code>.env</code>, never in <code>config.yaml</code>.
-      </p>
-      <Input
-        v-model="form.welib_auth_cookie"
-        placeholder="(unchanged) e.g. session_id=abc; user_id=42"
-      />
-    </Card>
+    <details :open="isDesktop" class="settings-section group bg-card border border-border rounded-lg overflow-hidden">
+      <summary class="cursor-pointer md:cursor-default select-none px-5 py-3 font-semibold flex items-center gap-2 text-sm">
+        <Cookie class="w-4 h-4 text-primary" />
+        Welib auth cookie (optional)
+        <ChevronDown class="w-4 h-4 ml-auto md:hidden transition-transform group-open:rotate-180" />
+      </summary>
+      <div class="p-5 pt-0 space-y-3">
+        <p class="text-xs text-muted-foreground">
+          Paste the literal <code>Cookie:</code> header value from your browser
+          after signing in to <code>welib.org</code> — open devtools → Application → Cookies,
+          select all rows, "Copy with name=value;…". With this set, welib uses
+          <code>/fast_download/</code> instead of the slow-countdown anonymous path.
+          Stored only in <code>.env</code>, never in <code>config.yaml</code>.
+        </p>
+        <Input
+          v-model="form.welib_auth_cookie"
+          placeholder="(unchanged) e.g. session_id=abc; user_id=42"
+        />
+      </div>
+    </details>
 
-    <Card class="p-5">
-      <h2 class="font-semibold mb-4">General</h2>
-      <div class="grid grid-cols-3 gap-4">
-        <div>
-          <label class="text-xs text-muted-foreground mb-1 block">Poll interval (minutes)</label>
-          <Input v-model="form.poll_interval_minutes" type="number" />
-        </div>
-        <div>
-          <label class="text-xs text-muted-foreground mb-1 block">Max attempts per book</label>
-          <Input v-model="form.max_attempts" type="number" />
-        </div>
-        <div>
-          <label class="text-xs text-muted-foreground mb-1 block">Log level</label>
-          <select v-model="form.log_level" class="h-9 w-full px-3 rounded-md border border-input bg-background text-sm">
-            <option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-xs text-muted-foreground mb-1 block">Auto-pick threshold</label>
-          <Input v-model="form.auto_pick_threshold" type="number" />
-        </div>
-        <div>
-          <label class="text-xs text-muted-foreground mb-1 block">Auto-pick min gap</label>
-          <Input v-model="form.auto_pick_gap" type="number" />
+    <details :open="isDesktop" class="settings-section group bg-card border border-border rounded-lg overflow-hidden">
+      <summary class="cursor-pointer md:cursor-default select-none px-5 py-3 font-semibold flex items-center gap-2 text-sm">
+        <Sliders class="w-4 h-4 text-primary" />
+        General
+        <ChevronDown class="w-4 h-4 ml-auto md:hidden transition-transform group-open:rotate-180" />
+      </summary>
+      <div class="p-5 pt-0">
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+          <div>
+            <label class="text-xs text-muted-foreground mb-1 block">Poll interval (minutes)</label>
+            <Input v-model="form.poll_interval_minutes" type="number" />
+          </div>
+          <div>
+            <label class="text-xs text-muted-foreground mb-1 block">Max attempts per book</label>
+            <Input v-model="form.max_attempts" type="number" />
+          </div>
+          <div>
+            <label class="text-xs text-muted-foreground mb-1 block">Log level</label>
+            <select v-model="form.log_level" class="h-9 w-full px-3 rounded-md border border-input bg-background text-sm">
+              <option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-muted-foreground mb-1 block">Auto-pick threshold</label>
+            <Input v-model="form.auto_pick_threshold" type="number" />
+          </div>
+          <div>
+            <label class="text-xs text-muted-foreground mb-1 block">Auto-pick min gap</label>
+            <Input v-model="form.auto_pick_gap" type="number" />
+          </div>
         </div>
       </div>
-    </Card>
+    </details>
   </div>
 </template>
+
+<style scoped>
+.settings-section > summary { list-style: none; }
+.settings-section > summary::-webkit-details-marker { display: none; }
+</style>
