@@ -142,3 +142,41 @@ is clean.
 
 Set `TAILSCALE_IP=` in the env to restrict 8090 / 3000 to a single
 Tailscale IP.
+
+## UI overhaul (Phase 6t)
+
+biblichor's web UI matches BookOrbit's exact stack — Vue 3.5, Vite 8,
+Tailwind v4 (`@tailwindcss/vite`), reka-ui 2.9, vue-router 5,
+vite-plugin-pwa 1.3, lucide-vue-next, vue-sonner. Bundled
+`@fontsource-variable/inter` ships the font so the dashboard has no
+Google Fonts CDN dependency.
+
+**Tokens.** Design tokens are oklch values keyed off a single
+`--tint-h` CSS variable on `<html>`. The hue picker on the Settings
+page writes that variable and persists it to localStorage, so every
+button, badge, focus ring, and bottom-nav active state re-tints
+instantly without a reload. Light + dark modes use the same hue with
+different L/C bands. Default hue is 265° (BookOrbit blue).
+
+**Responsive shell.** At ≥768 px the layout is a fixed left side-rail
+(60 px wide, 9 nav entries). Below 768 px the side-rail is replaced by
+a sticky 56 px header plus a fixed bottom nav strip that horizontally
+scroll-snaps through the same 9 entries. Pages drop to single-column
+layouts, tables collapse to card-lists (Queue / Sources / Mirrors /
+Schedule / BookDetail candidates), the Settings card stack becomes
+a `<details>` accordion, and the global Run-now button is a
+bottom-right FAB. iOS safe-area insets are respected via
+`viewport-fit=cover` + `env(safe-area-inset-*)`.
+
+**PWA.** `vite-plugin-pwa` generates a Workbox-backed service worker
+plus `manifest.webmanifest`, 64/192/512 px icons, and a maskable
+512 px. `/api`, `/ws`, and `/healthz` are denylisted from the
+navigation fallback so SPA routing never swallows live API requests.
+biblichor is installable as a standalone app on iOS Safari, Android
+Chrome, and desktop Chromium browsers; offline cold-starts load the
+shell from cache before re-hydrating from the network.
+
+**Heavy lists.** The Logs page uses `vue-virtual-scroller`'s
+`DynamicScroller` so 500-event histories stay at 60 fps even on
+phones. Scrapers reorder via `vue-draggable-plus` instead of
+up/down arrow buttons.
