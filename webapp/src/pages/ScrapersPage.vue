@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { Cpu, Play, ArrowUp, ArrowDown, KeyRound } from "lucide-vue-next"
+import { computed, onMounted, ref } from 'vue'
+import { Cpu, Play, GripVertical, KeyRound } from "lucide-vue-next"
+import { VueDraggable } from 'vue-draggable-plus'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import Badge from '@/components/ui/Badge.vue'
@@ -97,19 +98,29 @@ async function toggle(name: string) {
   catch (e: any) { toast.error('Toggle failed', String(e?.message ?? e)) }
 }
 
-async function move(name: string, dir: -1 | 1) {
+// Two-way bound array for VueDraggable.
+const orderModel = computed<string[]>({
+  get: () => data.value?.order ?? [],
+  set: (next) => { if (data.value) data.value.order = next },
+})
+
+async function saveOrder() {
   if (!data.value) return
-  const order = [...data.value.order]
-  const i = order.indexOf(name)
-  if (i < 0) return
-  const j = i + dir
-  if (j < 0 || j >= order.length) return
-  ;[order[i], order[j]] = [order[j], order[i]]
   try {
-    await api('/api/scrapers/order', { method: 'POST', body: JSON.stringify({ order }) })
+    await api('/api/scrapers/order', {
+      method: 'POST',
+      body: JSON.stringify({ order: data.value.order }),
+    })
+  } catch (e: any) {
+    toast.error('Reorder failed', String(e?.message ?? e))
     await load()
-  } catch (e: any) { toast.error('Reorder failed', String(e?.message ?? e)) }
+  }
 }
+
+const unusedScrapers = computed<string[]>(() => {
+  if (!data.value) return []
+  return data.value.available.filter((n) => !data.value!.order.includes(n))
+})
 
 async function bench(mode: 'quick' | 'full') {
   benching.value = true
@@ -134,60 +145,60 @@ async function bench(mode: 'quick' | 'full') {
     </div>
     <p class="text-sm text-muted-foreground">Strategy order = priority. Pipeline tries each enabled strategy in turn.</p>
 
-    <Card class="overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="text-xs text-muted-foreground border-b border-border">
-          <tr class="text-left">
-            <th class="px-4 py-3 w-10">#</th>
-            <th class="px-4 py-3">Strategy</th>
-            <th class="px-4 py-3">State</th>
-            <th class="px-4 py-3">Success (30d)</th>
-            <th class="px-4 py-3">Recent</th>
-            <th class="px-4 py-3 text-right">Order</th>
-            <th class="px-4 py-3 text-right">Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(name, idx) in data.order" :key="name" class="border-b border-border/60 last:border-0">
-            <td class="px-4 py-3 text-muted-foreground">{{ idx + 1 }}</td>
-            <td class="px-4 py-3 font-mono">{{ name }}</td>
-            <td class="px-4 py-3">
-              <Badge :variant="data.enabled[name] ? 'success' : 'muted'">
-                {{ data.enabled[name] ? 'enabled' : 'disabled' }}
-              </Badge>
-            </td>
-            <td class="px-4 py-3">{{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}%</td>
-            <td class="px-4 py-3">
-              <div class="flex items-center gap-1">
-                <span v-for="(e, i) in (history[name] ?? [])" :key="i"
-                  :title="`${e.query} — ${e.success ? 'OK' : 'fail'}${e.duration_ms ? ' (' + e.duration_ms + 'ms)' : ''}`"
-                  :class="['inline-block w-2.5 h-2.5 rounded-full',
-                          e.success ? 'bg-emerald-500' : 'bg-red-500']"></span>
-                <span v-if="!(history[name] ?? []).length" class="text-xs text-muted-foreground">no runs</span>
-              </div>
-            </td>
-            <td class="px-4 py-3 text-right">
-              <Button size="sm" variant="ghost" :disabled="idx === 0" @click="move(name, -1)"><ArrowUp class="w-3.5 h-3.5" /></Button>
-              <Button size="sm" variant="ghost" :disabled="idx === data.order.length - 1" @click="move(name, 1)"><ArrowDown class="w-3.5 h-3.5" /></Button>
-            </td>
-            <td class="px-4 py-3 text-right">
-              <Button size="sm" variant="outline" @click="toggle(name)">{{ data.enabled[name] ? 'Disable' : 'Enable' }}</Button>
-            </td>
-          </tr>
-          <tr v-for="name in (data?.available ?? []).filter(n => !(data?.order ?? []).includes(n))" :key="name"
-              class="border-b border-border/60 last:border-0 opacity-60">
-            <td class="px-4 py-3 text-muted-foreground">—</td>
-            <td class="px-4 py-3 font-mono">{{ name }}</td>
-            <td class="px-4 py-3"><Badge variant="muted">unused</Badge></td>
-            <td class="px-4 py-3">{{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}%</td>
-            <td class="px-4 py-3 text-xs text-muted-foreground">no runs</td>
-            <td></td><td class="px-4 py-3 text-right">
-              <Button size="sm" variant="outline" @click="toggle(name)">Enable</Button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </Card>
+    <VueDraggable
+      v-model="orderModel"
+      handle=".drag-handle"
+      :animation="180"
+      class="space-y-2"
+      @update="saveOrder"
+    >
+      <div
+        v-for="(name, idx) in orderModel"
+        :key="name"
+        class="flex items-center gap-3 bg-card border border-border rounded-lg p-3"
+      >
+        <GripVertical class="drag-handle w-5 h-5 text-muted-foreground cursor-grab shrink-0 touch-none" />
+        <span class="text-xs text-muted-foreground font-mono w-5 text-center shrink-0">{{ idx + 1 }}</span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <h4 class="font-mono text-sm break-all">{{ name }}</h4>
+            <Badge :variant="data.enabled[name] ? 'success' : 'muted'">
+              {{ data.enabled[name] ? 'enabled' : 'disabled' }}
+            </Badge>
+          </div>
+          <p class="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
+            <span>{{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)</span>
+            <span v-if="(history[name] ?? []).length" class="inline-flex items-center gap-0.5">
+              <span v-for="(e, i) in (history[name] ?? [])" :key="i"
+                :title="`${e.query} — ${e.success ? 'OK' : 'fail'}${e.duration_ms ? ' (' + e.duration_ms + 'ms)' : ''}`"
+                :class="['inline-block w-2 h-2 rounded-full',
+                        e.success ? 'bg-emerald-500' : 'bg-red-500']"></span>
+            </span>
+          </p>
+        </div>
+        <Button size="sm" variant="outline" class="shrink-0" @click="toggle(name)">
+          {{ data.enabled[name] ? 'Disable' : 'Enable' }}
+        </Button>
+      </div>
+    </VueDraggable>
+
+    <div v-if="unusedScrapers.length" class="space-y-2">
+      <p class="text-xs text-muted-foreground px-1">Unused — enable to add to the chain.</p>
+      <div v-for="name in unusedScrapers" :key="name"
+           class="flex items-center gap-3 bg-card border border-border rounded-lg p-3 opacity-60">
+        <span class="w-5 text-center text-muted-foreground shrink-0">—</span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <h4 class="font-mono text-sm break-all">{{ name }}</h4>
+            <Badge variant="muted">unused</Badge>
+          </div>
+          <p class="text-[11px] text-muted-foreground">
+            {{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)
+          </p>
+        </div>
+        <Button size="sm" variant="outline" class="shrink-0" @click="toggle(name)">Enable</Button>
+      </div>
+    </div>
 
     <Card class="p-4">
       <div class="flex items-center gap-2 mb-3">
@@ -214,7 +225,7 @@ async function bench(mode: 'quick' | 'full') {
         domain, and caches it for ~30 days. Stored encrypted in <code class="font-mono">library.db</code>;
         only used when zlib_singlelogin is in the scraper chain.
       </p>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label class="text-xs space-y-1">
           <span class="text-muted-foreground">Z-Library email</span>
           <input v-model="zlibEmail" type="email" autocomplete="email"
