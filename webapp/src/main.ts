@@ -3,6 +3,7 @@ import { createPinia } from "pinia"
 import { createRouter, createWebHistory } from "vue-router"
 
 import App from "./App.vue"
+import { registerSW } from 'virtual:pwa-register'
 import "./styles/app.css"
 import { applyTint, readSavedTint } from "@/composables/useTint"
 
@@ -32,4 +33,6 @@ applyTint(readSavedTint())
 const app = createApp(App)
 app.use(createPinia())
 app.use(router)
+if (import.meta.env.PROD) { registerSW({ immediate: true }) }
+
 app.mount("#app")

@@ -166,8 +166,24 @@ def create_app(*, cfg: Config, deps: PipelineDeps, config_path: Path) -> FastAPI
     if dist.exists():
         app.mount("/assets", StaticFiles(directory=dist / "assets"), name="spa-assets")
 
+        # Phase 6t.3: serve PWA root files (manifest.webmanifest, sw.js,
+        # workbox-*.js, registerSW.js, icons) directly from dist. The
+        # SPA catch-all below would otherwise return index.html for these.
+        _PWA_ROOT_FILES = {
+            "manifest.webmanifest", "sw.js", "registerSW.js",
+            "favicon.ico", "favicon.svg",
+            "pwa-icon-source.svg",
+            "pwa-64x64.png", "pwa-192x192.png", "pwa-512x512.png",
+            "apple-touch-icon-180x180.png",
+        }
+
         @app.get("/{path:path}")
         def spa(path: str):
+            # PWA root files
+            if path in _PWA_ROOT_FILES or path.startswith("workbox-"):
+                file = dist / path
+                if file.exists():
+                    return FileResponse(file)
             return FileResponse(dist / "index.html")
 
     return app
