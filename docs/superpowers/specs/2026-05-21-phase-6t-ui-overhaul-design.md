@@ -281,3 +281,79 @@ any two without losing functionality.
 - Multi-language i18n (single locale today)
 - Animated route transitions (Tailwind v4 has them; we evaluate after the v4 migration)
 - Custom font (we keep Inter / system stack from BookOrbit)
+
+## BookOrbit's actual frontend stack (from `client/package.json`)
+
+Pulled live from `github.com/bookorbit/bookorbit` `client/package.json`
+(verified 2026-05-21). Side-by-side with biblichor today:
+
+| Library | BookOrbit | biblichor today | Action in 6t |
+|---|---|---|---|
+| vue | ^3.5.34 | ^3.5.34 | keep |
+| pinia | ^3.0.4 | ^3.0.4 | keep |
+| vue-router | ^5.0.7 | ^4.6.4 | **bump to 5.0.7** (Phase 6t.0) |
+| tailwindcss | ^4.3.0 | ^3.4.19 | **bump to v4** (Phase 6t.1) |
+| @tailwindcss/vite | ^4.3.0 | n/a | **add** (replaces postcss config) |
+| vite | ^8.0.13 | ^8.0.12 | bump (trivial) |
+| reka-ui | ^2.9.7 | radix-vue ^1.9.17 | **migrate** — radix-vue was renamed to reka-ui in v2; the shadcn-vue components reference the underlying primitive lib |
+| vite-plugin-pwa | ^1.3.0 | n/a | **add** (Phase 6t.3) |
+| @vite-pwa/assets-generator | ^1.0.2 | n/a | **add** (icon generation, Phase 6t.3) |
+| lucide-vue-next | ^1.0.0 | ^1.0.0 | keep |
+| @tanstack/vue-virtual | ^3.13.24 | ^3.13.24 | keep |
+| class-variance-authority | ^0.7.1 | ^0.7.1 | keep |
+| clsx | ^2.1.1 | ^2.1.1 | keep |
+| tailwind-merge | ^3.6.0 | ^3.6.0 | keep |
+| @vueuse/core | ^14.3.0 | ^14.3.0 | keep |
+
+### New libs we'll adopt from BookOrbit (worth it for parity)
+
+| Library | Why | Used where in biblichor |
+|---|---|---|
+| **`vue-sonner` ^2.0.9** | Toast library BookOrbit uses. Style matches across the two apps. Replaces our custom `Toaster.vue`. | Global toasts on every page |
+| **`@fontsource-variable/inter` ^5.2.8** | Bundled variable-weight Inter font. Same typography as BookOrbit; no Google Fonts CDN dependency. | Replaces system font stack |
+| **`@fontsource-variable/fraunces` ^5.2.9** | BookOrbit's serif accent (used in titles). Optional adoption — biblichor can use Inter only and still feel close. | Skip unless we add headlines |
+| **`@tanstack/vue-table` ^8.21.3** | Real table library with sort/filter/virtualization. Cleaner than our hand-rolled `<table>` in Queue/Mirrors. | Phase 6t.4 Queue / Mirrors |
+| **`vue-virtual-scroller` ^3.0.3** | Virtualized infinite list — needed for Logs page when event count grows. | Phase 6t.6 Logs |
+| **`vue-draggable-plus` ^0.6.1** | Drag-to-reorder. We already need this on Scrapers (today we use up/down buttons). | Phase 6t.5 Scrapers |
+| **`tw-animate-css` ^1.4.0** | The drop-in replacement for `tailwindcss-animate` we use today (which doesn't ship for v4). | Phase 6t.1 replaces our current animate plugin |
+
+### Adopt-or-skip (BookOrbit has, biblichor probably doesn't need)
+
+| Library | Reason to skip |
+|---|---|
+| `@embedpdf/vue-pdf-viewer` | BookOrbit is a reader; biblichor doesn't display files |
+| `howler` (audio) | No audio in biblichor |
+| `canvas-confetti` | No celebration moments we need |
+| `dompurify` | We don't render user-supplied HTML |
+| `driver.js` | Onboarding tour — could add later, out of 6t scope |
+| `echarts` + `vue-echarts` | Bench history chart could use this; **defer to 6t.6** as a polish item |
+
+### Tooling differences
+
+| | BookOrbit | biblichor today |
+|---|---|---|
+| Linter | oxlint + eslint + prettier | none (just vue-tsc for type check) |
+| Test runner | vitest + jsdom | none |
+| Type config | `@tsconfig/node24` | `@vue/tsconfig` |
+
+For Phase 6t we'll match the linter setup at the end (Phase 6t.8
+polish) — adding oxlint + eslint + prettier as a single commit.
+Vitest is left as a future phase (no UI unit tests today; backend
+tests stay in pytest).
+
+## Updated sub-phase order (now that 6t.0 router bump precedes shell rewrite)
+
+| Phase | Scope | Days |
+|---|---|---|
+| **6t.0** | vue-router 4 -> 5 bump. Audit router config + RouterView usage. Single dep change + path test. | 0.5d |
+| **6t.1** | Tailwind v3 -> v4 + `@tailwindcss/vite` plugin + `theme.css` (oklch + tintable hue) + replace `tailwindcss-animate` with `tw-animate-css` + bundle `@fontsource-variable/inter`. | 1.5d |
+| **6t.1b** | radix-vue -> reka-ui migration (shadcn-vue primitives). One commit per primitive (Button, Card, Dialog, etc.) with snapshot check. | 0.5d |
+| **6t.2** | App shell rewrite. Side-rail >=768px, bottom scroll-strip <768px. | 1d |
+| **6t.3** | PWA — manifest, service worker via vite-plugin-pwa, icons via @vite-pwa/assets-generator, install prompt. | 0.5d |
+| **6t.4** | Mobile passes: Queue (with @tanstack/vue-table), Sources, Library. | 1.5d |
+| **6t.5** | Mobile passes: Scrapers (with vue-draggable-plus drag-reorder), Mirrors, Settings. | 1d |
+| **6t.6** | Mobile passes: Scoring, Schedule, Logs (with vue-virtual-scroller). Optional bench history chart with echarts/vue-echarts. | 1d |
+| **6t.7** | Hue picker on Settings + vue-sonner migration for toasts. | 0.5d |
+| **6t.8** | Live verification (mobile + desktop), iOS PWA install test, optional eslint + oxlint + prettier setup, doctor sweep, wiki. | 0.5d |
+
+**Total: ~8d** (was ~7.5d; +0.5d for router bump + reka-ui migration + adopting their tooling).
