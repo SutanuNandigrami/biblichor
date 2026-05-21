@@ -1,69 +1,71 @@
 /* webapp/src/styles/theme.css
  *
- * Phase 6t.1: design tokens for biblichor.
- *
- * Adopts BookOrbit's oklch + tintable-hue scheme so the two apps feel
- * like one product. --tint-h is a runtime variable the user can change
- * via the Settings hue picker (Phase 6t.7); the default is BookOrbit's
- * blue (265). Light + dark variants share the same hue; only L and
- * chroma differ.
+ * Phase 6t.3.1 hotfix: chroma raised so the tint is visible
+ * (was 0.005 - basically achromatic). Primary now has real
+ * saturation so buttons, badges, active nav items pop.
  */
 
 :root {
   --tint-h: 265;
-  --tint-c-surface: 0.005;
-  --tint-c-content: 0.001;
+  /* Surface chroma raised from 0.005 -> 0.018 so light bg has a
+     visible blue/purple cast. Still very subtle, but no longer
+     pure white. */
+  --tint-c-surface: 0.018;
+  --tint-c-content: 0.005;
   --bg-lift: 0;
   --radius: 8px;
 
-  --background:           oklch(0.99  var(--tint-c-surface) var(--tint-h));
-  --foreground:           oklch(0.145 var(--tint-c-surface) var(--tint-h));
-  --card:                 oklch(0.975 var(--tint-c-surface) var(--tint-h));
-  --card-foreground:      oklch(0.145 var(--tint-c-surface) var(--tint-h));
-  --popover:              oklch(0.975 var(--tint-c-surface) var(--tint-h));
-  --popover-foreground:   oklch(0.145 var(--tint-c-surface) var(--tint-h));
-  --primary:              oklch(0.21  var(--tint-c-surface) var(--tint-h));
-  --primary-foreground:   oklch(0.985 0.004 var(--tint-h));
-  --secondary:            oklch(0.955 var(--tint-c-surface) var(--tint-h));
-  --secondary-foreground: oklch(0.21  var(--tint-c-surface) var(--tint-h));
-  --muted:                oklch(0.955 var(--tint-c-surface) var(--tint-h));
-  --muted-foreground:     oklch(0.52  0.001 var(--tint-h));
-  --accent:               oklch(0.955 var(--tint-c-surface) var(--tint-h));
-  --accent-foreground:    oklch(0.21  var(--tint-c-surface) var(--tint-h));
+  /* Light mode: bg slightly off-white with the tint, card slightly
+     warmer than bg so the card hierarchy is visible. */
+  --background:           oklch(0.985 var(--tint-c-surface) var(--tint-h));
+  --foreground:           oklch(0.18  0.03  var(--tint-h));
+  --card:                 oklch(1     0     0);
+  --card-foreground:      oklch(0.18  0.03  var(--tint-h));
+  --popover:              oklch(1     0     0);
+  --popover-foreground:   oklch(0.18  0.03  var(--tint-h));
+  /* Primary now has real chroma (0.16) so buttons + active nav
+     items + status badges are visibly tinted. Was 0.005 (gray). */
+  --primary:              oklch(0.55  0.16  var(--tint-h));
+  --primary-foreground:   oklch(0.99  0.005 var(--tint-h));
+  --secondary:            oklch(0.945 var(--tint-c-surface) var(--tint-h));
+  --secondary-foreground: oklch(0.21  0.03  var(--tint-h));
+  --muted:                oklch(0.94  var(--tint-c-surface) var(--tint-h));
+  --muted-foreground:     oklch(0.52  0.02  var(--tint-h));
+  --accent:               oklch(0.93  0.04  var(--tint-h));
+  --accent-foreground:    oklch(0.21  0.03  var(--tint-h));
   --destructive:          oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --border:               oklch(0.878 var(--tint-c-surface) var(--tint-h));
-  --input:                oklch(0.878 var(--tint-c-surface) var(--tint-h));
-  --ring:                 oklch(0.708 var(--tint-c-surface) var(--tint-h));
+  --border:               oklch(0.88  0.01  var(--tint-h));
+  --input:                oklch(0.88  0.01  var(--tint-h));
+  --ring:                 oklch(0.55  0.16  var(--tint-h));
 }
 
 .dark {
   --bg-lift: 0;
-
-  --background:           oklch(calc(0.145 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
-  --foreground:           oklch(0.985 0.001 var(--tint-h));
-  --card:                 oklch(calc(0.18  + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
-  --card-foreground:      oklch(0.985 0.001 var(--tint-h));
-  --popover:              oklch(calc(0.18  + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
-  --popover-foreground:   oklch(0.985 0.001 var(--tint-h));
-  --primary:              oklch(0.91  var(--tint-c-surface) var(--tint-h));
-  --primary-foreground:   oklch(0.18  var(--tint-c-surface) var(--tint-h));
-  --secondary:            oklch(calc(0.245 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
-  --secondary-foreground: oklch(0.985 0.001 var(--tint-h));
-  --muted:                oklch(calc(0.245 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
-  --muted-foreground:     oklch(0.725 0.001 var(--tint-h));
-  --accent:               oklch(calc(0.245 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
-  --accent-foreground:    oklch(0.985 0.001 var(--tint-h));
+  /* Dark mode: bg is a tinted near-black; card sits a step lighter
+     so cards visibly float above the background. Primary in dark
+     mode is lighter so it stands out on the dark bg. */
+  --background:           oklch(0.155 0.012 var(--tint-h));
+  --foreground:           oklch(0.97  0.01  var(--tint-h));
+  --card:                 oklch(0.20  0.014 var(--tint-h));
+  --card-foreground:      oklch(0.97  0.01  var(--tint-h));
+  --popover:              oklch(0.20  0.014 var(--tint-h));
+  --popover-foreground:   oklch(0.97  0.01  var(--tint-h));
+  --primary:              oklch(0.72  0.15  var(--tint-h));
+  --primary-foreground:   oklch(0.18  0.03  var(--tint-h));
+  --secondary:            oklch(0.27  0.018 var(--tint-h));
+  --secondary-foreground: oklch(0.97  0.01  var(--tint-h));
+  --muted:                oklch(0.25  0.016 var(--tint-h));
+  --muted-foreground:     oklch(0.72  0.015 var(--tint-h));
+  --accent:               oklch(0.31  0.04  var(--tint-h));
+  --accent-foreground:    oklch(0.97  0.01  var(--tint-h));
   --destructive:          oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
-  --border:               oklch(1 0 0 / 0.1);
-  --input:                oklch(1 0 0 / 0.15);
-  --ring:                 oklch(0.556 0 0);
+  --border:               oklch(0.33  0.02  var(--tint-h));
+  --input:                oklch(0.30  0.02  var(--tint-h));
+  --ring:                 oklch(0.72  0.15  var(--tint-h));
 }
 
-/* Tailwind v4 @theme block - registers utility-class color names that
- * map to the variables above. Classes like `bg-background`,
- * `text-foreground`, `bg-card`, `border-border`, etc. work as-is. */
 @theme inline {
   --color-background:           var(--background);
   --color-foreground:           var(--foreground);

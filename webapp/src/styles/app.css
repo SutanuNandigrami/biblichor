@@ -14,6 +14,13 @@ html {
 
 html, body, #app { height: 100%; min-height: 100dvh; }
 
+/* Phase 6t.3.1 hotfix: clip horizontal overflow so pages with
+   wide tables (Queue/Schedule/Logs etc.) don't make the whole
+   viewport horizontally scroll on phones. */
+html, body {
+  overflow-x: hidden;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
@@ -22,4 +29,39 @@ body {
 :root {
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-top: env(safe-area-inset-top, 0px);
+}
+
+/* Phase 6t.3.1: any page-root .p-6 collapses to p-3 on narrow
+   so cards have breathing room instead of touching the edges.
+   This is a global rule because we haven't done the per-page
+   mobile passes yet (those are 6t.4-6t.6). */
+@media (max-width: 767px) {
+  main > div.p-6,
+  main > div.p-4,
+  main > div.p-8 {
+    padding: 0.75rem;
+  }
+
+  /* Tables on mobile: allow horizontal scroll inside the card
+     container so long rows are reachable via swipe but the page
+     itself doesn't blow out. */
+  main table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  /* Wide toolbars (search + filters + buttons in a row) wrap to
+     multiple lines on phones. */
+  main .flex.items-center.gap-2,
+  main .flex.items-center.gap-3 {
+    flex-wrap: wrap;
+  }
+
+  /* H1 page titles slightly smaller on mobile so a "Scrapers ..." +
+     "Run now" combo doesn't overflow. */
+  main h1.text-2xl {
+    font-size: 1.25rem;
+    line-height: 1.5rem;
+  }
 }
