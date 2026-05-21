@@ -10,7 +10,7 @@ import { api } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 
 type Source = { id: number; source: string; identifier: string; enabled: boolean; poll_interval_minutes: number; last_polled_at: string | null; token: string | null }
-type SourceType = 'goodreads' | 'goodreads_listopia' | 'goodreads_series' | 'hardcover' | 'nyt' | 'storygraph' | 'bookwyrm' | 'wikidata'
+type SourceType = 'goodreads' | 'goodreads_listopia' | 'goodreads_series' | 'hardcover' | 'nyt' | 'storygraph' | 'bookwyrm' | 'wikidata' | 'kindlebangla'
 
 const TYPE_OPTIONS: { value: SourceType; label: string }[] = [
   { value: 'goodreads',          label: 'Goodreads shelf' },
@@ -21,6 +21,7 @@ const TYPE_OPTIONS: { value: SourceType; label: string }[] = [
   { value: 'storygraph',         label: 'StoryGraph' },
   { value: 'bookwyrm',           label: 'BookWyrm (Fediverse)' },
   { value: 'wikidata',           label: 'Wikidata follow author' },
+  { value: 'kindlebangla',       label: 'KindleBangla (whole catalog)' },
 ]
 
 const sources = ref<Source[]>([])
@@ -216,6 +217,17 @@ async function del(s: Source) {
           <p class="text-[11px] text-muted-foreground mt-1">
             E.g. <code>Q36322</code> for Jane Austen, <code>Q5950</code> for Charles Dickens.
             Returns every literary work by the author via SPARQL.
+          </p>
+        </div>
+        <div v-else-if="newType === 'kindlebangla'">
+          <label class="block text-xs text-muted-foreground mb-1">Scope</label>
+          <Input v-model="newId" placeholder="full" />
+          <p class="text-[11px] text-muted-foreground mt-1">
+            Use <code>full</code> for the whole kindlebangla.com catalog, or
+            <code>category:&lt;slug&gt;</code> to limit (e.g. <code>category:উপন্যাস</code>).
+            First poll walks every category — can queue thousands of books and
+            run for ~1–2 hours. Subsequent polls only re-walk to dedup.
+            Each book is auto-picked and sent to Kindle + BookOrbit.
           </p>
         </div>
 

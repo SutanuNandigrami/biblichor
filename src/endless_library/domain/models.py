@@ -11,7 +11,7 @@ class BookRef:
     title: str
     author: str | None
     isbn13: str | None
-    source: Literal["goodreads", "hardcover", "manual", "nyt", "storygraph", "bookwyrm", "wikidata"]
+    source: Literal["goodreads", "hardcover", "manual", "nyt", "storygraph", "bookwyrm", "wikidata", "kindlebangla"]
     source_id: str
     source_added_at: str | None = None
 

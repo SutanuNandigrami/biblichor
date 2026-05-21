@@ -210,8 +210,9 @@ def _search_with_strategies(
         and (book.pub_year or 0) > 0
         and book.pub_year < 1928
     )
-    for s_name in scrapers_registry.pd_aware_order(
-        deps.cfg.scrapers, query_title=book.title or "", is_pd=_is_pd
+    _book_source = getattr(book, "source", None)
+    for s_name in scrapers_registry.chain_for_source(
+        deps.cfg.scrapers, source=_book_source, query_title=book.title or "", is_pd=_is_pd
     ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
@@ -324,8 +325,9 @@ def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Pa
         and (book.pub_year or 0) > 0
         and book.pub_year < 1928
     )
-    for s_name in scrapers_registry.pd_aware_order(
-        deps.cfg.scrapers, query_title=book.title or "", is_pd=_is_pd
+    _book_source = getattr(book, "source", None)
+    for s_name in scrapers_registry.chain_for_source(
+        deps.cfg.scrapers, source=_book_source, query_title=book.title or "", is_pd=_is_pd
     ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
@@ -482,6 +484,13 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
     else:
         floor = cfg_g.min_score_for_failure
         threshold = cfg_g.auto_pick_threshold
+    # Phase 6u: kindlebangla emits per-book slugs that the companion
+    # scraper resolves directly. There is no other ladder to compare
+    # against, so we force auto-pick regardless of the score (which will
+    # be near zero — no ISBN, Bengali title, no Latin author similarity).
+    if getattr(book, "source", None) == "kindlebangla":
+        floor = 0.0
+        threshold = 0.0
     # Phase 3b: feed identity signals from the top candidate's breakdown
     # into decide_auto_pick so it can override on rock-solid ISBN+title.
     top_breakdown = scored[0][2]
