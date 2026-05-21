@@ -40,6 +40,10 @@ body {
   main > div.p-4,
   main > div.p-8 {
     padding: 0.75rem;
+    /* Bottom nav (~64px) + FAB (~56px Run-now button at bottom-right) +
+       safe-area inset would otherwise hide the last card. Leave ~6.5rem
+       of breathing room so the final list item is fully tappable. */
+    padding-bottom: calc(6.5rem + var(--safe-area-bottom));
   }
 
   /* Tables on mobile: allow horizontal scroll inside the card

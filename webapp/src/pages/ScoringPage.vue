@@ -153,7 +153,7 @@ function size(b: number | null) {
 
           <div>
             <label class="text-sm font-semibold mb-2 block">Format bonus</label>
-            <div class="grid grid-cols-4 gap-3">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div v-for="fmt in ['epub', 'azw3', 'mobi', 'pdf']" :key="fmt">
                 <div class="flex justify-between text-xs">
                   <span class="font-mono">{{ fmt }}</span>
@@ -166,7 +166,7 @@ function size(b: number | null) {
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="text-xs text-muted-foreground">filesize_min_bytes</label>
               <Input v-model.number="weights.filesize_min_bytes" type="number" />
