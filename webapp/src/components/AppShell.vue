@@ -20,7 +20,8 @@ import {
   Library as LibraryIcon,
   Clock,
 } from "lucide-vue-next"
-import Toaster from "@/components/ui/Toaster.vue"
+import { Toaster } from 'vue-sonner'
+import 'vue-sonner/style.css'
 import Button from "@/components/ui/Button.vue"
 import BottomNav from "@/components/BottomNav.vue"
 import MobileHeader from "@/components/MobileHeader.vue"
@@ -78,7 +79,18 @@ async function onRun() {
 </script>
 
 <template>
-  <Toaster />
+  <Toaster
+    position="top-right"
+    rich-colors
+    close-button
+    :toast-options="{
+      classes: {
+        toast: 'bg-card text-card-foreground border border-border shadow-lg',
+        title: 'font-medium text-sm',
+        description: 'text-xs text-muted-foreground',
+      },
+    }"
+  />
   <div class="min-h-dvh bg-background text-foreground">
     <!-- Desktop side-rail (>= md) -->
     <aside
