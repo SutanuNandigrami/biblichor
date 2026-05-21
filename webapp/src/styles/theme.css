@@ -1,0 +1,92 @@
+/* webapp/src/styles/theme.css
+ *
+ * Phase 6t.1: design tokens for biblichor.
+ *
+ * Adopts BookOrbit's oklch + tintable-hue scheme so the two apps feel
+ * like one product. --tint-h is a runtime variable the user can change
+ * via the Settings hue picker (Phase 6t.7); the default is BookOrbit's
+ * blue (265). Light + dark variants share the same hue; only L and
+ * chroma differ.
+ */
+
+:root {
+  --tint-h: 265;
+  --tint-c-surface: 0.005;
+  --tint-c-content: 0.001;
+  --bg-lift: 0;
+  --radius: 8px;
+
+  --background:           oklch(0.99  var(--tint-c-surface) var(--tint-h));
+  --foreground:           oklch(0.145 var(--tint-c-surface) var(--tint-h));
+  --card:                 oklch(0.975 var(--tint-c-surface) var(--tint-h));
+  --card-foreground:      oklch(0.145 var(--tint-c-surface) var(--tint-h));
+  --popover:              oklch(0.975 var(--tint-c-surface) var(--tint-h));
+  --popover-foreground:   oklch(0.145 var(--tint-c-surface) var(--tint-h));
+  --primary:              oklch(0.21  var(--tint-c-surface) var(--tint-h));
+  --primary-foreground:   oklch(0.985 0.004 var(--tint-h));
+  --secondary:            oklch(0.955 var(--tint-c-surface) var(--tint-h));
+  --secondary-foreground: oklch(0.21  var(--tint-c-surface) var(--tint-h));
+  --muted:                oklch(0.955 var(--tint-c-surface) var(--tint-h));
+  --muted-foreground:     oklch(0.52  0.001 var(--tint-h));
+  --accent:               oklch(0.955 var(--tint-c-surface) var(--tint-h));
+  --accent-foreground:    oklch(0.21  var(--tint-c-surface) var(--tint-h));
+  --destructive:          oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border:               oklch(0.878 var(--tint-c-surface) var(--tint-h));
+  --input:                oklch(0.878 var(--tint-c-surface) var(--tint-h));
+  --ring:                 oklch(0.708 var(--tint-c-surface) var(--tint-h));
+}
+
+.dark {
+  --bg-lift: 0;
+
+  --background:           oklch(calc(0.145 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --foreground:           oklch(0.985 0.001 var(--tint-h));
+  --card:                 oklch(calc(0.18  + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --card-foreground:      oklch(0.985 0.001 var(--tint-h));
+  --popover:              oklch(calc(0.18  + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --popover-foreground:   oklch(0.985 0.001 var(--tint-h));
+  --primary:              oklch(0.91  var(--tint-c-surface) var(--tint-h));
+  --primary-foreground:   oklch(0.18  var(--tint-c-surface) var(--tint-h));
+  --secondary:            oklch(calc(0.245 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --secondary-foreground: oklch(0.985 0.001 var(--tint-h));
+  --muted:                oklch(calc(0.245 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --muted-foreground:     oklch(0.725 0.001 var(--tint-h));
+  --accent:               oklch(calc(0.245 + var(--bg-lift)) var(--tint-c-surface) var(--tint-h));
+  --accent-foreground:    oklch(0.985 0.001 var(--tint-h));
+  --destructive:          oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border:               oklch(1 0 0 / 0.1);
+  --input:                oklch(1 0 0 / 0.15);
+  --ring:                 oklch(0.556 0 0);
+}
+
+/* Tailwind v4 @theme block - registers utility-class color names that
+ * map to the variables above. Classes like `bg-background`,
+ * `text-foreground`, `bg-card`, `border-border`, etc. work as-is. */
+@theme inline {
+  --color-background:           var(--background);
+  --color-foreground:           var(--foreground);
+  --color-card:                 var(--card);
+  --color-card-foreground:      var(--card-foreground);
+  --color-popover:              var(--popover);
+  --color-popover-foreground:   var(--popover-foreground);
+  --color-primary:              var(--primary);
+  --color-primary-foreground:   var(--primary-foreground);
+  --color-secondary:            var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted:                var(--muted);
+  --color-muted-foreground:     var(--muted-foreground);
+  --color-accent:               var(--accent);
+  --color-accent-foreground:    var(--accent-foreground);
+  --color-destructive:          var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border:               var(--border);
+  --color-input:                var(--input);
+  --color-ring:                 var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
