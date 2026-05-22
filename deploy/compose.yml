@@ -70,6 +70,19 @@ services:
       # pre-compose installs.
       FLARESOLVERR_URL: "http://flaresolverr:8191/v1"
       BOOKORBIT_URL: "${BOOKORBIT_URL:-http://bookorbit:3000}"
+      # Phase 6v.1 hotfix: relative bind-mount paths in compose.yml
+      # (e.g. ../data/bookorbit-db) resolve against the project
+      # directory the docker daemon is told about, NOT against
+      # /app/deploy/compose.yml inside the biblichor container. If
+      # apply_upgrade runs `docker compose -f /app/deploy/compose.yml`
+      # without --project-directory, the daemon defaults to the
+      # compose-file dir (/app/deploy) and the relative volumes end
+      # up at /app/data — a brand-new empty directory instead of the
+      # real persistent data. We pass the host-side repo path here
+      # so apply_upgrade can forward it as --project-directory.
+      # ${PWD} substitutes at compose-up time to the directory the
+      # user invoked compose from (which is the repo root).
+      HOST_REPO_PATH: "${PWD}"
     depends_on:
       flaresolverr:
         condition: service_healthy

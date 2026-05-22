@@ -265,6 +265,96 @@ services:
     assert "pgvector/pgvector:pg16" in new  # untouched
 
 
+def test_apply_upgrade_passes_project_directory_to_compose(tmp_path: Path, monkeypatch):
+    """Regression: live apply on 2026-05-22 ran `docker compose -f
+    /app/deploy/compose.yml` from inside biblichor without
+    --project-directory, so the docker daemon resolved relative bind-
+    mount paths (../data/bookorbit-db) against /app/deploy/ and ended
+    up writing to a brand-new empty /app/data/bookorbit-db on the host
+    instead of the real persistent data at /home/ubuntu/<repo>/data/
+    bookorbit-db. Every `docker compose` invocation in apply_upgrade
+    must now include --project-directory <host-repo-root>.
+    """
+    monkeypatch.setenv("HOST_REPO_PATH", "/home/me/repo")
+    compose, env_file = _seed_compose(tmp_path)
+    runner = FakeDockerRunner(available=True)
+    import os as _os
+
+    runner.respond_to_file(
+        ["exec", "biblichor-bookorbit-db"], (0, ""), gzip.compress(_os.urandom(4096))
+    )
+    runner.respond(["compose"], (0, "Started", ""))
+
+    with patch("endless_library.bookorbit.upgrade.httpx.get") as fake_get:
+        fake_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"info": {"database": {"status": "up"}}, "version": "v1.3.0"},
+        )
+        apply_upgrade(
+            "1.3.0",
+            submitted_token="ok",
+            expected_token="ok",
+            preflight_expires_at=time.time() + 600,
+            compose_path=compose,
+            env_file=env_file,
+            runner=runner,
+            backup_dir=tmp_path / "backups",
+            poll_timeout=5,
+            poll_interval=1,
+        )
+
+    # At least one docker compose call must carry --project-directory
+    # and the host-side repo root (NOT compose.parent which would be
+    # /app/deploy from inside the container).
+    compose_calls = [args for args in runner.calls if args and args[0] == "compose"]
+    assert compose_calls, "no docker compose calls were made"
+    for args in compose_calls:
+        assert "--project-directory" in args, f"compose call missing flag: {args}"
+        idx = args.index("--project-directory")
+        assert args[idx + 1] == "/home/me/repo", (
+            f"--project-directory not pointing at HOST_REPO_PATH: {args}"
+        )
+
+
+def test_swap_compose_image_picks_bookorbit_not_tor_sidecar(tmp_path: Path):
+    """Regression: live apply on 2026-05-22 reported
+       'dperson/torproxy:latest -> ghcr.io/bookorbit/bookorbit:1.3.0'
+    because the original (?ms) regex + lazy quantifier slipped past the
+    bookorbit service and hit the tor sidecar's image line further
+    down the file. Multiline-only (no dotall) plus [^\\n]* per
+    iteration keeps the scope line-bounded — this test pins that.
+    """
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        """name: biblichor
+services:
+  bookorbit-db:
+    image: pgvector/pgvector:pg16
+  bookorbit:
+    # Comments + blank lines between header and image: must not
+    # confuse the matcher.
+    image: ghcr.io/bookorbit/bookorbit@sha256:oldbookorbit
+    container_name: biblichor-bookorbit
+    restart: unless-stopped
+  clamav:
+    image: clamav/clamav:latest
+    profiles:
+      - av
+  tor:
+    image: dperson/torproxy:latest
+    profiles:
+      - tor
+""",
+        encoding="utf-8",
+    )
+    old = _swap_compose_image(compose, "ghcr.io/bookorbit/bookorbit:1.3.0")
+    assert old == "ghcr.io/bookorbit/bookorbit@sha256:oldbookorbit"
+    text = compose.read_text(encoding="utf-8")
+    assert "ghcr.io/bookorbit/bookorbit:1.3.0" in text
+    # Tor sidecar image must not have been touched.
+    assert "dperson/torproxy:latest" in text
+
+
 def test_swap_compose_image_returns_none_when_block_missing(tmp_path: Path):
     compose = tmp_path / "compose.yml"
     compose.write_text("services:\n  biblichor:\n    image: foo:bar\n", encoding="utf-8")

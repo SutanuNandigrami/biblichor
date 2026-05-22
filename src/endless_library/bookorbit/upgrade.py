@@ -475,6 +475,36 @@ def _finish_step(step: ApplyStep, *, ok: bool, detail: str = "") -> None:
     step.finished_at = _now_iso()
 
 
+def _compose_args(compose_path: Path, env_file: Path) -> list[str]:
+    """Common prefix for every `docker compose` invocation inside
+    apply_upgrade. Includes --project-directory so the docker daemon
+    resolves relative bind-mount paths (e.g. `../data/bookorbit-db`
+    in compose.yml) against the HOST repo root, not against
+    /app/deploy where biblichor sees the compose file from inside its
+    container.
+
+    The host repo path is passed in via the `HOST_REPO_PATH` env var
+    set in compose.yml; this fails over to the compose file's parent's
+    parent (which is correct on the host but wrong inside the
+    container — only used as a safety net for unit tests).
+    """
+    host_root = os.environ.get("HOST_REPO_PATH")
+    if not host_root:
+        # Best-effort fallback (correct from the host, wrong from
+        # the container). Real production calls always have the env
+        # var set by compose.yml.
+        host_root = str(compose_path.parent.parent)
+    return [
+        "compose",
+        "-f",
+        str(compose_path),
+        "--env-file",
+        str(env_file),
+        "--project-directory",
+        host_root,
+    ]
+
+
 def _read_current_image_ref(
     runner: DockerRunner, container: str = BOOKORBIT_CONTAINER
 ) -> str | None:
@@ -495,8 +525,14 @@ def _swap_compose_image(compose_path: Path, new_image_ref: str) -> str | None:
     # Match the bookorbit service block's `image:` line. The bookorbit
     # service is named exactly `bookorbit` in compose.yml; we anchor on
     # the service header to avoid touching biblichor / flaresolverr.
+    # Critical: use [^\n]* instead of .* so each iteration is one line.
+    # The previous (?ms) flags + .* let dotall slip the lazy quantifier
+    # past the bookorbit service entirely and match the tor sidecar's
+    # image line below it — which on apply would swap dperson/torproxy
+    # instead of BookOrbit. Multiline only (no dotall) keeps the per-
+    # iteration scope strictly line-bounded.
     m = re.search(
-        r"(?ms)^(  bookorbit:\n(?:    .*\n)*?    image:\s*)(\S+)",
+        r"(?m)^(  bookorbit:\n(?:    [^\n]*\n)*?    image:\s*)(\S+)",
         text,
     )
     if not m:
@@ -611,16 +647,8 @@ def apply_upgrade(
         except OSError as e:
             log.error("rollback: compose restore failed: %s", e)
         rc_rb, _, err_rb = runner.run(
-            [
-                "compose",
-                "-f",
-                str(compose_path),
-                "--env-file",
-                str(env_file),
-                "up",
-                "-d",
-                "bookorbit",
-            ],
+            _compose_args(compose_path, env_file)
+            + ["up", "-d", "bookorbit"],
             timeout=300,
         )
         ok_rb = rc_rb == 0
@@ -638,16 +666,8 @@ def apply_upgrade(
     # ---- 3. compose up bookorbit ----
     up_step = _step(result, "compose.up_bookorbit")
     rc, out, err = runner.run(
-        [
-            "compose",
-            "-f",
-            str(compose_path),
-            "--env-file",
-            str(env_file),
-            "up",
-            "-d",
-            "bookorbit",
-        ],
+        _compose_args(compose_path, env_file)
+        + ["up", "-d", "bookorbit"],
         timeout=300,
     )
     if rc != 0:
