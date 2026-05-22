@@ -87,6 +87,13 @@ class SettingsPatch(BaseModel):
     smtp_port: int | None = None
     smtp_user: str | None = None
     smtp_password: str | None = None
+    # Phase 6u.6: provider-switch fields. Previously the SPA could only
+    # set host/port/user/password; starttls + daily_cap + attachment cap
+    # had to be edited by hand in config.yaml. The new provider-preset
+    # dropdown depends on these flowing through.
+    smtp_starttls: bool | None = None
+    smtp_daily_cap: int | None = None
+    smtp_max_attachment_mb: int | None = None
     pushover_enabled: bool | None = None
     pushover_user_key: str | None = None
     pushover_app_token: str | None = None
@@ -704,6 +711,13 @@ def register(app: FastAPI) -> None:
             cfg.smtp.user = (p["smtp_user"] or "").strip()
         if "smtp_password" in p and p["smtp_password"] and p["smtp_password"] != "***":
             cfg.smtp.password = p["smtp_password"].replace(" ", "").strip()
+        # Phase 6u.6: provider-switch fields
+        if "smtp_starttls" in p and p["smtp_starttls"] is not None:
+            cfg.smtp.starttls = bool(p["smtp_starttls"])
+        if "smtp_daily_cap" in p and p["smtp_daily_cap"] is not None:
+            cfg.smtp.daily_cap = max(0, int(p["smtp_daily_cap"]))
+        if "smtp_max_attachment_mb" in p and p["smtp_max_attachment_mb"] is not None:
+            cfg.smtp.max_attachment_mb = max(1, int(p["smtp_max_attachment_mb"]))
         if "pushover_enabled" in p:
             cfg.pushover.enabled = bool(p["pushover_enabled"])
         if "pushover_user_key" in p and p["pushover_user_key"] and p["pushover_user_key"] != "***":

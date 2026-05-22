@@ -180,3 +180,107 @@ shell from cache before re-hydrating from the network.
 `DynamicScroller` so 500-event histories stay at 60 fps even on
 phones. Scrapers reorder via `vue-draggable-plus` instead of
 up/down arrow buttons.
+
+## Phase 6u — Bulk sources, SMTP self-pacing, pipeline hardening
+
+biblichor's source layer can now ingest entire catalogues in one shot,
+the pipeline self-paces against SMTP daily caps, and BookOrbit ingest
+runs ahead of Kindle delivery so the library always fills even when
+email is throttled.
+
+**Bulk source: KindleBangla.** `sources.kindlebangla` walks every
+`/category/<slug>?page=N` on kindlebangla.com and yields one BookRef
+per book card. Identifier accepts `full` (entire catalogue, default)
+or `category:<slug>`. The pipeline detects `source=="kindlebangla"`,
+synthesises a Candidate directly from the per-book slug stored in
+`books.goodreads_id`, and routes straight to `kindlebangla_curl` —
+bypassing the brittle site search that misses long Bengali titles and
+slug-disambiguator suffixes (`-1`, `-2`). Auto-pick floor and threshold
+are forced to 0 for this source because the Bengali titles bottom-out
+the Latin-tuned scorer.
+
+**SMTP daily-cap gate.** `cfg.smtp.daily_cap` (default 80, 0 disables)
+governs how many Kindle SMTP sends the pipeline emits per rolling 24h.
+`smtp_rate.quota_status(db_path, daily_cap)` counts `kind='send'`
+events in the window; when the cap is reached, `process_one` emits a
+`send_deferred` event and returns `'deferred'` instead of calling
+`send_to_kindle`. Server-side throttle responses (Gmail's 421 / 452
+/ 550 5.4.5 / 4.7.28) are also caught as `KindleRateLimited` and
+deferred the same way. `/healthz` now includes
+`smtp: {sent_24h, cap, remaining, exhausted}` and a mailbox pill in
+the desktop top header polls it every 60s.
+
+**GUI SMTP provider swap.** Settings page exposes a Provider preset
+dropdown (Gmail, Workspace, Brevo 300/day free, SendGrid 100/day free,
+AWS SES 200/day, Mailgun, Custom). Picking a preset fills host / port
+/ starttls / daily_cap / max_attachment_mb. User still types their own
+user + password. Settings POST accepts `smtp_starttls`,
+`smtp_daily_cap`, and `smtp_max_attachment_mb` so the dropdown is the
+only place these values are edited.
+
+**BookOrbit before SMTP.** The hand-off to BookOrbit's library is now
+sequenced *before* the SMTP gate. When the daily cap is hit, the book
+still lands in the library; only the Kindle email is deferred. Drop
+is idempotent across deferred retries via a `kind='bookorbit'` event
+check.
+
+**Pipeline concurrency hardening (the kindlebangla flood found these):**
+
+- *Atomic claim.* `_process_job` (every 7 min) and `_retry_job`
+  (every 4 h) both call `process_queue`. APScheduler's `max_instances=1`
+  is per-job, so they overlap. `BookRepo.claim_for_processing(book_id)`
+  is a conditional `UPDATE books SET status='searching' WHERE id=?
+  AND status IN ('queued','failed','needs_review')`; if zero rows
+  match, the worker returns the `'in_flight'` sentinel. Called BEFORE
+  the resume path so two cycles can never Kindle-send the same
+  already-downloaded book.
+- *UUID-stamped .part files.* Downloads stage to
+  `<name>.<ext>.part.<12-hex-uuid>` per attempt. Concurrent workers
+  can never share a `.part` filename.
+- *httpx exceptions wrapped.* Any `httpx.HTTPError` raised mid-stream
+  (ReadError, RemoteProtocolError, ReadTimeout, ConnectError) is
+  re-raised as `DownloadError` so the pipeline's narrow handler
+  catches them and treats them as recoverable. Empty-body sentinel
+  raises `DownloadError("empty body … likely quota / private link")`
+  rather than passing 0 bytes to the unpack step.
+- *Smarter zombie sweep.* `reset_zombies` now returns stuck-in-flight
+  books to `'queued'` (not `'failed'`); the resume path picks them up
+  via `downloaded_at + file_path` without burning their attempts
+  budget.
+- *Collision-proof unpack filename.* `safe_extract_zip` /
+  `safe_extract_rar` used the inner archive member name as the
+  destination, which collided across different books with the same
+  inner filename and silently overwrote earlier extractions. Now uses
+  the outer downloaded filename (always unique per provider slug or
+  md5); the original archive is kept as `<name>.<ext>.orig` for
+  forensics.
+- *Bengali directory names.* `_check_member_safe` now skips directory
+  entries from the extension allowlist; Python's `Path.suffix`
+  mis-parses names like `Ph.D. বল্টুভাই/` and trips the allowlist
+  on the "extension" `". বল্টুভাই"`.
+- *RAR support.* `unrar-free` + `libarchive-tools` in the runtime
+  image plus `rarfile>=4.2` in pyproject deps. kindlebangla's Drive
+  payloads are RAR-wrapped EPUBs; the existing
+  `security.safe_extract_rar` code path now has the binaries it
+  needs.
+
+**Queue pagination.** `/api/books` accepts `limit` + `offset` and
+returns a real SQL-filtered `total`. QueuePage exposes a
+10/20/50/100 page-size dropdown (persisted to localStorage) and
+first/prev/next/last controls. Status dropdown is seeded with the
+full lifecycle (`queued`, `searched`, `picked`, `downloading`,
+`converting`, `sending`, `sent`, `failed`, `needs_review`, `skipped`,
+`deferred`) so filters stay available even when the page slice
+doesn't contain them.
+
+**Desktop theme toggle.** Top header now carries the same moon/sun
+toggle as `MobileHeader`, sharing the `biblichor.theme` localStorage
+key.
+
+**Source allowlist via registry.** The `/api/sources` POST handler
+used to allowlist 5 hardcoded source names, silently rejecting all
+the Phase 6s.3 and 6u additions with HTTP 400. It now reads
+`sources/registry._SOURCES` directly, so any source the registry
+can build is fair game.
+
+**Test count: 851 passed / 2 skipped.**
