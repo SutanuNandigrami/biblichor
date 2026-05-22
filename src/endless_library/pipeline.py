@@ -469,7 +469,21 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
         search+download steps entirely and resume at convert/send.
       - If `converted_at` is set AND the converted file is on disk, skip convert.
       - `attempts` only increments when we actually do a fresh search.
+
+    Concurrency (Phase 6u.5): two scheduler jobs (_process_job + _retry_job)
+    both call process_queue, and APScheduler's max_instances=1 is per-job —
+    so they can race. claim_for_processing() atomically flips the row from
+    queued/failed/needs_review to 'searching'; if another worker beat us
+    to it the UPDATE matches 0 rows and we skip this book this cycle.
+    Books already mid-pipeline (searching/picked/downloading/sending etc.)
+    are returned to a sentinel "in-flight" status so process_queue can
+    skip counting them.
     """
+    # Resume paths (downloaded_at / converted_at) bypass the claim because
+    # they don't redo the download — they touch the file on disk and
+    # advance straight to convert/send. Those steps are idempotent
+    # against a parallel run (set_status updates the same row to the
+    # same target).
     if book.downloaded_at and book.file_path:
         existing = Path(book.file_path)
         if existing.exists() and existing.stat().st_size > 0:
@@ -486,7 +500,12 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
             message="resume: downloaded file missing on disk; restarting from search",
         )
 
-    deps.books.set_status(book.id, "searching")
+    # Phase 6u.5: atomic claim. If another worker already flipped this
+    # row out of queued/failed/needs_review, skip — they own the book
+    # for this cycle. process_queue will count it under "skipped" so the
+    # tally stays sane.
+    if not deps.books.claim_for_processing(book.id):
+        return "in_flight"
     deps.events.append(book_id=book.id, kind="state_change", message="-> searching")
 
     candidates, _strat = _search_with_strategies(deps, book)
@@ -805,9 +824,13 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
 
 
 def process_queue(deps: PipelineDeps) -> dict[str, int]:
-    """Walk every pending book; returns a tally by terminal status."""
+    """Walk every pending book; returns a tally by terminal status.
+
+    Phase 6u.5: "in_flight" is the sentinel process_one returns when
+    another worker beat us to the claim. We don't count it as a
+    terminal outcome and we don't mark the book failed."""
     deps.books.reset_zombies(stale_minutes=deps.cfg.general.zombie_stale_minutes)
-    tally = {"sent": 0, "failed": 0, "needs_review": 0, "skipped": 0}
+    tally = {"sent": 0, "failed": 0, "needs_review": 0, "skipped": 0, "deferred": 0, "in_flight": 0}
     for b in deps.books.pending(max_attempts=deps.cfg.general.max_attempts):
         try:
             st = process_one(deps, b)

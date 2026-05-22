@@ -268,6 +268,26 @@ class BookRepo:
                 (book_id,),
             )
 
+    def claim_for_processing(self, book_id: int) -> bool:
+        """Phase 6u.5: atomically transition a book from queued/failed to
+        searching. Returns True if this caller now owns the book; False
+        if another worker already claimed it. The two scheduler jobs
+        (_process_job + _retry_job) both call process_queue and would
+        otherwise race on the same row, double-downloading and clobbering
+        each other's .part files.
+        """
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE books
+                   SET status = 'searching', updated_at = datetime('now')
+                 WHERE id = ?
+                   AND status IN ('queued', 'failed', 'needs_review')
+                """,
+                (book_id,),
+            )
+            return cur.rowcount == 1
+
     def pending(self, *, max_attempts: int) -> list[BookRow]:
         with self._connect() as conn:
             rows = conn.execute(

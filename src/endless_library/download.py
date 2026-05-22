@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
+import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -180,7 +183,12 @@ def download(
     dest_dir.mkdir(parents=True, exist_ok=True)
     name = safe_filename(_filename_from_handle(handle, fallback_name))
     final = dest_dir / name
-    part = final.with_suffix(final.suffix + ".part")
+    # Phase 6u.5: uuid-stamped .part. Concurrent workers (zombie reset
+    # race + process_job/retry_job overlap) used to share the same
+    # <name>.epub.part filename and clobber each other's downloads,
+    # surfacing as either truncated bytes or ENOENT on rename. Unique
+    # per-attempt staging files make collision impossible.
+    part = final.with_suffix(final.suffix + f".part.{uuid.uuid4().hex[:12]}")
 
     factory = client_factory or (
         # follow_redirects=False on purpose; _walk_redirects does it manually
@@ -190,25 +198,66 @@ def download(
     md5 = hashlib.md5()
     total = 0
     content_type: str | None = None
-    with factory() as client:
-        safe_final_url = _walk_redirects(client, handle.url)
-        with client.stream("GET", safe_final_url) as r:
-            if r.status_code != 200:
-                raise DownloadError(f"HTTP {r.status_code} from {safe_final_url}")
-            content_type = r.headers.get("content-type")
-            if content_type and "text/html" in content_type.lower():
-                snippet = r.read()[:200]
-                raise DownloadError(f"got HTML, not book (ct={content_type}): {snippet!r}")
-            with part.open("wb") as f:
-                for chunk in r.iter_bytes(CHUNK):
-                    if not chunk:
-                        continue
-                    f.write(chunk)
-                    md5.update(chunk)
-                    total += len(chunk)
+    try:
+        with factory() as client:
+            safe_final_url = _walk_redirects(client, handle.url)
+            with client.stream("GET", safe_final_url) as r:
+                if r.status_code != 200:
+                    raise DownloadError(f"HTTP {r.status_code} from {safe_final_url}")
+                content_type = r.headers.get("content-type")
+                if content_type and "text/html" in content_type.lower():
+                    snippet = r.read()[:200]
+                    raise DownloadError(
+                        f"got HTML, not book (ct={content_type}): {snippet!r}"
+                    )
+                with part.open("wb") as f:
+                    for chunk in r.iter_bytes(CHUNK):
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        md5.update(chunk)
+                        total += len(chunk)
+    except httpx.HTTPError as e:
+        # Phase 6u.5: previously httpx-native errors (ReadError,
+        # RemoteProtocolError, ReadTimeout, ConnectError, etc.) escaped
+        # past the pipeline's narrow `except DownloadError` and were
+        # surfaced as "pipeline crash: ..." — failing the book hard
+        # instead of being treated as a recoverable transient. Wrap
+        # them so the pipeline can mark the book failed cleanly and
+        # the next cycle retries.
+        with suppress(OSError):
+            part.unlink(missing_ok=True)
+        raise DownloadError(f"network error during download: {e}") from e
+    except Exception:
+        # Anything else we can't recover from leaves a dangling .part
+        # behind. Best-effort cleanup so /data/books doesn't fill up
+        # with truncated files.
+        with suppress(OSError):
+            part.unlink(missing_ok=True)
+        raise
+
+    # Empty-body sanity: Drive's anti-abuse layer sometimes responds
+    # with HTTP 200 + zero bytes (private file, quota exceeded). The
+    # downstream archive/AV check would mistake this for a corrupt
+    # archive; flag it explicitly so the operator sees the real cause.
+    if total == 0:
+        with suppress(OSError):
+            part.unlink(missing_ok=True)
+        raise DownloadError(
+            f"empty body (0 bytes) from {safe_final_url}; likely quota / private link"
+        )
+
     digest = md5.hexdigest()
     if expected_md5 and digest != expected_md5:
-        part.unlink(missing_ok=True)
+        with suppress(OSError):
+            part.unlink(missing_ok=True)
         raise DownloadError(f"md5 mismatch: got {digest}, expected {expected_md5}")
-    part.replace(final)
+
+    # os.replace is atomic on the same filesystem (POSIX rename(2)).
+    try:
+        os.replace(part, final)
+    except OSError as e:
+        with suppress(OSError):
+            part.unlink(missing_ok=True)
+        raise DownloadError(f"rename {part.name} -> {final.name} failed: {e}") from e
     return DownloadResult(path=final, size=total, md5=digest, content_type=content_type)
