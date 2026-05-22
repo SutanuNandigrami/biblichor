@@ -42,6 +42,7 @@ class Candidate:
         "wikisource",
         "zlib",
         "hathitrust",
+        "mobilism_books",
     ]
     md5: str | None
     title: str | None
