@@ -57,6 +57,11 @@ class _ZlibCredsPayload(BaseModel):
     password: str
 
 
+class _MobilismCredsPayload(BaseModel):
+    username: str
+    password: str
+
+
 class AddSource(BaseModel):
     source: str
     identifier: str
@@ -68,6 +73,15 @@ class RescheduleJob(BaseModel):
     minutes: int | None = None
     hours: int | None = None
     cron_hour: int | None = None  # for daily cron jobs (UTC hour)
+
+
+class BulkDelete(BaseModel):
+    ids: list[int] | None = None
+    status: str | None = None
+    source: str | None = None
+    created_after: str | None = None
+    created_before: str | None = None
+    hard: bool = False
 
 
 class BulkDelete(BaseModel):
@@ -299,6 +313,48 @@ def register(app: FastAPI) -> None:
             book_id=book_id, kind="state_change", message="manually re-queued from dashboard"
         )
         return {"ok": True}
+
+    @router.post("/books/bulk_delete")
+    def bulk_delete(payload: BulkDelete, request: Request):
+        """Bulk delete books matching filters. Provide at least one filter.
+
+        Filters combine with AND. `hard=True` removes rows; default soft-deletes
+        (status='skipped', preserves audit trail).
+        """
+        deps = request.app.state.deps
+        where: list[str] = []
+        args: list = []
+        if payload.ids:
+            placeholders = ",".join(["?"] * len(payload.ids))
+            where.append(f"id IN ({placeholders})")
+            args.extend(payload.ids)
+        if payload.status:
+            where.append("status = ?")
+            args.append(payload.status)
+        if payload.source:
+            where.append("source = ?")
+            args.append(payload.source)
+        if payload.created_after:
+            where.append("created_at >= ?")
+            args.append(payload.created_after)
+        if payload.created_before:
+            where.append("created_at <= ?")
+            args.append(payload.created_before)
+        if not where:
+            raise HTTPException(400, detail="must provide at least one filter")
+        clause = " AND ".join(where)
+        with connect(deps.db_path) as conn:
+            if payload.hard:
+                n = conn.execute(f"DELETE FROM books WHERE {clause}", args).rowcount
+            else:
+                n = conn.execute(
+                    f"UPDATE books SET status='skipped', "
+                    f"last_error='deleted from dashboard', "
+                    f"updated_at=datetime('now') WHERE {clause}",
+                    args,
+                ).rowcount
+            conn.commit()
+        return {"deleted": n, "hard": payload.hard}
 
     @router.post("/books/bulk_delete")
     def bulk_delete(payload: BulkDelete, request: Request):
@@ -1407,6 +1463,46 @@ def register(app: FastAPI) -> None:
         svc = _bookorbit_service(request)
         svc.clear_zlib_creds()
         return {"ok": True}
+
+    @router.post("/scrapers/mobilism/creds")
+    def mobilism_store_creds(payload: _MobilismCredsPayload, request: Request):
+        """Phase 6w.5d: store Mobilism forum credentials in the encrypted
+        secrets store. SPA Scrapers page card uses this."""
+        svc = _bookorbit_service(request)
+        svc.set_secret_value("mobilism.username", payload.username)
+        svc.set_secret_value("mobilism.password", payload.password)
+        return {"ok": True}
+
+    @router.delete("/scrapers/mobilism/creds")
+    def mobilism_clear_creds(request: Request):
+        """Phase 6w.5d: clear stored Mobilism credentials."""
+        svc = _bookorbit_service(request)
+        svc.delete_secret_value("mobilism.username")
+        svc.delete_secret_value("mobilism.password")
+        return {"ok": True}
+
+    @router.post("/scrapers/mobilism/test-creds")
+    def mobilism_test_creds(payload: _MobilismCredsPayload, request: Request):
+        """Phase 6w.5d: verify Mobilism credentials by attempting login."""
+        from types import SimpleNamespace
+        from endless_library.scrapers.mobilism import (
+            AuthFailed, MobilismSession, NotConfigured, _reset_session,
+        )
+        _reset_session()
+        cfg_stub = SimpleNamespace(
+            mobilism_username=payload.username,
+            mobilism_password=payload.password,
+        )
+        try:
+            MobilismSession.get(cfg_stub)
+            _reset_session()
+            return {"ok": True, "message": "Login successful"}
+        except NotConfigured as e:
+            raise HTTPException(400, str(e)) from e
+        except AuthFailed as e:
+            raise HTTPException(401, str(e)) from e
+        except Exception as e:
+            raise HTTPException(502, f"{type(e).__name__}: {e}") from e
 
     @router.post("/scrapers/cookies")
     async def upload_cookies(request: Request):

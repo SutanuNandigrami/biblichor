@@ -41,6 +41,11 @@ const benchEventSrc = ref<EventSource | null>(null)
 const zlibEmail = ref('')
 const zlibPassword = ref('')
 const zlibBusy = ref(false)
+
+// Phase 6w.5d — Mobilism credentials card
+const mobiUser = ref('')
+const mobiPass = ref('')
+const mobiBusy = ref(false)
 const cookieFile = ref<File | null>(null)
 const cookieBusy = ref(false)
 const cookieResult = ref('')
@@ -68,6 +73,48 @@ async function clearZlibCreds() {
   if (!confirm('Clear stored Z-Library credentials?')) return
   await api('/api/scrapers/zlibrary/creds', { method: 'DELETE' })
   toast.success('Z-Library credentials cleared')
+}
+
+async function saveMobilismCreds() {
+  if (!mobiUser.value || !mobiPass.value) return
+  mobiBusy.value = true
+  try {
+    await api('/api/scrapers/mobilism/creds', {
+      method: 'POST',
+      body: JSON.stringify({ username: mobiUser.value, password: mobiPass.value }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    mobiUser.value = ''
+    mobiPass.value = ''
+    toast.success('Mobilism credentials saved (encrypted)')
+  } catch (e: any) {
+    toast.error('Save failed: ' + (e?.message ?? e))
+  } finally {
+    mobiBusy.value = false
+  }
+}
+
+async function clearMobilismCreds() {
+  if (!confirm('Clear stored Mobilism credentials?')) return
+  await api('/api/scrapers/mobilism/creds', { method: 'DELETE' })
+  toast.success('Mobilism credentials cleared')
+}
+
+async function testMobilismCreds() {
+  if (!mobiUser.value || !mobiPass.value) return
+  mobiBusy.value = true
+  try {
+    await api('/api/scrapers/mobilism/test-creds', {
+      method: 'POST',
+      body: JSON.stringify({ username: mobiUser.value, password: mobiPass.value }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    toast.success('Mobilism login successful')
+  } catch (e: any) {
+    toast.error('Login failed: ' + (e?.message ?? e))
+  } finally {
+    mobiBusy.value = false
+  }
 }
 
 function pickCookieFile(e: Event) {
@@ -435,6 +482,39 @@ async function cancelBench() {
         <Button variant="ghost" size="sm" @click="clearZlibCreds">Clear stored creds</Button>
         <Button size="sm" :disabled="zlibBusy || !zlibEmail || !zlibPassword" @click="saveZlibCreds">
           {{ zlibBusy ? 'Saving...' : 'Save' }}
+        </Button>
+      </div>
+    </Card>
+
+    <Card class="p-4 space-y-3">
+      <h2 class="font-semibold flex items-center gap-2 text-sm">
+        <KeyRound class="w-4 h-4 text-primary" /> Mobilism credentials (optional)
+      </h2>
+      <p class="text-[11px] text-muted-foreground leading-relaxed">
+        Save Mobilism forum username + password to enable the
+        <code class="font-mono">mobilism_books</code> scraper. biblichor logs in via phpBB,
+        caches the session for 24 h, and extracts Mediafire links from the English Books subforum.
+        Stored encrypted in <code class="font-mono">library.db</code>.
+      </p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label class="text-xs space-y-1">
+          <span class="text-muted-foreground">Mobilism username</span>
+          <input v-model="mobiUser" type="text" autocomplete="username"
+            class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+        </label>
+        <label class="text-xs space-y-1">
+          <span class="text-muted-foreground">Mobilism password</span>
+          <input v-model="mobiPass" type="password" autocomplete="off"
+            class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+        </label>
+      </div>
+      <div class="flex gap-2 justify-end">
+        <Button variant="ghost" size="sm" @click="clearMobilismCreds">Clear stored creds</Button>
+        <Button size="sm" variant="outline" :disabled="mobiBusy || !mobiUser || !mobiPass" @click="testMobilismCreds">
+          {{ mobiBusy ? 'Testing...' : 'Test login' }}
+        </Button>
+        <Button size="sm" :disabled="mobiBusy || !mobiUser || !mobiPass" @click="saveMobilismCreds">
+          {{ mobiBusy ? 'Saving...' : 'Save' }}
         </Button>
       </div>
     </Card>
