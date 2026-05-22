@@ -499,13 +499,12 @@ def register(app: FastAPI) -> None:
     @router.post("/sources")
     def add_source(payload: AddSource, request: Request):
         deps = request.app.state.deps
-        if payload.source not in (
-            "goodreads",
-            "hardcover",
-            "manual",
-            "goodreads_listopia",
-            "goodreads_series",
-        ):
+        # Allowlist must stay in sync with sources/registry.py — any
+        # source the registry can build is fair game for the API. Using
+        # the registry as the source of truth means future sources
+        # auto-enable here.
+        from endless_library.sources import registry as _src_reg
+        if payload.source not in _src_reg._SOURCES:
             raise HTTPException(400, detail="unknown source")
         try:
             sid = deps.sources.add(
