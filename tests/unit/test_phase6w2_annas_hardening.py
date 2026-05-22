@@ -41,3 +41,37 @@ def test_cool_expires_after_300_seconds(monkeypatch):
     for _ in range(10):
         seen.add(ad.next_mirror())
     assert ad._MIRRORS[0] in seen
+
+
+def test_cf_bypass_client_posts_url_and_returns_html(monkeypatch):
+    from endless_library.scrapers import cf_bypass_client
+    posted = {}
+    class _R:
+        status_code = 200
+        def json(self): return {"html": "<html>resolved</html>"}
+        def raise_for_status(self): pass
+    def _fake_post(url, json=None, timeout=None, **kw):
+        posted["url"] = url; posted["json"] = json
+        return _R()
+    monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.httpx.post", _fake_post)
+    monkeypatch.setenv("CF_BYPASS_URL", "http://test-bypass:8000")
+    html = cf_bypass_client.resolve("https://annas-archive.gl/md5/abc")
+    assert "<html>resolved</html>" in html
+    assert posted["url"] == "http://test-bypass:8000/cf-clearance-scraper"
+    assert posted["json"] == {"url": "https://annas-archive.gl/md5/abc"}
+
+
+def test_cf_bypass_client_raises_on_5xx(monkeypatch):
+    import httpx
+    from endless_library.scrapers import cf_bypass_client
+    class _R:
+        status_code = 502
+        def raise_for_status(self): raise httpx.HTTPStatusError("502", request=None, response=None)
+    monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.httpx.post",
+                        lambda *a, **kw: _R())
+    monkeypatch.setenv("CF_BYPASS_URL", "http://test-bypass:8000")
+    try:
+        cf_bypass_client.resolve("https://x")
+        assert False, "should have raised"
+    except httpx.HTTPStatusError:
+        pass
