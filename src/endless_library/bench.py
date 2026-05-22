@@ -22,6 +22,7 @@ class BenchQuery:
     author: str
     isbn13: str
     language: str
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,16 +36,69 @@ class BenchOutcome:
     note: str = ""
 
 
+def _resolve_queries_path(path: Path | None) -> Path:
+    if path is not None:
+        return path
+    return Path(__file__).resolve().parent.parent.parent / "bench" / "queries.yaml"
+
+
 def load_queries(path: Path | None = None) -> tuple[list[BenchQuery], list[int]]:
     """Load queries.yaml. When path is None, resolve relative to the
     repo root so it works regardless of cwd — fixes the container
-    HTTP 500 where the cwd-relative path missed the bundled file."""
-    if path is None:
-        path = Path(__file__).resolve().parent.parent.parent / "bench" / "queries.yaml"
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    qs = [BenchQuery(**q) for q in raw.get("queries", [])]
+    HTTP 500 where the cwd-relative path missed the bundled file.
+
+    Tagged-query schema is Phase 6v.3 — the optional `tags` field on
+    each query is read here, but the per-scraper corpus filter lives
+    in `load_corpus_tags` so this signature stays backwards-compatible.
+    """
+    p = _resolve_queries_path(path)
+    raw = yaml.safe_load(p.read_text(encoding="utf-8"))
+    qs: list[BenchQuery] = []
+    for q in raw.get("queries", []):
+        tags = tuple(q.get("tags", []) or ())
+        qs.append(
+            BenchQuery(
+                title=q["title"],
+                author=q.get("author", ""),
+                isbn13=q.get("isbn13", ""),
+                language=q.get("language", "en"),
+                tags=tags,
+            )
+        )
     quick = list(raw.get("quick_indices", []))
     return qs, quick
+
+
+def load_corpus_tags(path: Path | None = None) -> dict[str, frozenset[str]]:
+    """Per-scraper corpus filter from queries.yaml.
+
+    Returns a mapping of scraper-name to the set of tags it accepts.
+    Scrapers absent from the map are general-purpose (accept every
+    query in the corpus).
+    """
+    p = _resolve_queries_path(path)
+    raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    raw_corpus = raw.get("corpus_tags", {}) or {}
+    return {scraper: frozenset(tags) for scraper, tags in raw_corpus.items()}
+
+
+def queries_for_scraper(
+    queries: Iterable[BenchQuery],
+    scraper: str,
+    corpus_tags: dict[str, frozenset[str]],
+) -> list[BenchQuery]:
+    """Subset of `queries` this scraper should be benched against.
+
+    - If `scraper` has no entry in `corpus_tags`, it gets every query
+      (general-purpose backends like annas_curl / libgen / zlib).
+    - If it does, only queries whose tags intersect the scraper's
+      accepted tags are kept (e.g. kindlebangla_curl gets only bn
+      queries, gutendex gets only PD queries).
+    """
+    wanted = corpus_tags.get(scraper)
+    if wanted is None:
+        return list(queries)
+    return [q for q in queries if any(t in wanted for t in q.tags)]
 
 
 def run_bench(
@@ -53,16 +107,40 @@ def run_bench(
     *,
     repo: BenchRunRepo | None = None,
     strategies: list[str] | None = None,
+    corpus_tags: dict[str, frozenset[str]] | None = None,
 ) -> list[BenchOutcome]:
+    """Run each scraper against the queries it accepts.
+
+    Phase 6v.3: `corpus_tags` filters which queries each scraper sees
+    (e.g. kindlebangla_curl only bn, gutendex only PD). When None,
+    every scraper sees every query (legacy behaviour).
+    """
     strats = strategies or registry.enabled_order(cfg.scrapers)
     outcomes: list[BenchOutcome] = []
+    all_queries = list(queries)
+    if corpus_tags is None:
+        try:
+            tag_map = load_corpus_tags()
+        except Exception as e:
+            log.warning("bench: could not load corpus_tags, running unfiltered: %s", e)
+            tag_map = {}
+    else:
+        tag_map = corpus_tags
     for s_name in strats:
         try:
             scraper = registry.build(s_name, cfg.scrapers)
         except Exception as e:
             log.warning("could not build %s: %s", s_name, e)
             continue
-        for q in queries:
+        scoped = queries_for_scraper(all_queries, s_name, tag_map)
+        if not scoped:
+            log.info(
+                "bench: skipping %s — no queries match its corpus tags %s",
+                s_name,
+                tag_map.get(s_name),
+            )
+            continue
+        for q in scoped:
             sq = SearchQuery(
                 title=q.title,
                 author=q.author,
