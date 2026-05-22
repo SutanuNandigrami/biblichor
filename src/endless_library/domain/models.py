@@ -41,6 +41,7 @@ class Candidate:
         "doab",
         "wikisource",
         "zlib",
+        "hathitrust",
     ]
     md5: str | None
     title: str | None
