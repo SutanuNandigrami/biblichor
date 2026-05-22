@@ -130,6 +130,8 @@ corpus_tags:
   standard_ebooks: [pd]
   oapen_doab: [pd]
   wikisource: [pd]
+  hathitrust: [pd]
+  doab: [pd]
 
 # `bench --quick` indices: one modern English, one PD, one Bengali so
 # even a quick run touches all three corpora (assuming the scraper

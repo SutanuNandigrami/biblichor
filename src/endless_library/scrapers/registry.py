@@ -20,6 +20,10 @@ from endless_library.scrapers.welib_playwright import WelibPlaywright
 from endless_library.scrapers.wikisource import Wikisource
 from endless_library.scrapers.zlib_singlelogin import ZlibSingleLogin
 
+# Phase 6w.3 — HathiTrust + DOAB
+from endless_library.scrapers.hathitrust import HathiTrust
+from endless_library.scrapers.doab import Doab
+
 _REGISTRY = {
     "annas_curl": AnnasArchiveCurl,
     "annas_flaresolverr": AnnasArchiveFlareSolverr,
@@ -35,9 +39,18 @@ _REGISTRY = {
     "oapen_doab": OapenDoab,
     "wikisource": Wikisource,
     "zlib_singlelogin": ZlibSingleLogin,
+    "hathitrust": HathiTrust,
+    "doab": Doab,
 }
 
-_PD_PRIORITY = ("standard_ebooks", "gutendex", "wikisource", "oapen_doab")
+_PD_PRIORITY = (
+    "standard_ebooks",
+    "gutendex",
+    "wikisource",
+    "oapen_doab",
+    "doab",
+    "hathitrust",
+)
 
 
 def available() -> list[str]:
