@@ -190,3 +190,61 @@ def effective_mirrors(configured: list[str], cached: list[str]) -> list[str]:
         seen.add(host)
         out.append(url)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Phase 6w.2: Mirror rotation with cool-down
+# ---------------------------------------------------------------------------
+# The bench audit on 2026-05-22 hit a sustained 502 from annas-archive.gl
+# on Bengali queries. Rotate across the 2026 mirror list (.gl, .li, .pm, .in).
+# On 5xx / connection-refused, cool that mirror for 5 minutes; pin success
+# across calls when prefer_last_working is set.
+
+_MIRRORS = (
+    "annas-archive.gl",
+    "annas-archive.li",
+    "annas-archive.pm",
+    "annas-archive.in",
+)
+_COOL_DOWN_SEC = 5 * 60
+
+_state: dict[str, float] = {}      # mirror -> cool-until-epoch
+_last_working: str | None = None
+
+
+def _now() -> float:
+    return time.time()
+
+
+def _reset_state() -> None:
+    global _last_working
+    _state.clear()
+    _last_working = None
+
+
+def _is_cool(host: str) -> bool:
+    until = _state.get(host)
+    return until is not None and until > _now()
+
+
+def next_mirror(prefer_last_working: bool = True) -> str:
+    """Return a hostname currently usable. If prefer_last_working and
+    the last-known-good is not cool, return it; else round-robin
+    through non-cool mirrors. Falls back to earliest-expiring if all cool."""
+    if prefer_last_working and _last_working and not _is_cool(_last_working):
+        return _last_working
+    for m in _MIRRORS:
+        if not _is_cool(m):
+            return m
+    # Everything cool — return the earliest expiring (least bad)
+    return min(_MIRRORS, key=lambda m: _state.get(m, 0))
+
+
+def mark_cool(host: str) -> None:
+    _state[host] = _now() + _COOL_DOWN_SEC
+
+
+def mark_success(host: str) -> None:
+    global _last_working
+    _last_working = host
+    _state.pop(host, None)
