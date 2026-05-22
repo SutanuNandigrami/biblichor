@@ -596,15 +596,34 @@ def register(app: FastAPI) -> None:
     @router.get("/scrapers")
     def list_scrapers(request: Request):
         deps = request.app.state.deps
+        from endless_library.bench import load_corpus_tags
         from endless_library.scrapers import registry
 
         all_names = registry.available()
+        in_chain_set = set(registry.enabled_order(deps.cfg.scrapers))
+        try:
+            corpus_tags = load_corpus_tags()
+        except Exception:
+            corpus_tags = {}
+        ever_run = {n: deps.bench.ever_run(scraper=n) for n in all_names}
+        last_run = {n: deps.bench.last_run_at(scraper=n) for n in all_names}
         stats = {n: deps.bench.success_rate(scraper=n) for n in all_names}
         return {
             "available": all_names,
             "order": deps.cfg.scrapers.order,
             "enabled": deps.cfg.scrapers.enabled,
             "success_rates_30d": stats,
+            # Phase 6v.4: differentiate "0% — never tested" from "0% — broken"
+            "ever_run": ever_run,
+            "last_run_at": last_run,
+            # in_chain = enabled AND present in cfg.order. A scraper toggled
+            # 'enabled' that isn't in the order list won't actually be tried
+            # by the pipeline — the SPA shows this distinction so users
+            # don't wonder why their flipped switch did nothing.
+            "in_chain": {n: (n in in_chain_set) for n in all_names},
+            # Specialised corpus this scraper is benched against; empty
+            # tuple = general-purpose (sees every query).
+            "corpus_tags": {n: sorted(corpus_tags.get(n, frozenset())) for n in all_names},
         }
 
     @router.post("/scrapers/{name}/toggle")
@@ -665,6 +684,50 @@ def register(app: FastAPI) -> None:
             "outcomes": [asdict(o) for o in outcomes],
             "table": format_table(outcomes),
         }
+
+    @router.post("/scrapers/{name}/test_now")
+    async def test_scraper_now(name: str, request: Request):
+        """Phase 6v.4: run one bench query against a single scraper and
+        return the outcome immediately. Uses the scraper's corpus_tags
+        to pick a query it should be able to answer (Bengali for
+        kindlebangla_curl, PD classic for gutendex, etc.) — falls back
+        to the first general-corpus query when the scraper has no
+        special tags. The outcome is also recorded in bench_runs so
+        success_rate_30d and the sparkline reflect it on next reload.
+        """
+        from functools import partial
+
+        from endless_library.bench import load_corpus_tags, queries_for_scraper
+        from endless_library.scrapers import registry
+
+        deps = request.app.state.deps
+        if name not in registry.available():
+            raise HTTPException(404, f"unknown scraper: {name}")
+        qs, _ = load_queries()
+        corpus_tags = load_corpus_tags()
+        scoped = queries_for_scraper(qs, name, corpus_tags)
+        if not scoped:
+            raise HTTPException(
+                400,
+                f"no bench query in the corpus matches {name}'s corpus tags "
+                f"{sorted(corpus_tags.get(name, frozenset()))}",
+            )
+        pick = [scoped[0]]
+        outcomes = await asyncio.to_thread(
+            partial(
+                run_bench,
+                deps.cfg,
+                pick,
+                repo=deps.bench,
+                strategies=[name],
+                corpus_tags=corpus_tags,
+            )
+        )
+        if not outcomes:
+            raise HTTPException(
+                500, f"{name} produced no outcome (could not build scraper instance?)"
+            )
+        return {"outcome": asdict(outcomes[0])}
 
     # ---------- settings ----------
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { Cpu, Play, GripVertical, KeyRound } from "lucide-vue-next"
+import { computed, onMounted, reactive, ref } from 'vue'
+import { Cpu, Play, GripVertical, KeyRound, FlaskConical, Link2, Unlink } from "lucide-vue-next"
 import { VueDraggable } from 'vue-draggable-plus'
 import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
@@ -11,6 +11,15 @@ import { useToast } from '@/composables/useToast'
 type ScrapersResp = {
   available: string[]; order: string[]; enabled: Record<string, boolean>
   success_rates_30d: Record<string, number>
+  // Phase 6v.4
+  ever_run: Record<string, boolean>
+  last_run_at: Record<string, string | null>
+  in_chain: Record<string, boolean>
+  corpus_tags: Record<string, string[]>
+}
+type TestOutcome = {
+  scraper: string; query: string; success: boolean
+  duration_ms: number; candidates: number; matched_isbn: boolean; note: string
 }
 type BenchHistoryEntry = {
   ts: string; query: string; success: boolean
@@ -122,6 +131,42 @@ const unusedScrapers = computed<string[]>(() => {
   return data.value.available.filter((n) => !data.value!.order.includes(n))
 })
 
+// Phase 6v.4: per-scraper "Test now" state. Keyed by scraper name so each
+// row has its own spinner + result.
+const testState = reactive<Record<string, {
+  busy: boolean
+  outcome: TestOutcome | null
+  error: string | null
+}>>({})
+
+function testStateFor(name: string) {
+  if (!testState[name]) testState[name] = { busy: false, outcome: null, error: null }
+  return testState[name]
+}
+
+async function testNow(name: string) {
+  const s = testStateFor(name)
+  s.busy = true
+  s.outcome = null
+  s.error = null
+  try {
+    const r = await api<{ outcome: TestOutcome }>(
+      `/api/scrapers/${name}/test_now`,
+      { method: 'POST' },
+    )
+    s.outcome = r.outcome
+    if (r.outcome.success) toast.success(`${name}: OK (${r.outcome.duration_ms}ms)`)
+    else toast.error(`${name}: ${r.outcome.note || 'no candidates'}`)
+    // Reload to refresh ever_run + success_rates_30d.
+    await load()
+  } catch (e: any) {
+    s.error = e?.message ?? String(e)
+    toast.error(`${name} test failed: ${s.error}`)
+  } finally {
+    s.busy = false
+  }
+}
+
 async function bench(mode: 'quick' | 'full') {
   benching.value = true
   benchOutput.value = `Running ${mode} bench…\n(may take ${mode === 'quick' ? '~2' : '~15'} min)`
@@ -155,19 +200,41 @@ async function bench(mode: 'quick' | 'full') {
       <div
         v-for="(name, idx) in orderModel"
         :key="name"
-        class="flex items-center gap-3 bg-card border border-border rounded-lg p-3"
+        class="flex items-start gap-3 bg-card border border-border rounded-lg p-3"
       >
-        <GripVertical class="drag-handle w-5 h-5 text-muted-foreground cursor-grab shrink-0 touch-none" />
-        <span class="text-xs text-muted-foreground font-mono w-5 text-center shrink-0">{{ idx + 1 }}</span>
+        <GripVertical class="drag-handle w-5 h-5 text-muted-foreground cursor-grab shrink-0 touch-none mt-0.5" />
+        <span class="text-xs text-muted-foreground font-mono w-5 text-center shrink-0 mt-0.5">{{ idx + 1 }}</span>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
             <h4 class="font-mono text-sm break-all">{{ name }}</h4>
             <Badge :variant="data.enabled[name] ? 'success' : 'muted'">
               {{ data.enabled[name] ? 'enabled' : 'disabled' }}
             </Badge>
+            <!-- Phase 6v.4: in-chain is the difference between "the toggle says
+                 on" and "the pipeline will actually try it" -->
+            <Badge :variant="data.in_chain[name] ? 'success' : 'muted'"
+                   :title="data.in_chain[name]
+                     ? 'In the pipeline chain: requests will be routed here'
+                     : 'NOT in the chain — toggling enabled alone is not enough; reorder to add'">
+              <Link2 v-if="data.in_chain[name]" class="inline-block w-3 h-3 mr-0.5" />
+              <Unlink v-else class="inline-block w-3 h-3 mr-0.5" />
+              {{ data.in_chain[name] ? 'in chain' : 'not in chain' }}
+            </Badge>
+            <Badge v-if="(data.corpus_tags[name] ?? []).length" variant="muted"
+                   :title="`Benched only on queries tagged: ${(data.corpus_tags[name] ?? []).join(', ')}`">
+              corpus: {{ (data.corpus_tags[name] ?? []).join(',') }}
+            </Badge>
           </div>
           <p class="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
-            <span>{{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)</span>
+            <!-- Never-tested vs broken: 0% on a scraper that's never been
+                 benched means nothing; show that explicitly. -->
+            <Badge v-if="!data.ever_run[name]" variant="muted"
+                   title="No bench outcome recorded yet — click Test now to find out if it works.">
+              never tested
+            </Badge>
+            <span v-else>
+              {{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)
+            </span>
             <span v-if="(history[name] ?? []).length" class="inline-flex items-center gap-0.5">
               <span v-for="(e, i) in (history[name] ?? [])" :key="i"
                 :title="`${e.query} — ${e.success ? 'OK' : 'fail'}${e.duration_ms ? ' (' + e.duration_ms + 'ms)' : ''}`"
@@ -175,28 +242,80 @@ async function bench(mode: 'quick' | 'full') {
                         e.success ? 'bg-emerald-500' : 'bg-red-500']"></span>
             </span>
           </p>
+          <!-- Phase 6v.4: inline test result -->
+          <div v-if="testStateFor(name).outcome || testStateFor(name).error"
+               class="mt-2 text-[11px] font-mono break-all"
+               :class="testStateFor(name).outcome?.success
+                       ? 'text-emerald-500' : 'text-red-500'">
+            <template v-if="testStateFor(name).outcome">
+              <span>{{ testStateFor(name).outcome!.success ? '✓' : '✗' }}</span>
+              <span class="ml-1">{{ testStateFor(name).outcome!.query }}</span>
+              <span class="ml-1 opacity-70">
+                {{ testStateFor(name).outcome!.candidates }} cand,
+                {{ testStateFor(name).outcome!.duration_ms }}ms
+              </span>
+              <span v-if="testStateFor(name).outcome!.note" class="ml-1 opacity-70">
+                — {{ testStateFor(name).outcome!.note }}
+              </span>
+            </template>
+            <template v-else-if="testStateFor(name).error">
+              ✗ {{ testStateFor(name).error }}
+            </template>
+          </div>
         </div>
-        <Button size="sm" variant="outline" class="shrink-0" @click="toggle(name)">
-          {{ data.enabled[name] ? 'Disable' : 'Enable' }}
-        </Button>
+        <div class="flex flex-col gap-1 shrink-0">
+          <Button size="sm" variant="outline" :loading="testStateFor(name).busy" @click="testNow(name)">
+            <FlaskConical class="w-4 h-4" /> Test now
+          </Button>
+          <Button size="sm" variant="ghost" @click="toggle(name)">
+            {{ data.enabled[name] ? 'Disable' : 'Enable' }}
+          </Button>
+        </div>
       </div>
     </VueDraggable>
 
     <div v-if="unusedScrapers.length" class="space-y-2">
       <p class="text-xs text-muted-foreground px-1">Unused — enable to add to the chain.</p>
       <div v-for="name in unusedScrapers" :key="name"
-           class="flex items-center gap-3 bg-card border border-border rounded-lg p-3 opacity-60">
-        <span class="w-5 text-center text-muted-foreground shrink-0">—</span>
+           class="flex items-start gap-3 bg-card border border-border rounded-lg p-3 opacity-60">
+        <span class="w-5 text-center text-muted-foreground shrink-0 mt-0.5">—</span>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
             <h4 class="font-mono text-sm break-all">{{ name }}</h4>
             <Badge variant="muted">unused</Badge>
+            <Badge v-if="(data.corpus_tags[name] ?? []).length" variant="muted"
+                   :title="`Specialised — only sees queries tagged: ${(data.corpus_tags[name] ?? []).join(', ')}`">
+              corpus: {{ (data.corpus_tags[name] ?? []).join(',') }}
+            </Badge>
           </div>
-          <p class="text-[11px] text-muted-foreground">
-            {{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)
+          <p class="text-[11px] text-muted-foreground mt-0.5">
+            <Badge v-if="!data.ever_run[name]" variant="muted">never tested</Badge>
+            <span v-else>
+              {{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)
+            </span>
           </p>
+          <div v-if="testStateFor(name).outcome || testStateFor(name).error"
+               class="mt-2 text-[11px] font-mono break-all"
+               :class="testStateFor(name).outcome?.success
+                       ? 'text-emerald-500' : 'text-red-500'">
+            <template v-if="testStateFor(name).outcome">
+              {{ testStateFor(name).outcome!.success ? '✓' : '✗' }}
+              {{ testStateFor(name).outcome!.query }}
+              ({{ testStateFor(name).outcome!.candidates }} cand,
+              {{ testStateFor(name).outcome!.duration_ms }}ms)
+              <span v-if="testStateFor(name).outcome!.note">
+                — {{ testStateFor(name).outcome!.note }}
+              </span>
+            </template>
+            <template v-else>✗ {{ testStateFor(name).error }}</template>
+          </div>
         </div>
-        <Button size="sm" variant="outline" class="shrink-0" @click="toggle(name)">Enable</Button>
+        <div class="flex flex-col gap-1 shrink-0">
+          <Button size="sm" variant="outline" :loading="testStateFor(name).busy" @click="testNow(name)">
+            <FlaskConical class="w-4 h-4" /> Test now
+          </Button>
+          <Button size="sm" variant="ghost" @click="toggle(name)">Enable</Button>
+        </div>
       </div>
     </div>
 

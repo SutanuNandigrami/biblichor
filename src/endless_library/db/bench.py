@@ -63,6 +63,29 @@ class BenchRunRepo:
             ).fetchone()
         return float(row["rate"] or 0.0)
 
+    def ever_run(self, *, scraper: str) -> bool:
+        """True if this scraper has at least one recorded bench outcome,
+        regardless of success/fail or how old. Used by the SPA to render
+        'Never tested' instead of a misleading '0% success' badge — the
+        difference between 'we know it's broken' and 'we haven't tried
+        yet' is the whole point. Phase 6v.4."""
+        with connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM bench_runs WHERE scraper = ? LIMIT 1", (scraper,)
+            ).fetchone()
+        return row is not None
+
+    def last_run_at(self, *, scraper: str) -> str | None:
+        """Timestamp of the most recent bench run for this scraper, or
+        None if it's never been benched. Drives the SPA's tooltip on
+        the 'Never tested' badge."""
+        with connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT ts FROM bench_runs WHERE scraper = ? ORDER BY id DESC LIMIT 1",
+                (scraper,),
+            ).fetchone()
+        return row["ts"] if row else None
+
     def recent(self, *, scraper: str | None = None, limit: int = 200) -> list[BenchRunRow]:
         with connect(self.db_path) as conn:
             if scraper:
