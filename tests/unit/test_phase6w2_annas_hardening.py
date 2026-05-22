@@ -75,3 +75,34 @@ def test_cf_bypass_client_raises_on_5xx(monkeypatch):
         assert False, "should have raised"
     except httpx.HTTPStatusError:
         pass
+
+
+def test_annas_cloakbrowser_routes_through_sidecar(monkeypatch):
+    from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
+    from endless_library.domain.models import SearchQuery
+    seen_url = []
+    def _fake_resolve(url, **kw):
+        seen_url.append(url)
+        return '<html><body><a href="/md5/abc">Sapiens</a></body></html>'
+    monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.resolve", _fake_resolve)
+    cl = AnnasArchiveCloakBrowser(cfg=None)
+    cands = cl.search(SearchQuery(title="Sapiens", author="Harari", isbn13="",
+                                  format_priority=("epub",), language="en"))
+    assert any("annas-archive" in u for u in seen_url)
+    assert any(c.title == "Sapiens" for c in cands)
+
+
+def test_annas_cloakbrowser_cools_mirror_on_resolve_failure(monkeypatch):
+    from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
+    from endless_library.scrapers import annas_domains
+    from endless_library.domain.models import SearchQuery
+    annas_domains._reset_state()
+    def _fail(url, **kw):
+        raise RuntimeError("sidecar down")
+    monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.resolve", _fail)
+    cl = AnnasArchiveCloakBrowser(cfg=None)
+    out = cl.search(SearchQuery(title="x", author="", isbn13="",
+                                format_priority=("epub",), language="en"))
+    assert out == []
+    # at least one mirror should now be cool
+    assert any(annas_domains._is_cool(m) for m in annas_domains._MIRRORS)
