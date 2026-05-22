@@ -477,23 +477,38 @@ def _finish_step(step: ApplyStep, *, ok: bool, detail: str = "") -> None:
 
 def _compose_args(compose_path: Path, env_file: Path) -> list[str]:
     """Common prefix for every `docker compose` invocation inside
-    apply_upgrade. Includes --project-directory so the docker daemon
-    resolves relative bind-mount paths (e.g. `../data/bookorbit-db`
-    in compose.yml) against the HOST repo root, not against
-    /app/deploy where biblichor sees the compose file from inside its
-    container.
+    apply_upgrade. Includes --project-directory so the docker compose
+    plugin (running inside biblichor) resolves relative bind-mount
+    paths in compose.yml against the right HOST directory.
 
-    The host repo path is passed in via the `HOST_REPO_PATH` env var
-    set in compose.yml; this fails over to the compose file's parent's
-    parent (which is correct on the host but wrong inside the
-    container — only used as a safety net for unit tests).
+    Per docker compose docs: "Relative paths in env_file, secrets,
+    configs, build context, volume bindings are resolved relative to
+    [--project-directory]." Default is the compose file's directory.
+
+    From inside biblichor the compose file is at /app/deploy/
+    compose.yml, so the default project dir is /app/deploy/ and
+    `../data/bookorbit-db` resolves to /app/data/bookorbit-db — a
+    path the docker daemon happily creates as an empty new directory
+    on the host, completely ignoring the real persistent data at
+    <host_repo>/data/bookorbit-db.
+
+    We want `../data/bookorbit-db` to resolve to <host_repo>/data/
+    bookorbit-db, so the project directory needs to be
+    <host_repo>/deploy. HOST_REPO_PATH (set in compose.yml from
+    ${PWD} at compose-up time) gives us <host_repo>; we tack on
+    /deploy here. compose.yml's bind-mount paths assume the file
+    lives in <repo>/deploy/, which is the convention bootstrap.sh
+    enforces and the only layout we ship.
     """
     host_root = os.environ.get("HOST_REPO_PATH")
     if not host_root:
-        # Best-effort fallback (correct from the host, wrong from
-        # the container). Real production calls always have the env
-        # var set by compose.yml.
-        host_root = str(compose_path.parent.parent)
+        # Best-effort fallback: when biblichor is run outside a
+        # compose context (e.g. unit tests, native dev install),
+        # compose_path.parent is the right project directory on the
+        # host filesystem.
+        project_dir = str(compose_path.parent)
+    else:
+        project_dir = f"{host_root.rstrip('/')}/deploy"
     return [
         "compose",
         "-f",
@@ -501,7 +516,7 @@ def _compose_args(compose_path: Path, env_file: Path) -> list[str]:
         "--env-file",
         str(env_file),
         "--project-directory",
-        host_root,
+        project_dir,
     ]
 
 

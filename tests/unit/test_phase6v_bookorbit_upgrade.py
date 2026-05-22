@@ -304,15 +304,19 @@ def test_apply_upgrade_passes_project_directory_to_compose(tmp_path: Path, monke
         )
 
     # At least one docker compose call must carry --project-directory
-    # and the host-side repo root (NOT compose.parent which would be
-    # /app/deploy from inside the container).
+    # and the host-side deploy/ subdir (NOT compose.parent which would
+    # be /app/deploy from inside the container, NOR HOST_REPO_PATH
+    # itself which would let `..` climb above the repo). The compose
+    # file's relative bind-mounts assume the file lives in <repo>/
+    # deploy/ — that's the layout bootstrap.sh enforces and the only
+    # one we ship.
     compose_calls = [args for args in runner.calls if args and args[0] == "compose"]
     assert compose_calls, "no docker compose calls were made"
     for args in compose_calls:
         assert "--project-directory" in args, f"compose call missing flag: {args}"
         idx = args.index("--project-directory")
-        assert args[idx + 1] == "/home/me/repo", (
-            f"--project-directory not pointing at HOST_REPO_PATH: {args}"
+        assert args[idx + 1] == "/home/me/repo/deploy", (
+            f"--project-directory should be HOST_REPO_PATH/deploy, got: {args[idx + 1]}"
         )
 
 
