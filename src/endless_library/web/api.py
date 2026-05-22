@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+from endless_library.db.bench_jobs import BenchJobsRepo
 
 from endless_library.bench import format_table, load_queries, run_bench
 from endless_library.config import save_config
@@ -671,18 +674,72 @@ def register(app: FastAPI) -> None:
         }
         return {"history": out, "success_rates_30d": rates}
 
-    @router.post("/bench/run")
+    @router.post("/bench/run", status_code=202)
     async def run_bench_endpoint(request: Request, mode: str = "quick"):
         deps = request.app.state.deps
         qs, quick_idx = load_queries()
         if mode == "quick":
             qs = [qs[i] for i in quick_idx if i < len(qs)]
-        from functools import partial
+        from endless_library.scrapers import registry
+        strats = registry.enabled_order(deps.cfg.scrapers)
+        progress_total = len(strats) * len(qs)
+        job_id = deps.bench_jobs.create(mode=mode, progress_total=progress_total)
+        asyncio.create_task(_bench_worker(deps, job_id, qs, strats))
+        return {"job_id": job_id}
 
-        outcomes = await asyncio.to_thread(partial(run_bench, deps.cfg, qs, repo=deps.bench))
+    async def _bench_worker(deps, job_id: int, qs, strats):
+        """Background worker: runs bench per-scraper, increments progress, checks cancel."""
+        from functools import partial
+        try:
+            outcomes_so_far: list = []
+            for s_name in strats:
+                if deps.bench_jobs.is_cancel_requested(job_id):
+                    deps.bench_jobs.finish(job_id, status="cancelled",
+                                           summary_json=json.dumps([asdict(o) for o in outcomes_so_far]))
+                    return
+                os_for_one = await asyncio.to_thread(
+                    partial(run_bench, deps.cfg, qs, repo=deps.bench, strategies=[s_name])
+                )
+                outcomes_so_far.extend(os_for_one)
+                for _ in os_for_one:
+                    deps.bench_jobs.increment_progress(job_id)
+            deps.bench_jobs.finish(
+                job_id, status="done",
+                summary_json=json.dumps([asdict(o) for o in outcomes_so_far]),
+            )
+        except Exception as e:
+            deps.bench_jobs.finish(job_id, status="failed",
+                                   summary_json=json.dumps({"error": f"{type(e).__name__}: {e}"}))
+
+    @router.get("/bench/jobs")
+    def list_bench_jobs(request: Request, limit: int = 20):
+        deps = request.app.state.deps
+        rows = deps.bench_jobs.list_recent(limit=limit)
+        return {"jobs": [_job_row_to_dict(r) for r in rows]}
+
+    @router.get("/bench/jobs/{job_id}")
+    def get_bench_job(job_id: int, request: Request):
+        deps = request.app.state.deps
+        row = deps.bench_jobs.get(job_id)
+        if row is None:
+            raise HTTPException(404, f"no bench job with id={job_id}")
+        return _job_row_to_dict(row)
+
+    @router.post("/bench/jobs/{job_id}/cancel")
+    def cancel_bench_job(job_id: int, request: Request):
+        deps = request.app.state.deps
+        row = deps.bench_jobs.get(job_id)
+        if row is None:
+            raise HTTPException(404, f"no bench job with id={job_id}")
+        deps.bench_jobs.request_cancel(job_id)
+        return {"ok": True}
+
+    def _job_row_to_dict(r):
         return {
-            "outcomes": [asdict(o) for o in outcomes],
-            "table": format_table(outcomes),
+            "id": r.id, "started_at": r.started_at, "finished_at": r.finished_at,
+            "mode": r.mode, "status": r.status,
+            "progress_done": r.progress_done, "progress_total": r.progress_total,
+            "summary_json": r.summary_json,
         }
 
     @router.post("/scrapers/{name}/test_now")

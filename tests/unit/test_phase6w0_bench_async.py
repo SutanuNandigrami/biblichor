@@ -148,3 +148,89 @@ def test_run_bench_circuit_breaks_after_3_consecutive_fails(tmp_path, monkeypatc
     by_note = [o.note for o in outcomes]
     assert sum(1 for n in by_note if "circuit-broken" in n) == 3
     assert sum(1 for n in by_note if "RuntimeError" in n) == 3
+
+import json as _json
+from types import SimpleNamespace
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from endless_library.web import api as api_mod
+from endless_library.db.bench import BenchRunRepo
+from endless_library.config import ScrapersCfg
+
+
+def _app(tmp_path: Path) -> FastAPI:
+    db = tmp_path / "x.db"
+    init_db(db)
+    app = FastAPI()
+    cfg = SimpleNamespace(
+        scrapers=ScrapersCfg(order=[], enabled={}),
+        bench=SimpleNamespace(per_query_timeout_sec=20,
+                              circuit_break_after_consecutive_fails=3),
+        general=SimpleNamespace(books_dir='/tmp/books'),
+        smtp=SimpleNamespace(daily_cap=80),
+    )
+    app.state.deps = SimpleNamespace(
+        db_path=db, cfg=cfg,
+        bench=BenchRunRepo(db),
+        bench_jobs=BenchJobsRepo(db),
+        books=SimpleNamespace(pending=lambda **kw: []),
+    )
+    app.state.scheduler = SimpleNamespace(running=True)
+    app.state.config_path = Path('/tmp/cfg.yaml')
+    api_mod.register(app)
+    return app
+
+
+def test_post_bench_run_returns_202_with_job_id(tmp_path: Path):
+    app = _app(tmp_path)
+    client = TestClient(app)
+    r = client.post('/api/bench/run?mode=quick')
+    assert r.status_code == 202
+    body = r.json()
+    assert 'job_id' in body and isinstance(body['job_id'], int)
+
+
+def test_get_bench_jobs_returns_list_with_recent_first(tmp_path: Path):
+    app = _app(tmp_path)
+    client = TestClient(app)
+    client.post('/api/bench/run?mode=quick')
+    client.post('/api/bench/run?mode=quick')
+    r = client.get('/api/bench/jobs')
+    assert r.status_code == 200
+    jobs = r.json()['jobs']
+    assert len(jobs) >= 2
+    assert jobs[0]['id'] > jobs[1]['id']
+
+
+def test_get_bench_job_returns_status_and_progress(tmp_path: Path):
+    app = _app(tmp_path)
+    client = TestClient(app)
+    r = client.post('/api/bench/run?mode=quick')
+    job_id = r.json()['job_id']
+    g = client.get(f'/api/bench/jobs/{job_id}')
+    assert g.status_code == 200
+    body = g.json()
+    assert body['id'] == job_id
+    assert body['status'] in ('running', 'done')
+    assert 'progress_done' in body
+    assert 'progress_total' in body
+
+
+def test_get_bench_job_returns_404_for_missing(tmp_path: Path):
+    app = _app(tmp_path)
+    client = TestClient(app)
+    r = client.get('/api/bench/jobs/9999')
+    assert r.status_code == 404
+
+
+def test_post_bench_job_cancel_flips_status(tmp_path: Path):
+    app = _app(tmp_path)
+    client = TestClient(app)
+    r = client.post('/api/bench/run?mode=quick')
+    job_id = r.json()['job_id']
+    c = client.post(f'/api/bench/jobs/{job_id}/cancel')
+    assert c.status_code == 200
+    g = client.get(f'/api/bench/jobs/{job_id}')
+    assert g.json()['status'] in ('cancelled', 'done')

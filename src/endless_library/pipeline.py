@@ -12,6 +12,7 @@ from endless_library.bookorbit.drop import (
 from endless_library.config import Config
 from endless_library.convert import ConvertError, convert_to_epub
 from endless_library.db.bench import BenchRunRepo
+from endless_library.db.bench_jobs import BenchJobsRepo
 from endless_library.db.books import BookRepo, BookRow
 from endless_library.db.candidates import CandidateRepo
 from endless_library.db.events import EventRepo
@@ -44,6 +45,7 @@ class PipelineDeps:
     events: EventRepo
     sources: SourceAccountRepo
     bench: BenchRunRepo
+    bench_jobs: BenchJobsRepo
     mirrors: MirrorRepo
 
     @classmethod
@@ -60,6 +62,7 @@ class PipelineDeps:
             events=EventRepo(db_path),
             sources=SourceAccountRepo(db_path),
             bench=BenchRunRepo(db_path),
+            bench_jobs=BenchJobsRepo(db_path),
             mirrors=mirrors,
         )
 
