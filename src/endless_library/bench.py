@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures as _cf
 import logging
 import time
 from collections.abc import Iterable
@@ -140,7 +141,20 @@ def run_bench(
                 tag_map.get(s_name),
             )
             continue
+        timeout_sec = float(getattr(cfg.bench, "per_query_timeout_sec", 20))
+        breaker_limit = int(getattr(cfg.bench, "circuit_break_after_consecutive_fails", 3))
+        consecutive_fails = 0
         for q in scoped:
+            if consecutive_fails >= breaker_limit:
+                outcomes.append(BenchOutcome(
+                    scraper=s_name, query=q.title, success=False, duration_ms=0,
+                    candidates=0, matched_isbn=False,
+                    note=f"circuit-broken: skipped after {breaker_limit} consecutive failures",
+                ))
+                if repo:
+                    repo.record(scraper=s_name, query=q.title, success=False,
+                                duration_ms=0, notes="circuit-broken")
+                continue
             sq = SearchQuery(
                 title=q.title,
                 author=q.author,
@@ -154,7 +168,9 @@ def run_bench(
             matched = False
             note = ""
             try:
-                cands = scraper.search(sq)
+                with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+                    fut = ex.submit(scraper.search, sq)
+                    cands = fut.result(timeout=timeout_sec)
                 n_cands = len(cands)
                 if cands:
                     # Match if any candidate's title/author roughly matches AND format ok.
@@ -166,10 +182,16 @@ def run_bench(
                             matched = True
                             break
                     success = matched
+            except _cf.TimeoutError:
+                note = f"timeout after {timeout_sec}s"
             except NotImplementedError as e:
                 note = f"stub: {e}"
             except Exception as e:
                 note = f"{type(e).__name__}: {e}"
+            if not success:
+                consecutive_fails += 1
+            else:
+                consecutive_fails = 0
             dur = int((time.monotonic() - t0) * 1000)
             outcomes.append(
                 BenchOutcome(

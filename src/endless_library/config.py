@@ -231,6 +231,12 @@ class StorageCfg(BaseModel):
     hybrid_mode: str = "mirror"  # "mirror" or "scheduled"
 
 
+
+class BenchCfg(BaseModel):
+    per_query_timeout_sec: int = 20
+    circuit_break_after_consecutive_fails: int = 3
+
+
 class Config(BaseModel):
     general: GeneralCfg = GeneralCfg()
     kindle: KindleCfg = KindleCfg()
@@ -242,6 +248,7 @@ class Config(BaseModel):
     security: SecurityCfg = SecurityCfg()
     storage: StorageCfg = StorageCfg()
     bookorbit: BookOrbitCfg = BookOrbitCfg()
+    bench: BenchCfg = BenchCfg()
 
     def public_view(self) -> dict:
         d = self.model_dump()

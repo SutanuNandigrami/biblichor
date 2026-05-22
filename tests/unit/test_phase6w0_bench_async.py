@@ -86,3 +86,65 @@ def test_get_returns_none_for_missing_id(tmp_path: Path):
     init_db(db)
     repo = BenchJobsRepo(db)
     assert repo.get(9999) is None
+
+
+import time
+import types
+
+from endless_library.bench import BenchQuery, run_bench
+
+
+class _SlowScraper:
+    name = "slow"
+    def __init__(self, *a, **kw): pass
+    def search(self, q):
+        time.sleep(2)
+        return []
+
+
+class _FailingScraper:
+    name = "fail"
+    def __init__(self, *a, **kw): pass
+    def search(self, q):
+        raise RuntimeError("boom")
+
+
+def _fake_registry(monkeypatch, by_name: dict):
+    from endless_library.scrapers import registry as r
+    monkeypatch.setattr(r, "_REGISTRY", by_name)
+    monkeypatch.setattr(r, "enabled_order", lambda cfg: list(by_name.keys()))
+    monkeypatch.setattr(r, "build", lambda n, cfg, **kw: by_name[n]())
+
+
+def test_run_bench_records_timeout_as_failure(tmp_path, monkeypatch):
+    _fake_registry(monkeypatch, {"slow": _SlowScraper})
+    cfg = types.SimpleNamespace(
+        scrapers=types.SimpleNamespace(
+            order=["slow"], enabled={"slow": True},
+            format_priority=("epub",),
+        ),
+        bench=types.SimpleNamespace(per_query_timeout_sec=0.5,
+                                    circuit_break_after_consecutive_fails=3),
+    )
+    qs = [BenchQuery("X", "Y", "", "en")]
+    outcomes = run_bench(cfg, qs)
+    assert len(outcomes) == 1
+    assert outcomes[0].success is False
+    assert "timeout" in outcomes[0].note.lower()
+
+
+def test_run_bench_circuit_breaks_after_3_consecutive_fails(tmp_path, monkeypatch):
+    _fake_registry(monkeypatch, {"fail": _FailingScraper})
+    cfg = types.SimpleNamespace(
+        scrapers=types.SimpleNamespace(
+            order=["fail"], enabled={"fail": True},
+            format_priority=("epub",),
+        ),
+        bench=types.SimpleNamespace(per_query_timeout_sec=5,
+                                    circuit_break_after_consecutive_fails=3),
+    )
+    qs = [BenchQuery(f"Q{i}", "A", "", "en") for i in range(6)]
+    outcomes = run_bench(cfg, qs)
+    by_note = [o.note for o in outcomes]
+    assert sum(1 for n in by_note if "circuit-broken" in n) == 3
+    assert sum(1 for n in by_note if "RuntimeError" in n) == 3
