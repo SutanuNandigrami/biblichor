@@ -238,3 +238,74 @@ behind Cloudflare Turnstile that needs human interaction once):
 2. Upload via `POST /api/scrapers/cookies` (file form-field).
 3. Cookies are stored per-domain in the encrypted secrets store
    and biblichor adds them to outbound requests for that domain.
+
+## Phase 6v: tagged corpus + scraper health
+
+### Tagged corpus
+
+`bench/queries.yaml` queries each carry a `tags:` list, and a
+top-level `corpus_tags:` map routes specialised scrapers to the
+subset they can answer:
+
+```yaml
+queries:
+  - title: "The Pragmatic Programmer"
+    tags: [en, modern]
+  - title: "Pride and Prejudice"
+    author: "Austen"
+    tags: [en, pd]
+  - title: "হিমু"
+    author: "Humayun Ahmed"
+    tags: [bn, kindlebangla]
+
+corpus_tags:
+  kindlebangla_curl: [kindlebangla]
+  gutendex: [pd]
+  standard_ebooks: [pd]
+  oapen_doab: [pd]
+  wikisource: [pd]
+```
+
+A scraper absent from `corpus_tags` is general-purpose and sees
+every query (Anna's, libgen, welib, zlib). A scraper listed there
+only sees queries whose tags intersect the scraper's accepted set
+— so `kindlebangla_curl` is no longer benched against "Sapiens"
+and `gutendex` is no longer benched against "Project Hail Mary".
+
+The Phase 6v default corpus is 5 modern English titles, 5
+Gutenberg-era public-domain classics, and 5 Bengali kindlebangla
+slugs pulled from the live production DB. `quick_indices` samples
+one of each so `bench --quick` isn't English-only.
+
+### Scraper health: never-tested vs broken
+
+The dashboard used to render a flat "0% success (30d)" for every
+scraper, which conflated two very different states: "we benched
+it and it failed every time" and "we never benched it at all".
+`BenchRunRepo.ever_run(scraper)` returns True iff any row exists
+in `bench_runs` for that scraper, and the Scrapers page renders
+a **never tested** badge in place of 0% when so.
+
+Companion fields surfaced by `GET /api/scrapers`:
+
+- `in_chain`: `enabled AND in cfg.scrapers.order`. The "enabled"
+  toggle alone does not put a scraper in the pipeline chain —
+  reordering is also required. This was previously invisible in
+  the UI.
+- `corpus_tags`: which query tags the scraper is benched against
+  (empty list = general-purpose). Rendered as a `corpus: <tags>`
+  badge next to specialised scrapers so it's obvious why a given
+  pass rate covers only part of the corpus.
+- `last_run_at`: timestamp of the most recent bench outcome, drives
+  tooltips.
+
+### Test-now button
+
+The Scrapers page exposes a per-row **Test now** button that calls
+`POST /api/scrapers/{name}/test_now`. The endpoint picks a single
+query from the scraper's corpus (Bengali for `kindlebangla_curl`,
+PD classic for `gutendex`, the first general-corpus query for
+unfiltered scrapers), runs it, and persists the outcome to
+`bench_runs` so the dashboard's success rate updates immediately.
+Useful for one-shot "is this scraper alive right now?" probes
+without kicking off the full bench.

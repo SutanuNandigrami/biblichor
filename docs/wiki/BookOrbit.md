@@ -229,3 +229,90 @@ BookOrbit needs UID 1000 ownership on the shared library mount.
 See [Configuration → Host filesystem](Configuration#host-filesystem-requirements)
 for the `deploy/fix-perms.sh` helper and the explicit warning about
 blanket chowns.
+
+## Upgrading BookOrbit (Phase 6v)
+
+biblichor exposes a guarded upgrade button at **Settings → BookOrbit
+upgrade**. The card shows current + latest versions, the release
+notes for the candidate, and a Preflight → Apply flow with
+automatic rollback.
+
+### How it works
+
+1. **Status** (`GET /api/bookorbit/upgrade/status`) queries
+   BookOrbit's own `/api/v1/app-info` to learn current + latest.
+   BookOrbit polls upstream releases itself, so we don't run a
+   parallel GitHub check. The endpoint also reports whether
+   `/var/run/docker.sock` is reachable; if not, Apply stays hidden.
+
+2. **Preflight** (`POST /api/bookorbit/upgrade/preflight`) runs
+   seven checks:
+
+   | Check                | What it verifies                                                |
+   |----------------------|-----------------------------------------------------------------|
+   | `docker.socket`      | biblichor can talk to the host Docker daemon                    |
+   | `image.pull`         | `docker pull ghcr.io/bookorbit/bookorbit:<target>` succeeds     |
+   | `image.inspect`      | Arch + size (sanity)                                            |
+   | `disk.free`          | ≥ 2 GB free on the volume holding `/data/backups`               |
+   | `db.dumpable`        | `pg_isready` in the bookorbit-db container                      |
+   | `changelog.safe`     | Release notes contain no DANGER_WORDS (`breaking change`, `manual migration`, `data loss`, ...) |
+   | `backup.dir_writable`| `/data/backups` exists and accepts writes                       |
+
+   On pass, a 15-minute token is generated and stashed in
+   `app.state.upgrade_state`. The SPA's Apply button only enables
+   when this token exists and hasn't expired.
+
+3. **Apply** (`POST /api/bookorbit/upgrade/apply`) requires the
+   token and executes the six steps below. Any failure after
+   `compose.swap_image` triggers automatic rollback (revert the
+   image SHA in `compose.yml`, `docker compose up -d bookorbit`):
+
+   | Step                  | What it does                                                            |
+   |-----------------------|-------------------------------------------------------------------------|
+   | `token.validate`      | Refuses mismatched / expired tokens                                     |
+   | `db.backup`           | `pg_dump | gzip -9` → `/data/backups/bookorbit-pre-<target>-<ts>.sql.gz`|
+   | `compose.swap_image`  | Surgical regex replaces only the bookorbit service's `image:` line      |
+   | `compose.up_bookorbit`| `docker compose -f deploy/compose.yml --env-file .env up -d bookorbit`  |
+   | `health.poll`         | `GET /api/v1/health` until `database.status == "up"` or 90s             |
+   | `version.verify`      | `/api/v1/app-info` (or `docker inspect` if auth-gated) confirms target  |
+
+### One-time setup
+
+The upgrade button requires biblichor to reach the host Docker
+daemon. Add the docker.sock bind-mount + group_add lines from
+`deploy/compose.yml` (the Phase 6v.1 commit landed them by
+default), and set `DOCKER_GID` in `.env` to match your host:
+
+```bash
+echo "DOCKER_GID=$(getent group docker | cut -d: -f3)" >> .env
+docker compose -f deploy/compose.yml --env-file .env up -d --build biblichor
+```
+
+If you'd rather keep biblichor away from the host daemon, comment
+out the bind-mount + `group_add:` lines in `compose.yml`. The
+upgrade card then surfaces a "docker socket not reachable"
+explanation and the rest of biblichor keeps working unchanged.
+
+### Backups and rollback
+
+`db.backup` writes to `/data/backups/` and is kept indefinitely —
+no auto-prune. Each successful upgrade leaves a backup that the
+operator can manually restore via `pg_restore` in the bookorbit-db
+container if something goes wrong after Apply has finished
+successfully.
+
+Rollback is automatic during the Apply sequence. If `health.poll`
+or `version.verify` fails, the previous image SHA is restored in
+`compose.yml` and `docker compose up -d bookorbit` brings the old
+container back. The backup remains untouched and the `ApplyResult`
+returned to the SPA records both the failed step and the rollback
+outcome.
+
+### Privilege note
+
+Granting biblichor access to `/var/run/docker.sock` is equivalent
+to granting root over every container on the host. Anyone who
+compromises biblichor can manage / delete / recreate any container
+the daemon controls. This is the trade-off for one-click upgrades;
+operators who want a tighter blast radius should run the upgrade
+out of band and skip the docker mount.

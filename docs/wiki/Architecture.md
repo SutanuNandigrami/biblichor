@@ -284,3 +284,87 @@ the Phase 6s.3 and 6u additions with HTTP 400. It now reads
 can build is fair game.
 
 **Test count: 851 passed / 2 skipped.**
+
+## Phase 6v — corpus-aware bench, scraper transparency, BookOrbit upgrade
+
+**Per-scraper bench corpus.** `bench/queries.yaml` queries now carry
+a `tags` field, and the file has a top-level `corpus_tags` map that
+routes specialised scrapers to the subset they can answer. The
+default corpus picks up 5 modern English titles, 5 Gutenberg-era
+public-domain classics, and 5 Bengali kindlebangla slugs pulled from
+the live production database. Routing:
+
+| Scraper                     | Sees queries tagged |
+|-----------------------------|---------------------|
+| `kindlebangla_curl`         | `kindlebangla`      |
+| `gutendex`                  | `pd`                |
+| `standard_ebooks`           | `pd`                |
+| `oapen_doab`                | `pd`                |
+| `wikisource`                | `pd`                |
+| `annas_curl` / `libgen_curl` / `welib_*` / `zlib_singlelogin` | unfiltered (general-purpose) |
+
+`bench.queries_for_scraper(qs, name, corpus_tags)` is the filter;
+`run_bench` loads `load_corpus_tags()` automatically when not given
+one, so legacy callers don't need a migration. `load_queries`
+signature is unchanged.
+
+**Scraper health distinguishes never-tested from broken.**
+`BenchRunRepo.ever_run(scraper)` returns True iff there is at least
+one recorded outcome for that scraper, regardless of pass/fail.
+`GET /api/scrapers` now also returns `ever_run`, `last_run_at`,
+`in_chain` (`enabled AND in cfg.scrapers.order`) and `corpus_tags`
+per scraper. The Scrapers page renders a "never tested" badge in
+place of a misleading 0% rate, shows an explicit "in chain" /
+"not in chain" indicator alongside the enabled toggle (the former
+"enabled" badge alone hid the case where a scraper is toggled on
+but absent from `order`, in which case the pipeline silently never
+calls it), and exposes a per-row "Test now" button. `POST
+/api/scrapers/{name}/test_now` runs one query the scraper actually
+accepts (Bengali for `kindlebangla_curl`, PD classic for `gutendex`,
+etc.) and persists the outcome to `bench_runs`.
+
+**Safe BookOrbit upgrade.** The Settings page carries an upgrade card
+that walks the user through version → preflight → apply with full
+rollback. The flow:
+
+1. `GET /api/bookorbit/upgrade/status` queries BookOrbit's own
+   `/api/v1/app-info` for current + latest version (BookOrbit polls
+   upstream itself, so we don't run a parallel GitHub check),
+   fetches the release notes from GitHub's releases API, and
+   reports whether `/var/run/docker.sock` is reachable from inside
+   biblichor.
+2. `POST /api/bookorbit/upgrade/preflight` runs seven checks:
+   `docker.socket`, `image.pull` (heavy — actually pulls the
+   candidate image), `image.inspect`, `disk.free` (≥ 2 GB),
+   `db.dumpable` (`pg_isready`), `changelog.safe` (scans release
+   notes for DANGER_WORDS: `breaking change`, `manual migration`,
+   `data loss`, ...), `backup.dir_writable`. On pass, a 15-minute
+   token + target + expiry is stashed in `app.state.upgrade_state`.
+3. `POST /api/bookorbit/upgrade/apply` requires that token and
+   executes: `token.validate` → `db.backup` (pg_dump | gzip into
+   `/data/backups/bookorbit-pre-<target>-<ts>.sql.gz`) →
+   `compose.swap_image` (surgical regex on `deploy/compose.yml`'s
+   bookorbit service image line; biblichor / db / flaresolverr
+   untouched) → `compose.up_bookorbit` (`docker compose up -d`)
+   → `health.poll` (`GET /api/v1/health` until DB up or 90s) →
+   `version.verify`. Any failure after `compose.swap_image` fires
+   rollback: revert the SHA, `docker compose up -d bookorbit` to
+   bring back the prior container. Backups are kept indefinitely.
+
+**Docker access.** `deploy/compose.yml` bind-mounts
+`/var/run/docker.sock` + `deploy/` + the host `.env` into
+biblichor. `group_add: ["${DOCKER_GID:-999}"]` lets the in-container
+UID 1000 write to the socket; users set `DOCKER_GID` in `.env`
+(check with `getent group docker | cut -d: -f3`). The Dockerfile
+installs the static `docker` CLI binary and the `docker compose`
+plugin via the official tarball — multi-arch via the buildx
+`TARGETARCH` arg (`x86_64` ↔ `aarch64`). The compose plugin lives
+at `/usr/local/lib/docker/cli-plugins/docker-compose`.
+
+**Privilege boundary.** A compromise of biblichor with docker socket
+access can manage every container on the host. The bind mount is
+opt-in via `compose.yml`; the UI degrades to a "docker socket not
+reachable" banner with explicit remediation steps when omitted, and
+the rest of biblichor keeps working.
+
+**Test count: 893 passed.**
