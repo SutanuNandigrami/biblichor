@@ -51,16 +51,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # not the engine — the static tarball lets us extract just the docker
 # client without pulling in dockerd / containerd / runc. Compose
 # plugin lives at the user-local CLI plugins path so it's picked up
-# regardless of UID. Pinned versions so an upstream silent break can't
-# corrupt the upgrade flow.
+# regardless of UID. Pinned versions so an upstream silent break
+# can't corrupt the upgrade flow. Multi-arch: maps TARGETARCH
+# (set by buildx) to the upstream tarball's arch tag — x86_64 for
+# amd64 hosts, aarch64 for arm64 (Pi 4/5, Apple Silicon, Oracle
+# Ampere, etc.).
 ARG DOCKER_CLI_VERSION=25.0.5
 ARG DOCKER_COMPOSE_VERSION=v2.27.0
-RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
-    | tar -xz -C /tmp \
+ARG TARGETARCH
+RUN case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+        amd64) DARCH=x86_64 ;; \
+        arm64) DARCH=aarch64 ;; \
+        *) echo "Unsupported TARGETARCH=${TARGETARCH}" >&2 && exit 1 ;; \
+    esac \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${DARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
+        | tar -xz -C /tmp \
     && install -m 0755 /tmp/docker/docker /usr/local/bin/docker \
     && rm -rf /tmp/docker \
     && mkdir -p /usr/local/lib/docker/cli-plugins \
-    && curl -fsSL "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-linux-x86_64" \
+    && curl -fsSL "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-linux-${DARCH}" \
         -o /usr/local/lib/docker/cli-plugins/docker-compose \
     && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
