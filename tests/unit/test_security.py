@@ -199,7 +199,8 @@ def test_unpack_extracts_zip_wrapped_epub(tmp_path: Path):
     inner.unlink()  # leave only the wrapper
     result = unpack_if_archive(wrapper)
     assert result.was_archive
-    assert result.path.name == "book.epub"
+    # Phase 6u.5c: outer downloaded filename is the slot (collision-proof).
+    assert result.path.name == "book.zip"
     assert result.path.exists()
     # The archive itself was renamed .orig
     assert (tmp_path / "book.zip.orig").exists()

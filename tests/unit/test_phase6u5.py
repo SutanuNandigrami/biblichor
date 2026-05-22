@@ -76,6 +76,45 @@ def test_claim_rejects_terminal_states(db: Path) -> None:
         assert repo.claim_for_processing(bid) is False, terminal
 
 
+def test_reset_zombies_returns_to_queued_not_failed(db: Path) -> None:
+    """Phase 6u.5b: zombie sweep used to mark stale in-flight books as
+    'failed'. But books with file_path set are recoverable via the
+    resume path — failing them just dirties the dashboard and gives
+    operators no actionable signal. Reset to 'queued' instead and
+    record the cause in last_error."""
+    bid = _seed_book(db, status="searching")
+    # Backdate so the zombie sweep picks it up
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "UPDATE books SET updated_at = datetime('now', '-60 minutes') WHERE id = ?",
+        (bid,),
+    )
+    conn.commit()
+    conn.close()
+
+    repo = BookRepo(db)
+    n = repo.reset_zombies(stale_minutes=30)
+    assert n == 1
+    row = sqlite3.connect(db).execute(
+        "SELECT status, last_error FROM books WHERE id = ?", (bid,)
+    ).fetchone()
+    assert row[0] == "queued"
+    assert "zombie" in (row[1] or "").lower()
+
+
+def test_reset_zombies_skips_fresh_in_flight(db: Path) -> None:
+    """Books mid-pipeline but updated within stale_minutes are not
+    touched."""
+    bid = _seed_book(db, status="searching")
+    repo = BookRepo(db)
+    n = repo.reset_zombies(stale_minutes=30)
+    assert n == 0
+    row = sqlite3.connect(db).execute(
+        "SELECT status FROM books WHERE id = ?", (bid,)
+    ).fetchone()
+    assert row[0] == "searching"
+
+
 # --- download.py: httpx exceptions wrap to DownloadError ----------------------
 
 def _stub_handle(url: str = "http://book.example/x.epub") -> DownloadHandle:

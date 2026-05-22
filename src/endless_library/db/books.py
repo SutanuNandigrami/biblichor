@@ -328,13 +328,22 @@ class BookRepo:
             )
 
     def reset_zombies(self, *, stale_minutes: int) -> int:
+        """Recover books stuck in mid-pipeline status (searching /
+        downloading / converting / sending) for longer than
+        stale_minutes. Phase 6u.5b: return them to 'queued' (not
+        'failed') so the resume path picks them up cleanly via
+        downloaded_at + file_path. Mid-pipeline books with a file
+        already on disk just need to advance — they don't need their
+        attempts budget burned. Books without a file get a fresh
+        search next cycle.
+        """
         in_flight = ",".join(f"'{s}'" for s in _IN_FLIGHT)
         with self._connect() as conn:
             cur = conn.execute(
                 f"""
                 UPDATE books
-                   SET status = 'failed',
-                       last_error = 'reset by zombie sweep',
+                   SET status = 'queued',
+                       last_error = 'reset by zombie sweep (will resume)',
                        updated_at = datetime('now')
                  WHERE status IN ({in_flight})
                    AND updated_at < datetime('now', ?)

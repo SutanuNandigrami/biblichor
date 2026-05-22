@@ -479,11 +479,17 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
     are returned to a sentinel "in-flight" status so process_queue can
     skip counting them.
     """
-    # Resume paths (downloaded_at / converted_at) bypass the claim because
-    # they don't redo the download — they touch the file on disk and
-    # advance straight to convert/send. Those steps are idempotent
-    # against a parallel run (set_status updates the same row to the
-    # same target).
+    # Phase 6u.5b: atomic claim FIRST. The resume path also passes
+    # through this gate now so two cycles can't both Kindle-send the
+    # same already-downloaded book. claim_for_processing flips the
+    # row queued/failed/needs_review -> searching; if 0 rows match,
+    # someone else owns it this cycle.
+    if not deps.books.claim_for_processing(book.id):
+        return "in_flight"
+
+    # Resume paths (downloaded_at + file_path). The 'searching' state
+    # is a benign mid-pipeline placeholder while we convert/send; the
+    # status will flip to 'sent' or 'sending' as we progress.
     if book.downloaded_at and book.file_path:
         existing = Path(book.file_path)
         if existing.exists() and existing.stat().st_size > 0:
@@ -500,12 +506,6 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
             message="resume: downloaded file missing on disk; restarting from search",
         )
 
-    # Phase 6u.5: atomic claim. If another worker already flipped this
-    # row out of queued/failed/needs_review, skip — they own the book
-    # for this cycle. process_queue will count it under "skipped" so the
-    # tally stays sane.
-    if not deps.books.claim_for_processing(book.id):
-        return "in_flight"
     deps.events.append(book_id=book.id, kind="state_change", message="-> searching")
 
     candidates, _strat = _search_with_strategies(deps, book)

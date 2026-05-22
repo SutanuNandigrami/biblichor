@@ -115,7 +115,13 @@ def detect_archive(path: Path) -> str | None:
 
 
 def _check_member_safe(name: str) -> None:
-    """Path-traversal + extension + nested-archive guard. Raises on fail."""
+    """Path-traversal + extension + nested-archive guard. Raises on fail.
+
+    Phase 6u.5d: directory entries (trailing '/') are skipped — they
+    carry no executable content and Path.suffix mis-parses their names
+    when they contain periods (e.g. a Bengali directory like
+    'Ph.D. বল্টুভাই/' would see '. বল্টুভাই' as the 'extension'). The
+    extension allowlist only meaningfully applies to files."""
     if not name:
         raise ArchiveSafetyError("empty member name")
     if name.startswith("/") or "\\" in name:
@@ -128,7 +134,12 @@ def _check_member_safe(name: str) -> None:
     if any(p == ".." for p in parts):
         raise ArchiveSafetyError(f"path traversal: {name!r}")
 
-    suffix = Path(name).suffix.lower()
+    # Directory entries: trailing slash or empty basename → no file to
+    # extract. Skip extension check.
+    if name.endswith("/") or not parts[-1]:
+        return
+
+    suffix = Path(parts[-1]).suffix.lower()
     if suffix in NESTED_ARCHIVE_EXTENSIONS:
         raise ArchiveSafetyError(f"nested archive forbidden: {name!r}")
     if suffix and suffix not in ALLOWED_EXTENSIONS:

@@ -119,17 +119,30 @@ def unpack_if_archive(
         shutil.rmtree(dest, ignore_errors=True)
         raise UnpackError(f"AV scan rejected extracted file: {av.threat or av.detail}")
 
-    # Move the extracted ebook out of the temp dir alongside the archive,
-    # so the pipeline's normal `data/books/<title>.epub` shape is preserved.
-    final_path = downloaded_path.parent / ebook_path.name
+    # Phase 6u.5c: collision-proof extracted-file naming.
+    #
+    # Old behaviour used `ebook_path.name` (the filename *inside* the
+    # archive) as the destination basename. kindlebangla RARs frequently
+    # share or near-share inner filenames across different books (after
+    # filesystem normalisation), so book B silently overwrote book A's
+    # extracted EPUB and stale-ed every book.file_path that pointed at
+    # it. Symptom: ebook-meta exit 1, FileNotFoundError on resume.
+    #
+    # New: rename the original archive to <name>.orig first (freeing
+    # the original slot), then move the extracted file into that slot.
+    # The downloaded filename is derived from the provider's unique
+    # identifier (kindlebangla slug, Anna's md5, etc) so collisions are
+    # structurally impossible.
+    with contextlib.suppress(OSError):
+        downloaded_path.rename(
+            downloaded_path.with_suffix(downloaded_path.suffix + ".orig")
+        )
+
+    final_path = downloaded_path  # original slot, now free
     if final_path.exists():
+        # Belt-and-suspenders: any stragglers in this slot drop now.
         final_path.unlink()
     shutil.move(str(ebook_path), str(final_path))
     shutil.rmtree(dest, ignore_errors=True)
-
-    # We no longer need the original archive. Keep it as <name>.orig for
-    # debug if the user wants it; the pipeline only cares about final_path.
-    with contextlib.suppress(OSError):
-        downloaded_path.rename(downloaded_path.with_suffix(downloaded_path.suffix + ".orig"))
 
     return UnpackResult(path=final_path, was_archive=True, av_result=av)
