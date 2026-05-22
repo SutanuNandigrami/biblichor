@@ -28,7 +28,7 @@ import logging
 from typing import Any
 from urllib.parse import quote_plus, urljoin
 
-import httpx
+from endless_library.scrapers.http_client import make_client
 from bs4 import BeautifulSoup
 
 from endless_library.config import ScrapersCfg
@@ -188,10 +188,9 @@ class KindleBanglaCurl:
                 return None
             return body.decode("utf-8", errors="replace") if isinstance(body, bytes) else body
         try:
-            r = httpx.get(
+            r = make_client(timeout=20.0).get(
                 url,
-                timeout=20.0,
-                follow_redirects=True,
+                allow_redirects=True,
                 headers={"User-Agent": USER_AGENT},
             )
         except Exception as e:
@@ -208,10 +207,9 @@ class KindleBanglaCurl:
                 return headers.get("Location") or headers.get("location")
             return None
         try:
-            r = httpx.get(
+            r = make_client(timeout=15.0).get(
                 url,
-                timeout=15.0,
-                follow_redirects=False,
+                allow_redirects=False,
                 headers={"User-Agent": USER_AGENT},
             )
         except Exception as e:

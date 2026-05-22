@@ -26,7 +26,7 @@ import logging
 from typing import Any
 from urllib.parse import quote_plus
 
-import httpx
+from endless_library.scrapers.http_client import make_client
 
 from endless_library.config import ScrapersCfg
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
@@ -145,10 +145,9 @@ class ArchiveOrgCurl:
             if self._http_get is not None:
                 status, body = self._http_get(url)
             else:
-                r = httpx.get(
+                r = make_client(timeout=20.0).get(
                     url,
-                    timeout=20.0,
-                    follow_redirects=True,
+                    allow_redirects=True,
                     headers={"User-Agent": USER_AGENT},
                 )
                 status, body = r.status_code, r.content
