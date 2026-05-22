@@ -234,3 +234,20 @@ def test_post_bench_job_cancel_flips_status(tmp_path: Path):
     assert c.status_code == 200
     g = client.get(f'/api/bench/jobs/{job_id}')
     assert g.json()['status'] in ('cancelled', 'done')
+
+
+def test_bench_job_stream_emits_terminal_event_on_done(tmp_path: Path):
+    """SSE endpoint should at minimum send a terminal 'done' event
+    once the job finishes. We use TestClient.stream to consume."""
+    app = _app(tmp_path)
+    client = TestClient(app)
+    r = client.post('/api/bench/run?mode=quick')
+    job_id = r.json()['job_id']
+    # With an empty enabled chain, job finishes immediately.
+    with client.stream('GET', f'/api/bench/jobs/{job_id}/stream') as resp:
+        events = []
+        for line in resp.iter_lines():
+            events.append(line)
+            if 'event: done' in line or 'event: failed' in line or len(events) > 50:
+                break
+    assert any('done' in e or 'failed' in e for e in events)

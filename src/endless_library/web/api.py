@@ -734,6 +734,31 @@ def register(app: FastAPI) -> None:
         deps.bench_jobs.request_cancel(job_id)
         return {"ok": True}
 
+    @router.get("/bench/jobs/{job_id}/stream")
+    async def stream_bench_job(job_id: int, request: Request):
+        deps = request.app.state.deps
+        row = deps.bench_jobs.get(job_id)
+        if row is None:
+            raise HTTPException(404, f"no bench job with id={job_id}")
+
+        async def _events():
+            last_progress = -1
+            while True:
+                r = deps.bench_jobs.get(job_id)
+                if r is None:
+                    yield "event: gone\ndata: {}\n\n"
+                    return
+                if r.progress_done != last_progress:
+                    data = json.dumps({"done": r.progress_done, "total": r.progress_total})
+                    yield "event: progress\ndata: " + data + "\n\n"
+                    last_progress = r.progress_done
+                if r.status in ("done", "cancelled", "failed"):
+                    summary = r.summary_json or "{}"
+                    yield "event: " + r.status + "\ndata: " + summary + "\n\n"
+                    return
+                await asyncio.sleep(0.5)
+        return StreamingResponse(_events(), media_type="text/event-stream")
+
     def _job_row_to_dict(r):
         return {
             "id": r.id, "started_at": r.started_at, "finished_at": r.finished_at,
