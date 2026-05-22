@@ -212,6 +212,37 @@ def _search_with_strategies(
         and book.pub_year < 1928
     )
     _book_source = getattr(book, "source", None)
+    # Phase 6u.4: when the Source already emits a per-book slug (e.g.
+    # kindlebangla.com Bengali slugs), bypass the scraper's search step
+    # — synthesise a Candidate directly so we don't depend on
+    # kindlebangla.com's brittle /index.php?search= behaviour, which
+    # routinely misses long Bengali titles and slug-disambiguator
+    # suffixes (e.g. "...-1" appended to repeat titles).
+    if _book_source == "kindlebangla" and book.goodreads_id:
+        slug = book.goodreads_id
+        synth = Candidate(
+            provider="kindlebangla",
+            md5=None,
+            title=book.title,
+            author=book.author,
+            language="bn",
+            format="epub",
+            filesize_bytes=None,
+            year=None,
+            publisher=None,
+            edition_hints="",
+            detail_url=f"https://www.kindlebangla.com/book/{slug}",
+            raw={"slug": slug},
+        )
+        deps.events.append(
+            book_id=book.id,
+            kind="scrape",
+            scraper="kindlebangla_curl",
+            message=f"synthesised candidate from source slug ({slug[:40]})",
+        )
+        deps.books.mark_stage(book.id, "searched")
+        return [synth], "kindlebangla_curl"
+
     for s_name in scrapers_registry.chain_for_source(
         deps.cfg.scrapers, source=_book_source, query_title=book.title or "", is_pd=_is_pd
     ):
@@ -688,50 +719,19 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
         deps.events.append(book_id=book.id, kind="error", message=msg)
         return "needs_review"
 
-    # Phase 6u: pre-flight SMTP rate-limit check. Counts kind='send'
-    # events in the last 24h and defers the send if we're at/over the
-    # configured Gmail-safe cap. Deferred books keep their picked
-    # state (file_path already set) and the next pipeline cycle retries
-    # — self-paces the queue into the daily budget.
-    quota = quota_status(deps.db_path, daily_cap=deps.cfg.smtp.daily_cap)
-    if quota.exhausted:
-        msg = (
-            f"smtp daily cap reached ({quota.sent_24h}/{quota.cap} in last 24h); "
-            f"deferring send to next cycle"
-        )
-        deps.events.append(book_id=book.id, kind="send_deferred", message=msg)
-        return "deferred"
-
-    try:
-        send_to_kindle(
-            attachment=file_path,
-            kindle=deps.cfg.kindle,
-            smtp=deps.cfg.smtp,
-            title=book.title,
-            author=book.author,
-        )
-    except KindleRateLimited as e:
-        # Server-side throttle, even though we thought we were under the
-        # cap. Defer the same way as the pre-flight gate.
-        msg = f"smtp throttled by server; deferring: {e}"
-        deps.events.append(book_id=book.id, kind="send_deferred", message=msg)
-        return "deferred"
-    except KindleSendError as e:
-        deps.books.set_failed(book.id, error=f"kindle send failed: {e}")
-        return "failed"
-    deps.books.set_status(book.id, "sent")
-    deps.events.append(book_id=book.id, kind="send", message="sent to kindle")
-    deps.notifier.book_sent(book.title, book.author, file_path.suffix.lstrip("."))
-
-    # Phase 6c: hand the enriched file off to BookOrbit. Best-effort —
-    # any failure logs to events but doesn't unwind the Kindle send.
-    # Phase 6o.2 (C-1): explicit guard for the path-mismatch failure
-    # mode where library_root is a value that exists on the host but
-    # not inside the biblichor container. A first failure logs a LOUD
-    # warning (not just an info event) so the operator notices, and
-    # we keep emitting an event per book so the dashboard's events
-    # log accurately reflects the silent skip.
-    if deps.cfg.bookorbit.enabled and deps.cfg.bookorbit.library_root:
+    # Phase 6u.4: hand the enriched file off to BookOrbit BEFORE the
+    # SMTP gate. BookOrbit has no rate limit; the library should fill
+    # in real time even when Kindle delivery is throttled. Idempotent
+    # via the event log — we skip the drop if any prior cycle already
+    # emitted kind='bookorbit' for this book.
+    _bo_already_done = any(
+        e.kind == "bookorbit" for e in deps.events.recent_for_book(book.id, limit=200)
+    )
+    if (
+        not _bo_already_done
+        and deps.cfg.bookorbit.enabled
+        and deps.cfg.bookorbit.library_root
+    ):
         library_root_path = Path(deps.cfg.bookorbit.library_root)
         if not library_root_path.exists():
             log.warning(
@@ -767,6 +767,40 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
                     kind="error",
                     message=f"bookorbit drop failed (non-fatal): {e}",
                 )
+
+    # Phase 6u: pre-flight SMTP rate-limit check. Counts kind='send'
+    # events in the last 24h and defers the send if we're at/over the
+    # configured Gmail-safe cap. Deferred books keep their picked
+    # state (file_path already set) and the next pipeline cycle retries
+    # — self-paces the queue into the daily budget. BookOrbit already
+    # ingested above so the user's library still grows.
+    quota = quota_status(deps.db_path, daily_cap=deps.cfg.smtp.daily_cap)
+    if quota.exhausted:
+        msg = (
+            f"smtp daily cap reached ({quota.sent_24h}/{quota.cap} in last 24h); "
+            f"deferring send to next cycle"
+        )
+        deps.events.append(book_id=book.id, kind="send_deferred", message=msg)
+        return "deferred"
+
+    try:
+        send_to_kindle(
+            attachment=file_path,
+            kindle=deps.cfg.kindle,
+            smtp=deps.cfg.smtp,
+            title=book.title,
+            author=book.author,
+        )
+    except KindleRateLimited as e:
+        msg = f"smtp throttled by server; deferring: {e}"
+        deps.events.append(book_id=book.id, kind="send_deferred", message=msg)
+        return "deferred"
+    except KindleSendError as e:
+        deps.books.set_failed(book.id, error=f"kindle send failed: {e}")
+        return "failed"
+    deps.books.set_status(book.id, "sent")
+    deps.events.append(book_id=book.id, kind="send", message="sent to kindle")
+    deps.notifier.book_sent(book.title, book.author, file_path.suffix.lstrip("."))
     return "sent"
 
 
