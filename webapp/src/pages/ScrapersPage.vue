@@ -33,6 +33,9 @@ const data = ref<ScrapersResp | null>(null)
 const history = ref<Record<string, BenchHistoryEntry[]>>({})
 const benchOutput = ref<string>('')
 const benching = ref(false)
+const benchJobId = ref<number | null>(null)
+const benchProgress = ref<{ done: number; total: number }>({ done: 0, total: 0 })
+const benchEventSrc = ref<EventSource | null>(null)
 
 // Phase 6s.8 — Z-Library + cookies cards
 const zlibEmail = ref('')
@@ -169,16 +172,84 @@ async function testNow(name: string) {
 
 async function bench(mode: 'quick' | 'full') {
   benching.value = true
-  benchOutput.value = `Running ${mode} bench…\n(may take ${mode === 'quick' ? '~2' : '~15'} min)`
+  benchOutput.value = `Starting ${mode} bench…`
+  benchProgress.value = { done: 0, total: 0 }
   try {
-    const r = await api<{ outcomes: any[]; table: string }>(`/api/bench/run?mode=${mode}`, { method: 'POST' })
-    benchOutput.value = r.table
-    toast.success(`Bench complete (${mode})`)
-    await load()
+    const r = await api<{ job_id: number }>(
+      `/api/bench/run?mode=${mode}`, { method: 'POST' },
+    )
+    benchJobId.value = r.job_id
+    _streamJob(r.job_id)
   } catch (e: any) {
     benchOutput.value = `FAILED: ${e?.message ?? e}`
     toast.error('Bench failed', String(e?.message ?? e))
-  } finally { benching.value = false }
+    benching.value = false
+  }
+}
+
+function _streamJob(jobId: number) {
+  const es = new EventSource(`/api/bench/jobs/${jobId}/stream`)
+  benchEventSrc.value = es
+  es.addEventListener('progress', (ev: MessageEvent) => {
+    const p = JSON.parse(ev.data) as { done: number; total: number }
+    benchProgress.value = p
+    benchOutput.value = `Running… ${p.done}/${p.total}`
+  })
+  for (const term of ['done', 'cancelled', 'failed', 'gone']) {
+    es.addEventListener(term, async (ev: MessageEvent) => {
+      benching.value = false
+      es.close()
+      if (term === 'done') {
+        const r = await api<{ summary_json: string | null }>(`/api/bench/jobs/${jobId}`)
+        benchOutput.value = r.summary_json
+          ? _formatSummary(JSON.parse(r.summary_json))
+          : 'done (no outcomes)'
+        toast.success(`Bench complete`)
+        await load()
+      } else {
+        benchOutput.value = `${term}: ${ev.data}`
+        toast.error(`Bench ${term}`)
+      }
+    })
+  }
+  es.onerror = () => {
+    es.close()
+    _pollJob(jobId)
+  }
+}
+
+async function _pollJob(jobId: number) {
+  while (true) {
+    const r = await api<any>(`/api/bench/jobs/${jobId}`)
+    benchProgress.value = { done: r.progress_done, total: r.progress_total }
+    if (r.status !== 'running') {
+      benching.value = false
+      benchOutput.value = r.status === 'done' && r.summary_json
+        ? _formatSummary(JSON.parse(r.summary_json))
+        : `${r.status}`
+      await load()
+      return
+    }
+    await new Promise(res => setTimeout(res, 2000))
+  }
+}
+
+function _formatSummary(outcomes: any[]): string {
+  if (!outcomes || outcomes.length === 0) return '(no outcomes)'
+  const by: Record<string, { p: number; f: number }> = {}
+  for (const o of outcomes) {
+    by[o.scraper] = by[o.scraper] || { p: 0, f: 0 }
+    if (o.success) by[o.scraper].p++; else by[o.scraper].f++
+  }
+  const lines = ['| Scraper | Pass | Fail |', '|---|---|---|']
+  for (const [name, s] of Object.entries(by)) lines.push(`| ${name} | ${s.p} | ${s.f} |`)
+  return lines.join('\n')
+}
+
+async function cancelBench() {
+  if (!benchJobId.value) return
+  await api(`/api/bench/jobs/${benchJobId.value}/cancel`, { method: 'POST' })
+  toast.success('Cancel requested')
 }
 </script>
 
@@ -327,9 +398,13 @@ async function bench(mode: 'quick' | 'full') {
       <p class="text-xs text-muted-foreground mb-3">
         Runs a curated set of queries against each enabled strategy to measure real-world success.
       </p>
-      <div class="flex gap-2 mb-3">
-        <Button :loading="benching" @click="bench('quick')"><Play class="w-4 h-4" /> Quick (3 queries)</Button>
-        <Button :loading="benching" variant="outline" @click="bench('full')">Full (10 queries)</Button>
+      <div class="flex gap-2 mb-3 items-center flex-wrap">
+        <Button :loading="benching" @click="bench('quick')"><Play class="w-4 h-4" /> Quick</Button>
+        <Button :loading="benching" variant="outline" @click="bench('full')">Full</Button>
+        <Button v-if="benching" variant="ghost" size="sm" @click="cancelBench">Cancel</Button>
+        <span v-if="benching && benchProgress.total > 0" class="text-xs text-muted-foreground font-mono">
+          {{ benchProgress.done }}/{{ benchProgress.total }}
+        </span>
       </div>
       <pre v-if="benchOutput" class="bg-secondary p-3 rounded text-xs whitespace-pre-wrap overflow-x-auto">{{ benchOutput }}</pre>
     </Card>
