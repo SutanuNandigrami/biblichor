@@ -30,6 +30,29 @@ services:
       - ../data:/data
       - ../config:/app/config
       - ../library:/library
+      # Phase 6v.1: host Docker socket for the in-app "Upgrade BookOrbit"
+      # button. biblichor uses this to pull the candidate image, dump
+      # the bookorbit Postgres DB, recreate the bookorbit container at
+      # the new tag, and roll back on failure. This is a privilege
+      # boundary — anyone who compromises biblichor can manage every
+      # container on the host. Comment out and remove the group_add
+      # entry below to disable; the upgrade UI then reports
+      # docker_socket_available=false and the Apply button stays hidden.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount the repo's deploy/ directory so apply_upgrade can mutate
+      # compose.yml (image SHA swap on apply, revert on rollback).
+      - ../deploy:/app/deploy
+      # Mount the host .env so apply_upgrade's `docker compose --env-file`
+      # can resolve BOOKORBIT_DB_PASSWORD etc. when restarting the
+      # bookorbit service.
+      - ../.env:/app/.env:ro
+    # Phase 6v.1: docker group passthrough. The host docker socket is
+    # owned by root:docker; UID 1000 inside the container needs the
+    # docker GID to write to it. Defaults to 999 (debian/ubuntu default);
+    # set DOCKER_GID in .env if your host uses a different value (run
+    # `getent group docker | cut -d: -f3` to find it).
+    group_add:
+      - "${DOCKER_GID:-999}"
     environment:
       CONFIG_PATH: /app/config/config.yaml
       LIBRARY_DB: /data/library.db

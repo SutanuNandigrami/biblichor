@@ -45,6 +45,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zstd \
     && rm -rf /var/lib/apt/lists/*
 
+# Phase 6v.1: docker CLI + compose plugin for the in-app "Upgrade
+# BookOrbit" button. Talks to the host daemon via the docker.sock
+# bind-mount declared in compose.yml. We only need the CLI binaries,
+# not the engine — the static tarball lets us extract just the docker
+# client without pulling in dockerd / containerd / runc. Compose
+# plugin lives at the user-local CLI plugins path so it's picked up
+# regardless of UID. Pinned versions so an upstream silent break can't
+# corrupt the upgrade flow.
+ARG DOCKER_CLI_VERSION=25.0.5
+ARG DOCKER_COMPOSE_VERSION=v2.27.0
+RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
+    | tar -xz -C /tmp \
+    && install -m 0755 /tmp/docker/docker /usr/local/bin/docker \
+    && rm -rf /tmp/docker \
+    && mkdir -p /usr/local/lib/docker/cli-plugins \
+    && curl -fsSL "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-linux-x86_64" \
+        -o /usr/local/lib/docker/cli-plugins/docker-compose \
+    && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
 # jbig2enc isn't packaged for Debian — build it from source. It's
 # ~80 KB final binary; gives ocrmypdf the bilevel-image compression
 # path that yields most of the size reduction on scanned books.

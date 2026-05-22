@@ -1405,6 +1405,149 @@ def register(app: FastAPI) -> None:
         except Exception as e:
             raise HTTPException(502, f"{type(e).__name__}: {e}") from e
 
+    # ---------- BookOrbit upgrade (Phase 6v.1) ----------
+    # State pattern: the last successful preflight's token + expiry +
+    # target version are kept in app.state.upgrade_state so a follow-
+    # up POST /upgrade/apply can verify them. Restarting biblichor
+    # invalidates the token, which is the safest default — we'd rather
+    # force a re-preflight than let a stale token through.
+    def _upgrade_state(app) -> dict:
+        if not hasattr(app.state, "upgrade_state"):
+            app.state.upgrade_state = {}
+        return app.state.upgrade_state
+
+    @router.get("/bookorbit/upgrade/status")
+    async def bookorbit_upgrade_status(request: Request):
+        """Current version, latest version, whether the docker socket
+        is reachable, and the release notes for the latest. Used by the
+        SPA to render the upgrade card."""
+        from functools import partial
+
+        from endless_library.bookorbit.upgrade import get_version_info
+
+        deps = request.app.state.deps
+        svc = _bookorbit_service(request)
+        creds = svc.get_admin_creds() or (None, None)
+        info = await asyncio.to_thread(
+            partial(
+                get_version_info,
+                deps.cfg.bookorbit.url or "",
+                admin_username=creds[0],
+                admin_password=creds[1],
+            )
+        )
+        state = _upgrade_state(request.app)
+        return {
+            **asdict(info),
+            "has_pending_preflight": bool(state.get("token")),
+            "preflight_target": state.get("target_version"),
+            "preflight_expires_at": state.get("expires_at"),
+        }
+
+    @router.post("/bookorbit/upgrade/preflight")
+    async def bookorbit_upgrade_preflight(payload: dict, request: Request):
+        """Pull the target image, scan release notes, check disk + DB.
+        Stores the resulting token in app.state so Apply can verify it.
+        """
+        from functools import partial
+
+        from endless_library.bookorbit.upgrade import get_version_info, preflight
+
+        target = (payload or {}).get("target_version") or ""
+        if not target:
+            raise HTTPException(400, "missing target_version")
+
+        deps = request.app.state.deps
+        svc = _bookorbit_service(request)
+        creds = svc.get_admin_creds() or (None, None)
+        info = await asyncio.to_thread(
+            partial(
+                get_version_info,
+                deps.cfg.bookorbit.url or "",
+                admin_username=creds[0],
+                admin_password=creds[1],
+            )
+        )
+        report = await asyncio.to_thread(
+            partial(preflight, target, release_notes=info.release_notes)
+        )
+
+        state = _upgrade_state(request.app)
+        if report.ok:
+            state.update(
+                {
+                    "token": report.token,
+                    "target_version": report.target_version,
+                    "expires_at": report.expires_at,
+                }
+            )
+        else:
+            # Clear any stale token from a previous green preflight so
+            # a failing one can't be 'overwritten' by an old success.
+            state.clear()
+        return report.as_dict()
+
+    @router.post("/bookorbit/upgrade/apply")
+    async def bookorbit_upgrade_apply(payload: dict, request: Request):
+        """Execute the upgrade. Requires a valid preflight token.
+        Returns the full ApplyResult once the upgrade either completes
+        or rolls back; the SPA polls /status to refresh the version
+        chip after.
+        """
+        from functools import partial
+
+        from endless_library.bookorbit.upgrade import (
+            BOOKORBIT_CONTAINER,
+            apply_upgrade,
+        )
+
+        deps = request.app.state.deps
+        target = (payload or {}).get("target_version") or ""
+        submitted_token = (payload or {}).get("token") or ""
+        if not target or not submitted_token:
+            raise HTTPException(400, "missing target_version and/or token")
+
+        state = _upgrade_state(request.app)
+        expected_token = state.get("token", "")
+        expected_target = state.get("target_version", "")
+        if target != expected_target:
+            raise HTTPException(
+                400,
+                f"target {target} does not match the most recent preflight "
+                f"({expected_target or 'none'}) — run preflight first",
+            )
+
+        # Resolve compose + env file paths. The biblichor container
+        # bind-mounts /app/deploy from <repo>/deploy at build time.
+        compose_path = Path("/app/deploy/compose.yml")
+        env_file = Path("/app/.env")
+        if not compose_path.exists():
+            # Dev/host fallback — the SPA might be running outside the
+            # container in pytest.
+            from endless_library import __file__ as pkg_root
+            repo_root = Path(pkg_root).resolve().parent.parent.parent
+            compose_path = repo_root / "deploy" / "compose.yml"
+            env_file = repo_root / ".env"
+
+        result = await asyncio.to_thread(
+            partial(
+                apply_upgrade,
+                target,
+                submitted_token=submitted_token,
+                expected_token=expected_token,
+                preflight_expires_at=float(state.get("expires_at", 0)),
+                compose_path=compose_path,
+                env_file=env_file,
+                container=BOOKORBIT_CONTAINER,
+                bookorbit_url=deps.cfg.bookorbit.url or "http://bookorbit:3000",
+            )
+        )
+
+        # On success the token is consumed (don't let it be reused).
+        if result.success or result.rolled_back:
+            state.clear()
+        return result.as_dict()
+
     @router.post("/bookorbit/setup-token")
     def bookorbit_generate_setup_token():
         """Return a fresh 48-byte URL-safe setup token. Used by the

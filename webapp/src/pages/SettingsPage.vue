@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Save, Mail, Bell, AlertTriangle, ExternalLink, Cookie, Sliders, ChevronDown, Palette } from 'lucide-vue-next'
+import { Save, Mail, Bell, AlertTriangle, ExternalLink, Cookie, Sliders, ChevronDown, Palette, ArrowUpCircle, ShieldCheck, RotateCw } from 'lucide-vue-next'
 import { useMediaQuery } from '@vueuse/core'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
@@ -207,6 +207,7 @@ async function load() {
 onMounted(() => {
   load()
   tintH.value = readSavedTint()
+  loadUpgradeStatus()
 })
 
 async function save() {
@@ -238,6 +239,143 @@ async function testSmtp() {
     smtpResult.value = { ok: false, msg: String(e?.message ?? e) }
   } finally { testingSmtp.value = false }
 }
+// ===== Phase 6v.1+6v.2: BookOrbit upgrade =====
+
+type UpgradeCheckResult = { name: string; ok: boolean; detail: string }
+type UpgradeStatus = {
+  current: string | null
+  latest: string | null
+  update_available: boolean
+  last_checked_at: string
+  docker_socket_available: boolean
+  release_notes: string
+  release_url: string
+  has_pending_preflight: boolean
+  preflight_target: string | null
+  preflight_expires_at: number | null
+}
+type PreflightReport = {
+  target_version: string
+  ok: boolean
+  token: string
+  expires_at: number
+  checks: UpgradeCheckResult[]
+}
+type ApplyStep = {
+  name: string; status: string; detail: string
+  started_at: string; finished_at: string
+}
+type ApplyResult = {
+  target_version: string
+  success: boolean
+  rolled_back: boolean
+  backup_path: string | null
+  final_version: string | null
+  steps: ApplyStep[]
+}
+
+const upgrade = reactive({
+  status: null as UpgradeStatus | null,
+  preflight: null as PreflightReport | null,
+  applyResult: null as ApplyResult | null,
+  loadingStatus: false,
+  runningPreflight: false,
+  applying: false,
+  showChangelog: false,
+})
+
+async function loadUpgradeStatus() {
+  upgrade.loadingStatus = true
+  try {
+    upgrade.status = await api<UpgradeStatus>('/api/bookorbit/upgrade/status')
+  } catch (e: any) {
+    toast.error('Could not check for BookOrbit updates: ' + (e?.message ?? e))
+  } finally {
+    upgrade.loadingStatus = false
+  }
+}
+
+async function runPreflight() {
+  if (!upgrade.status?.latest) return
+  upgrade.runningPreflight = true
+  upgrade.preflight = null
+  upgrade.applyResult = null
+  try {
+    upgrade.preflight = await api<PreflightReport>(
+      '/api/bookorbit/upgrade/preflight',
+      {
+        method: 'POST',
+        body: JSON.stringify({ target_version: upgrade.status.latest.replace(/^v/, '') }),
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
+    if (upgrade.preflight.ok) {
+      toast.success(`Preflight OK — token valid for 15 min`)
+    } else {
+      const failed = upgrade.preflight.checks.filter((c) => !c.ok).map((c) => c.name).join(', ')
+      toast.error(`Preflight failed: ${failed}`)
+    }
+    await loadUpgradeStatus()
+  } catch (e: any) {
+    toast.error('Preflight error: ' + (e?.message ?? e))
+  } finally {
+    upgrade.runningPreflight = false
+  }
+}
+
+async function applyUpgrade() {
+  if (!upgrade.preflight?.ok) return
+  if (!confirm(
+    `Apply BookOrbit upgrade to ${upgrade.preflight.target_version}?\n\n` +
+    `This will:\n` +
+    `  1. Take a pg_dump backup (kept under /data/backups/)\n` +
+    `  2. Recreate the bookorbit container at the new tag\n` +
+    `  3. Wait for /health and verify the version\n\n` +
+    `If anything fails, the upgrade rolls back to the current image.\n` +
+    `BookOrbit will be unavailable for ~30-60 seconds during the swap.`,
+  )) return
+
+  upgrade.applying = true
+  upgrade.applyResult = null
+  try {
+    upgrade.applyResult = await api<ApplyResult>(
+      '/api/bookorbit/upgrade/apply',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          target_version: upgrade.preflight.target_version,
+          token: upgrade.preflight.token,
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
+    if (upgrade.applyResult.success) {
+      toast.success(`BookOrbit upgraded to ${upgrade.applyResult.final_version}`)
+      // Preflight token is consumed; reset.
+      upgrade.preflight = null
+    } else if (upgrade.applyResult.rolled_back) {
+      toast.error('Upgrade failed and was rolled back. Backup is intact at ' + upgrade.applyResult.backup_path)
+    } else {
+      toast.error('Upgrade failed (no rollback). Inspect the steps below.')
+    }
+    await loadUpgradeStatus()
+  } catch (e: any) {
+    toast.error('Apply error: ' + (e?.message ?? e))
+  } finally {
+    upgrade.applying = false
+  }
+}
+
+function stepIcon(status: string): string {
+  switch (status) {
+    case 'ok': return '✓'
+    case 'failed': return '✗'
+    case 'running': return '⟳'
+    case 'skipped': return '–'
+    default: return '•'
+  }
+}
+
 async function testPushover() {
   testingPushover.value = true
   pushoverResult.value = null
@@ -289,6 +427,117 @@ async function testPushover() {
           @input="onTintInput"
         />
       </label>
+    </Card>
+
+    <!-- Phase 6v.1+6v.2: BookOrbit upgrade card -->
+    <Card class="p-5 space-y-4">
+      <div class="flex items-center gap-2">
+        <ArrowUpCircle class="w-5 h-5 text-primary" />
+        <h2 class="font-semibold text-sm">BookOrbit upgrade</h2>
+        <div class="flex-1"></div>
+        <Button size="sm" variant="outline" :loading="upgrade.loadingStatus" @click="loadUpgradeStatus">
+          <RotateCw class="w-4 h-4" /> Check for updates
+        </Button>
+      </div>
+
+      <p v-if="!upgrade.status" class="text-xs text-muted-foreground">
+        Loading…
+      </p>
+
+      <template v-else-if="upgrade.status">
+        <!-- Version line -->
+        <div class="flex items-center gap-3 flex-wrap text-sm">
+          <span class="text-muted-foreground">Current:</span>
+          <code class="font-mono">{{ upgrade.status.current ?? 'unknown' }}</code>
+          <span class="text-muted-foreground">→</span>
+          <span class="text-muted-foreground">Latest:</span>
+          <code class="font-mono">{{ upgrade.status.latest ?? 'unknown' }}</code>
+          <Badge v-if="upgrade.status.update_available" variant="warning">update available</Badge>
+          <Badge v-else variant="success">up to date</Badge>
+        </div>
+
+        <!-- Docker socket warning -->
+        <div v-if="!upgrade.status.docker_socket_available"
+             class="flex gap-3 p-3 rounded bg-amber-500/10 border border-amber-500/30 text-xs">
+          <AlertTriangle class="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <p class="text-amber-200 font-medium">Docker socket not reachable</p>
+            <p class="text-muted-foreground mt-1">
+              biblichor can't talk to the host Docker daemon — the Apply button is
+              disabled. Add the docker.sock bind-mount + group_add lines in
+              <code class="font-mono">deploy/compose.yml</code> (and set
+              <code class="font-mono">DOCKER_GID</code> in <code>.env</code>),
+              then re-run <code>docker compose up -d --build biblichor</code>.
+            </p>
+          </div>
+        </div>
+
+        <!-- Changelog toggle -->
+        <details v-if="upgrade.status.release_notes" class="text-xs"
+                 :open="upgrade.showChangelog"
+                 @toggle="(e) => upgrade.showChangelog = (e.target as HTMLDetailsElement).open">
+          <summary class="cursor-pointer text-primary hover:underline select-none">
+            Release notes for {{ upgrade.status.latest }}
+          </summary>
+          <pre class="mt-2 bg-secondary p-3 rounded whitespace-pre-wrap font-mono text-[11px] max-h-72 overflow-y-auto">{{ upgrade.status.release_notes }}</pre>
+          <a v-if="upgrade.status.release_url" :href="upgrade.status.release_url"
+             target="_blank" class="text-primary text-[11px] inline-flex items-center gap-1 mt-1">
+            View on GitHub <ExternalLink class="w-3 h-3" />
+          </a>
+        </details>
+
+        <!-- Action buttons -->
+        <div v-if="upgrade.status.update_available && upgrade.status.docker_socket_available"
+             class="flex gap-2 flex-wrap">
+          <Button :loading="upgrade.runningPreflight" :disabled="upgrade.applying" @click="runPreflight">
+            <ShieldCheck class="w-4 h-4" /> Run preflight
+          </Button>
+          <Button variant="destructive"
+                  :loading="upgrade.applying"
+                  :disabled="!upgrade.preflight?.ok || upgrade.runningPreflight"
+                  @click="applyUpgrade">
+            <ArrowUpCircle class="w-4 h-4" /> Apply upgrade
+          </Button>
+          <span v-if="upgrade.preflight?.ok" class="text-[11px] text-muted-foreground self-center">
+            Preflight valid until {{ new Date((upgrade.preflight.expires_at ?? 0) * 1000).toLocaleTimeString() }}
+          </span>
+        </div>
+
+        <!-- Preflight result -->
+        <div v-if="upgrade.preflight" class="space-y-1">
+          <p class="text-xs font-medium" :class="upgrade.preflight.ok ? 'text-emerald-400' : 'text-red-400'">
+            Preflight {{ upgrade.preflight.ok ? 'PASSED' : 'FAILED' }} for target {{ upgrade.preflight.target_version }}
+          </p>
+          <ul class="text-[11px] font-mono space-y-0.5">
+            <li v-for="c in upgrade.preflight.checks" :key="c.name"
+                :class="c.ok ? 'text-emerald-500' : 'text-red-500'">
+              {{ c.ok ? '✓' : '✗' }} {{ c.name }}<span v-if="c.detail" class="opacity-70"> — {{ c.detail }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Apply progress / result -->
+        <div v-if="upgrade.applyResult" class="space-y-1">
+          <p class="text-xs font-medium"
+             :class="upgrade.applyResult.success ? 'text-emerald-400' : 'text-red-400'">
+            Apply {{ upgrade.applyResult.success ? 'SUCCEEDED' : (upgrade.applyResult.rolled_back ? 'FAILED + ROLLED BACK' : 'FAILED') }}
+            <span v-if="upgrade.applyResult.final_version"> — running {{ upgrade.applyResult.final_version }}</span>
+          </p>
+          <p v-if="upgrade.applyResult.backup_path" class="text-[11px] text-muted-foreground font-mono">
+            Backup: {{ upgrade.applyResult.backup_path }}
+          </p>
+          <ul class="text-[11px] font-mono space-y-0.5">
+            <li v-for="s in upgrade.applyResult.steps" :key="s.name + s.started_at"
+                :class="{
+                  'text-emerald-500': s.status === 'ok',
+                  'text-red-500': s.status === 'failed',
+                  'text-muted-foreground': s.status === 'skipped' || s.status === 'running',
+                }">
+              {{ stepIcon(s.status) }} {{ s.name }}<span v-if="s.detail" class="opacity-70"> — {{ s.detail }}</span>
+            </li>
+          </ul>
+        </div>
+      </template>
     </Card>
 
     <Card class="p-5" v-if="form.smtp_user">
