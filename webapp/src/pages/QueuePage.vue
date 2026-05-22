@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Search, BookOpen, Plus, Trash2 } from 'lucide-vue-next'
+import { Search, BookOpen, Plus, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-vue-next'
 import { api } from '@/composables/useApi'
 import { useEventStream } from '@/composables/useWebSocket'
 import { useToast } from '@/composables/useToast'
@@ -28,18 +28,64 @@ const detailId = ref<number | null>(null)
 const selected = ref<Set<number>>(new Set())
 const toast = useToast()
 
+const PAGE_SIZES = [10, 20, 50, 100] as const
+const PER_PAGE_KEY = 'biblichor.queue.perPage'
+const perPage = ref<number>(20)
+const page = ref(1)
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
+const pageStart = computed(() =>
+  total.value === 0 ? 0 : (page.value - 1) * perPage.value + 1,
+)
+const pageEnd = computed(() => Math.min(page.value * perPage.value, total.value))
+
 async function fetchBooks() {
   const params = new URLSearchParams()
   if (query.value) params.set('q', query.value)
   if (statusFilter.value) params.set('status', statusFilter.value)
-  const r = await api<{ books: Book[]; total: number }>('/api/books?' + params)
+  params.set('limit', String(perPage.value))
+  params.set('offset', String((page.value - 1) * perPage.value))
+  const r = await api<{ books: Book[]; total: number; limit: number; offset: number }>(
+    '/api/books?' + params,
+  )
   books.value = r.books
   total.value = r.total
+  // If filters shrank the result set and the current page is now empty,
+  // jump back to the last non-empty page.
+  if (r.books.length === 0 && page.value > 1 && r.total > 0) {
+    page.value = Math.max(1, Math.ceil(r.total / perPage.value))
+    await fetchBooks()
+    return
+  }
   const visible = new Set(r.books.map((b) => b.id))
   selected.value = new Set([...selected.value].filter((id) => visible.has(id)))
 }
-onMounted(fetchBooks)
-watch([query, statusFilter], () => { selected.value.clear(); fetchBooks() })
+
+onMounted(() => {
+  try {
+    const stored = Number(localStorage.getItem(PER_PAGE_KEY))
+    if (PAGE_SIZES.includes(stored as 10 | 20 | 50 | 100)) perPage.value = stored
+  } catch {
+    /* private mode */
+  }
+  fetchBooks()
+})
+
+// Filter or page-size change resets to page 1 and refetches.
+watch([query, statusFilter, perPage], () => {
+  selected.value.clear()
+  page.value = 1
+  try {
+    localStorage.setItem(PER_PAGE_KEY, String(perPage.value))
+  } catch { /* */ }
+  fetchBooks()
+})
+// Page change just refetches.
+watch(page, () => fetchBooks())
+
+function gotoPage(p: number) {
+  page.value = Math.max(1, Math.min(p, totalPages.value))
+}
 
 useEventStream((msg) => {
   if (msg.type === 'event' && (msg.data.kind === 'state_change' || msg.data.kind === 'send')) {
@@ -47,7 +93,18 @@ useEventStream((msg) => {
   }
 })
 
-const statuses = computed(() => Array.from(new Set(books.value.map((b) => b.status))).sort())
+// Full biblichor lifecycle, kept even when the current page slice doesn't
+// contain them. Merged with whatever shows up in `books` so future custom
+// states still appear.
+const KNOWN_STATUSES = [
+  'queued', 'searched', 'picked', 'downloading', 'converting',
+  'sending', 'sent', 'failed', 'needs_review', 'skipped', 'deferred',
+]
+const statuses = computed(() => {
+  const seen = new Set<string>(KNOWN_STATUSES)
+  for (const b of books.value) seen.add(b.status)
+  return Array.from(seen).sort()
+})
 const allVisibleSelected = computed(() =>
   books.value.length > 0 && books.value.every((b) => selected.value.has(b.id)),
 )
@@ -151,6 +208,11 @@ async function bulkDeleteByStatus(opts: { hard: boolean }) {
         class="h-9 px-3 rounded-md border border-input bg-background text-sm">
         <option value="">All statuses</option>
         <option v-for="s in statuses" :key="s">{{ s }}</option>
+      </select>
+      <select v-model.number="perPage"
+        class="h-9 px-3 rounded-md border border-input bg-background text-sm"
+        title="Books per page">
+        <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }} / page</option>
       </select>
       <Button
         v-if="statusFilter"
@@ -277,6 +339,57 @@ async function bulkDeleteByStatus(opts: { hard: boolean }) {
         Nothing in the queue yet. Add a book or configure a source.
       </p>
     </div>
+
+    <!-- Pager (desktop + mobile) -->
+    <nav
+      v-if="total > 0"
+      class="flex items-center gap-2 text-sm flex-wrap"
+      aria-label="Queue pagination"
+    >
+      <span class="text-muted-foreground">
+        {{ pageStart }}–{{ pageEnd }} of {{ total }}
+      </span>
+      <div class="flex-1"></div>
+      <Button
+        size="sm"
+        variant="ghost"
+        :disabled="page <= 1"
+        aria-label="First page"
+        @click="gotoPage(1)"
+      >
+        <ChevronsLeft class="w-4 h-4" />
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        :disabled="page <= 1"
+        aria-label="Previous page"
+        @click="gotoPage(page - 1)"
+      >
+        <ChevronLeft class="w-4 h-4" />
+      </Button>
+      <span class="font-mono text-xs px-2 py-1 rounded border border-border">
+        {{ page }} / {{ totalPages }}
+      </span>
+      <Button
+        size="sm"
+        variant="ghost"
+        :disabled="page >= totalPages"
+        aria-label="Next page"
+        @click="gotoPage(page + 1)"
+      >
+        <ChevronRight class="w-4 h-4" />
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        :disabled="page >= totalPages"
+        aria-label="Last page"
+        @click="gotoPage(totalPages)"
+      >
+        <ChevronsRight class="w-4 h-4" />
+      </Button>
+    </nav>
 
     <Drawer :open="addOpen" title="Add a book manually" @close="addOpen = false">
       <div class="space-y-3">

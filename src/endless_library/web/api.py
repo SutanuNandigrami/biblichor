@@ -159,24 +159,45 @@ def register(app: FastAPI) -> None:
 
     @router.get("/books")
     def list_books(
-        request: Request, status: str | None = None, q: str | None = None, limit: int = 500
+        request: Request,
+        status: str | None = None,
+        q: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ):
+        """Phase 6u.3: real pagination. `total` is the SQL-filtered match
+        count (not just the page slice), so the UI can render
+        Page X of Y. limit is clamped to [1,500] and offset to >= 0."""
         deps = request.app.state.deps
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+
+        where_clauses: list[str] = []
+        params: list = []
+        if status:
+            where_clauses.append("status = ?")
+            params.append(status)
+        if q:
+            where_clauses.append("(LOWER(title) LIKE ? OR LOWER(author) LIKE ?)")
+            like = f"%{q.lower()}%"
+            params.extend([like, like])
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
         with connect(deps.db_path) as conn:
+            total_row = conn.execute(
+                f"SELECT COUNT(*) AS n FROM books{where_sql}", params
+            ).fetchone()
+            total = int(total_row["n"]) if total_row else 0
             rows = conn.execute(
-                "SELECT * FROM books ORDER BY created_at DESC LIMIT ?", (limit,)
+                f"SELECT * FROM books{where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                [*params, limit, offset],
             ).fetchall()
-        out = []
-        for r in rows:
-            d = dict(r)
-            if status and d["status"] != status:
-                continue
-            if q:
-                qlc = q.lower()
-                if qlc not in (d["title"] or "").lower() and qlc not in (d["author"] or "").lower():
-                    continue
-            out.append(d)
-        return {"books": out, "total": len(out)}
+        return {
+            "books": [dict(r) for r in rows],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
 
     @router.post("/books")
     def add_book(payload: AddBook, request: Request):
