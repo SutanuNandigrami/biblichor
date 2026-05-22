@@ -350,8 +350,17 @@ def _score_and_persist(deps: PipelineDeps, book: BookRow, candidates: list[Candi
     return scored
 
 
-def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Path | None:
-    """Find a scraper that can resolve this candidate's CDN URL and stream the file down."""
+def _resolve_and_download(
+    deps: PipelineDeps, book: BookRow, c: Candidate
+) -> tuple[Path | None, str | None]:
+    """Find a scraper that can resolve this candidate's CDN URL and stream
+    the file down.
+
+    Phase 6u.7: returns (path, last_error). When the chain exhausts the
+    last_error carries the most specific failure cause (truncated RAR,
+    Drive HTTP 403, no candidates) so the book's failed message is
+    actionable instead of the generic 'all scrapers failed'."""
+    last_error: str | None = None
     _is_pd = bool(getattr(book, "is_public_domain", None)) or (
         getattr(book, "pub_year", None) is not None
         and (book.pub_year or 0) > 0
@@ -367,11 +376,13 @@ def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Pa
         except NotImplementedError:
             continue
         except Exception as e:
+            last_error = f"resolve_cdn error ({s_name}): {e}"
             deps.events.append(
                 book_id=book.id, kind="error", scraper=s_name, message=f"resolve_cdn error: {e}"
             )
             continue
         if not handle:
+            last_error = f"{s_name} returned no CDN handle"
             continue
         deps.events.append(
             book_id=book.id,
@@ -387,6 +398,7 @@ def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Pa
                 expected_md5=c.md5,
             )
         except DownloadError as e:
+            last_error = f"download failed ({s_name}): {e}"
             deps.events.append(
                 book_id=book.id, kind="download", scraper=s_name, message=f"download failed: {e}"
             )
@@ -412,6 +424,7 @@ def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Pa
                 require_clamav=deps.cfg.security.require_clamav,
             )
         except UnpackError as e:
+            last_error = f"unpack rejected ({s_name}): {e}"
             deps.events.append(
                 book_id=book.id,
                 kind="error",
@@ -436,8 +449,8 @@ def _resolve_and_download(deps: PipelineDeps, book: BookRow, c: Candidate) -> Pa
             file_size=final_path.stat().st_size,
         )
         deps.books.mark_stage(book.id, "downloaded")
-        return final_path
-    return None
+        return final_path, None
+    return None, last_error
 
 
 def _search_fail_or_skip(deps: PipelineDeps, book: BookRow, error: str) -> str:
@@ -575,9 +588,12 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
         return "needs_review"
     # auto-pick
     picked_cand = scored[0][1]
-    file_path = _resolve_and_download(deps, book, picked_cand)
+    file_path, dl_err = _resolve_and_download(deps, book, picked_cand)
     if not file_path:
-        deps.books.set_failed(book.id, error="all scrapers failed to resolve/download")
+        # Phase 6u.7: surface the actual cause (truncated RAR, Drive
+        # HTTP 403, etc.) instead of the generic "all scrapers failed".
+        msg = dl_err or "all scrapers failed to resolve/download"
+        deps.books.set_failed(book.id, error=msg)
         return "failed"
     return _process_from_downloaded(deps, book, file_path)
 

@@ -132,10 +132,28 @@ def test_safe_extract_zip_rejects_absolute_path(tmp_path: Path):
         safe_extract_zip(p, dest_dir=tmp_path / "out")
 
 
-def test_safe_extract_zip_rejects_disallowed_extension(tmp_path: Path):
+def test_safe_extract_zip_skips_disallowed_extension_but_extracts_ebook(tmp_path: Path):
+    """Phase 6u.7c: disallowed extensions are filtered out (skipped),
+    NOT a hard archive-level rejection. As long as ONE ebook member is
+    extractable, the archive succeeds. This matches the kindlebangla
+    case where RARs include .epub + .kfx + .jpg + .opf siblings — we
+    only need the .epub.
+    """
     p = tmp_path / "x.zip"
     _zip_with_members(p, {"payload.exe": b"MZ", "book.epub": b"x"})
-    with pytest.raises(ArchiveSafetyError, match="disallowed extension"):
+    out = safe_extract_zip(p, dest_dir=tmp_path / "out")
+    assert out.name == "book.epub"
+    # The .exe member must NOT have been extracted.
+    assert not (tmp_path / "out" / "payload.exe").exists()
+
+
+def test_safe_extract_zip_fails_when_no_ebook_member(tmp_path: Path):
+    """If every member is a non-ebook format, there's nothing for the
+    pipeline to do — fail cleanly. .txt + .jpg are allowed formats
+    (kindlebangla packs covers + readmes) but neither is an ebook."""
+    p = tmp_path / "x.zip"
+    _zip_with_members(p, {"cover.jpg": b"\xff\xd8\xff", "readme.txt": b"hello"})
+    with pytest.raises(ArchiveSafetyError, match="no ebook file"):
         safe_extract_zip(p, dest_dir=tmp_path / "out")
 
 

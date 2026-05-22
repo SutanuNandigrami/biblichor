@@ -141,54 +141,85 @@ def resolve_download_url(
 ) -> tuple[str, dict[str, str]] | None:
     """Return (url, cookies-as-headers) for downloading a Drive file.
 
-    Handles the >100MB scan-warning dance:
-      1. Hit uc?export=download&id=<ID>
-      2. If response is the scan-warning HTML (form with confirm token),
-         pull the form action + hidden inputs and rebuild a GET URL.
-      3. Pass through whatever cookies Drive set; the caller streams the
-         actual download with those cookies.
+    Phase 6u.7d: the old flow stopped after the FIRST 302 from
+    drive.google.com/uc → drive.usercontent.google.com/download. For
+    files Drive flags for virus-scan (any RAR/ZIP > ~25MB, plus some
+    smaller ones at Drive's discretion), the redirect target serves an
+    HTML interstitial — not the bytes. We were handing that HTML URL
+    straight to the downloader, which correctly refused it as "got
+    HTML, not book". Now we follow the redirect once more and, if the
+    second hop returns the scan-warning HTML, we parse the form there.
+
+    Three response shapes Drive sends:
+      A. uc → 302 → usercontent → 200 application/octet-stream  ✓ stream
+      B. uc → 302 → usercontent → 200 text/html (form)          ✓ parse form
+      C. uc → 200 text/html (form, embedded confirm token)      ✓ parse form
     """
+    cookies: dict[str, str] = {}
     try:
         with httpx.Client(
             timeout=timeout, follow_redirects=False, headers={"User-Agent": "Mozilla/5.0"}
         ) as client:
             r = client.get(DRIVE_UC, params={"export": "download", "id": drive_id})
+            for c in r.cookies.jar:
+                cookies[c.name] = c.value
+
+            if r.status_code in (302, 303):
+                loc = r.headers.get("Location", "")
+                if not loc:
+                    return None
+                try:
+                    r2 = client.get(loc)
+                except Exception as e:
+                    log.warning("drive: redirect fetch %s failed: %s", loc, e)
+                    return loc, _cookies_as_headers(cookies)
+                for c in r2.cookies.jar:
+                    cookies[c.name] = c.value
+
+                ct2 = r2.headers.get("content-type", "")
+                if "text/html" in ct2 and (
+                    "virus" in r2.text.lower() or "scan" in r2.text.lower()
+                ):
+                    parsed = _parse_scan_warning_form(r2.text)
+                    if parsed:
+                        return parsed, _cookies_as_headers(cookies)
+                # Either real bytes (caller streams) or HTML we don't
+                # recognise; return the redirect URL with collected cookies.
+                return loc, _cookies_as_headers(cookies)
+
+            # No redirect — the uc endpoint may have served the form directly.
+            ctype = r.headers.get("content-type", "")
+            if "text/html" in ctype:
+                parsed = _parse_scan_warning_form(r.text)
+                if parsed:
+                    return parsed, _cookies_as_headers(cookies)
     except Exception as e:
         log.warning("drive: uc fetch %s failed: %s", drive_id, e)
         return None
 
-    cookies = {c.name: c.value for c in r.cookies.jar}
-
-    # Common shortcuts: 302 to userusercontent.google.com (direct bytes)
-    if r.status_code in (302, 303):
-        loc = r.headers.get("Location", "")
-        if loc:
-            return loc, _cookies_as_headers(cookies)
-
-    # Scan-warning HTML page: parse the form
-    ctype = r.headers.get("content-type", "")
-    if "text/html" in ctype and "drive.usercontent" in r.text:
-        soup = BeautifulSoup(r.text, "lxml")
-        form = soup.find("form")
-        if form is not None:
-            action = form.get("action") or DRIVE_USERCONTENT
-            params: dict[str, str] = {}
-            for inp in form.find_all("input"):
-                name = inp.get("name")
-                if name:
-                    params[name] = inp.get("value", "")
-            # Construct GET URL
-            from urllib.parse import urlencode
-
-            url = f"{action}?{urlencode(params)}"
-            return url, _cookies_as_headers(cookies)
-
-    # No scan-warning, no redirect — Drive may have served bytes directly on
-    # this connection. We can't stream from r here (we want the caller to
-    # do the streaming), but we can hand back uc?... which it can retry with
-    # the cookies we collected.
+    # Fallback: hand back the uc URL with cookies. Caller streams it.
     final_url = f"{DRIVE_UC}?export=download&id={drive_id}"
     return final_url, _cookies_as_headers(cookies)
+
+
+def _parse_scan_warning_form(html: str) -> str | None:
+    """Return the form-submission GET URL from a Drive virus-scan-warning
+    page, or None if the page doesn't look like one."""
+    soup = BeautifulSoup(html, "lxml")
+    form = soup.find("form")
+    if form is None:
+        return None
+    action = form.get("action") or DRIVE_USERCONTENT
+    params: dict[str, str] = {}
+    for inp in form.find_all("input"):
+        name = inp.get("name")
+        if name:
+            params[name] = inp.get("value", "")
+    if not params:
+        return None
+    from urllib.parse import urlencode
+
+    return f"{action}?{urlencode(params)}"
 
 
 def _cookies_as_headers(cookies: dict[str, str]) -> dict[str, str]:
