@@ -256,3 +256,20 @@ def test_bench_job_stream_emits_terminal_event_on_done(tmp_path: Path):
             if 'event: done' in line or 'event: failed' in line or len(events) > 50:
                 break
     assert any('done' in e or 'failed' in e for e in events)
+
+
+def test_bench_job_stream_poll_interval_is_2s(tmp_path):
+    """SSE stream poll interval must default to 2.0 s (ultrareview I9)."""
+    import ast, textwrap
+    # Parse the api.py source and check _SSE_POLL_INTERVAL assignment
+    import pathlib
+    src = pathlib.Path('/home/ubuntu/endless-library/src/endless_library/web/api.py').read_text()
+    assert '_SSE_POLL_INTERVAL = 2.0' in src, (
+        'Expected _SSE_POLL_INTERVAL = 2.0 in api.py; SSE poll interval not updated'
+    )
+    assert 'asyncio.sleep(_SSE_POLL_INTERVAL)' in src, (
+        'asyncio.sleep should use _SSE_POLL_INTERVAL'
+    )
+    assert 'asyncio.sleep(0.5)' not in src, (
+        'asyncio.sleep(0.5) still present; interval was not updated'
+    )

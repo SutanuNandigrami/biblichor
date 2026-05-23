@@ -813,9 +813,12 @@ def register(app: FastAPI) -> None:
         if row is None:
             raise HTTPException(404, f"no bench job with id={job_id}")
 
+        _SSE_POLL_INTERVAL = 2.0  # seconds; configurable for tests
         async def _events():
             last_progress = -1
             while True:
+                if await request.is_disconnected():
+                    return
                 r = deps.bench_jobs.get(job_id)
                 if r is None:
                     yield "event: gone\ndata: {}\n\n"
@@ -828,7 +831,7 @@ def register(app: FastAPI) -> None:
                     summary = r.summary_json or "{}"
                     yield "event: " + r.status + "\ndata: " + summary + "\n\n"
                     return
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(_SSE_POLL_INTERVAL)
         return StreamingResponse(_events(), media_type="text/event-stream")
 
     def _job_row_to_dict(r):
