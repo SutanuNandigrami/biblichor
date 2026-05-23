@@ -139,12 +139,19 @@ def _make_anubis_wrapper(session: Any, orig_fn: Any, raw_post_for_solve: Any):
             kw.setdefault("cookies", {})
             kw["cookies"].setdefault("techaro-anubis-auth", cached[0])
         r = orig_fn(url, **kw)
-        if _is_anubis_response(r) and _depth[0] < _ANUBIS_DEPTH_LIMIT:
+        with _ANUBIS_LOCK:
             _depth[0] += 1
+            current_depth = _depth[0]
+        if current_depth > _ANUBIS_DEPTH_LIMIT:
+            with _ANUBIS_LOCK:
+                _depth[0] -= 1
+            return r
+        if _is_anubis_response(r):
             try:
                 cookie = _solve_and_get_cookie(r.text, url, raw_post=raw_post_for_solve)
             finally:
-                _depth[0] -= 1
+                with _ANUBIS_LOCK:
+                    _depth[0] -= 1
             if cookie:
                 # Lock the write so concurrent threads do not tear the tuple
                 with _ANUBIS_LOCK:
