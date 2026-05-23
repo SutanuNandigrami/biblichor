@@ -39,7 +39,12 @@ class Doab:
             return []
         out: list[Candidate] = []
         for it in items[:20]:
-            md = {kv["key"]: kv["value"] for kv in it.get("metadata", [])}
+            # Keep first occurrence of each metadata key (DC convention: primary
+            # value comes first; last-wins dict comprehension silently drops it).
+            md: dict[str, str] = {}
+            for kv in it.get("metadata", []):
+                if kv["key"] not in md:
+                    md[kv["key"]] = kv["value"]
             url = md.get("oapen.relation.isPartOfBook") or md.get("dc.identifier.uri")
             if not url:
                 continue

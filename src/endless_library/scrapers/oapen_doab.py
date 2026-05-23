@@ -40,7 +40,12 @@ def _query(url: str, q: str) -> list[dict]:
 
 
 def _build_candidate(rec: dict, provider: Literal["oapen", "doab"], base: str) -> Candidate | None:
-    meta = {m["key"]: m["value"] for m in rec.get("metadata", [])}
+    # Keep first occurrence of each key; DC convention is that the primary value
+    # (e.g. primary download URL) comes first, and last-wins loses it (I10).
+    meta: dict[str, str] = {}
+    for m in rec.get("metadata", []):
+        if m["key"] not in meta:
+            meta[m["key"]] = m["value"]
     title = meta.get("dc.title", "")
     author = meta.get("dc.creator") or meta.get("dc.contributor.author") or ""
     bitstreams = rec.get("bitstreams") or []
