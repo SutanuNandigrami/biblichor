@@ -115,3 +115,20 @@ def test_cf_bypass_refuses_internal_url():
                 "file:///etc/passwd", "ftp://example.com/"):
         with pytest.raises(ValueError, match="refusing to proxy"):
             resolve(bad)
+
+
+def test_probe_slow_servers_safe_under_event_loop():
+    """_run_async must not raise RuntimeError when called from within an
+    already-running event loop (ultrareview I6)."""
+    import asyncio
+    from endless_library.scrapers.annas_curl import _run_async
+
+    async def _inner():
+        # A trivial coroutine that returns a value.
+        async def _coro():
+            return "ok"
+        # Call _run_async from within a running event loop.
+        return _run_async(_coro())
+
+    result = asyncio.run(_inner())
+    assert result == "ok", f"Expected 'ok', got {result!r}"

@@ -309,13 +309,11 @@ class AnnasArchiveCurl:
                 continue
             cdns = self._all_cdns(html)
             if cdns:
-                import asyncio
-
                 # If only one, no point in racing
                 if len(cdns) == 1:
                     return DownloadHandle(url=cdns[0], headers={}, expected_filename=None)
                 # Race them in parallel - first 200 wins
-                winner = asyncio.run(_probe_slow_servers_async(cdns))
+                winner = _run_async(_probe_slow_servers_async(cdns))
                 if winner:
                     return DownloadHandle(url=winner, headers={}, expected_filename=None)
                 # Fall through to the first one even if probes failed
@@ -373,6 +371,23 @@ class AnnasArchiveCurl:
             if url_has_book_ext(url):
                 return url
         return None
+
+
+
+def _run_async(coro):
+    """Run an async coroutine from sync code, safe whether or not an event
+    loop is already running.  asyncio.run raises RuntimeError when
+    called from inside a running loop; this wrapper falls back to a fresh
+    ThreadPoolExecutor-spawned event loop in that case."""
+    import asyncio
+    import concurrent.futures as _cf
+    try:
+        asyncio.get_running_loop()
+        # Already inside an event loop — spin up a fresh one in a worker thread.
+        with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+            return ex.submit(asyncio.run, coro).result()
+    except RuntimeError:
+        return asyncio.run(coro)
 
 
 async def _probe_slow_servers_async(urls: list[str], *, timeout: float = 15.0) -> str | None:
