@@ -148,7 +148,7 @@ def pd_aware_order(cfg: ScrapersCfg, *, query_title: str, is_pd: bool) -> list[s
     return promoted + rest
 
 
-def chain_for_source(cfg: ScrapersCfg, *, source: str | None, query_title: str,
+def chain_for_source(cfg, *, source: str | None, query_title: str,
                      is_pd: bool, is_recent_release: bool = False) -> list[str]:
     """Source-aware chain. For sources where the Source adapter already
     knows the per-book download path (e.g. kindlebangla emits slugs that
@@ -160,12 +160,19 @@ def chain_for_source(cfg: ScrapersCfg, *, source: str | None, query_title: str,
     Phase 6w.5: when is_recent_release=True and mobilism_books is in the
     base chain, promote it to the front so recently-published books hit
     Mobilism before the longer-latency open-access sources.
+
+    Phase 6w ultrareview C7: recent-release promotion only applies to
+    commercial releases (not is_pd). For PD books the PD chain already
+    prioritises correctly.
+
     """
     if source == "kindlebangla" and "kindlebangla_curl" in _REGISTRY:
         return ["kindlebangla_curl"]
     base = pd_aware_order(cfg, query_title=query_title, is_pd=is_pd)
-    if is_recent_release and "mobilism_books" in base:
+    # Recent-release promotion only makes sense for COMMERCIAL recent
+    # releases; for PD books the PD chain already prioritises correctly.
+    if is_recent_release and not is_pd and "mobilism_books" in base:
         promoted = ["mobilism_books"]
-        rest = [n for n in base if n != "mobilism_books"]
+        rest = [n for n in base if n not in promoted]
         return promoted + rest
     return base
