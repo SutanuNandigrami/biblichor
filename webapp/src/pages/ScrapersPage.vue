@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { Cpu, Play, GripVertical, KeyRound, FlaskConical, Link2, Unlink } from "lucide-vue-next"
 import { VueDraggable } from 'vue-draggable-plus'
 import Button from '@/components/ui/Button.vue'
@@ -154,6 +154,11 @@ async function load() {
   await loadExcluded()
 }
 onMounted(load)
+
+onUnmounted(() => {
+  benchEventSrc.value?.close()
+  benchEventSrc.value = null
+})
 
 async function toggle(name: string) {
   try { await api(`/api/scrapers/${name}/toggle`, { method: 'POST' }); await load() }
@@ -315,6 +320,7 @@ function _streamJob(jobId: number) {
     es.addEventListener(term, async (ev: MessageEvent) => {
       benching.value = false
       es.close()
+      benchEventSrc.value = null
       if (term === 'done') {
         const r = await api<{ summary_json: string | null }>(`/api/bench/jobs/${jobId}`)
         benchOutput.value = r.summary_json
@@ -330,6 +336,7 @@ function _streamJob(jobId: number) {
   }
   es.onerror = () => {
     es.close()
+    benchEventSrc.value = null
     _pollJob(jobId)
   }
 }
