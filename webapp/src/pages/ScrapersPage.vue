@@ -149,6 +149,7 @@ async function load() {
     const r = await api<BenchHistoryResp>('/api/bench/history?limit=7')
     history.value = r.history
   } catch { history.value = {} }
+  await loadExcluded()
 }
 onMounted(load)
 
@@ -194,6 +195,33 @@ function testStateFor(name: string) {
   return testState[name]
 }
 
+
+// Phase 6w.6: per-source excluded_categories denylist state
+const _DENYLIST_SCRAPERS = ['bdebooks', 'kindlebangla']
+const excludedCategoriesByName = reactive<Record<string, string>>({})
+
+async function loadExcluded() {
+  for (const name of _DENYLIST_SCRAPERS) {
+    try {
+      const r = await api<{ excluded_categories: string[] }>(`/api/scrapers/${name}/excluded-categories`)
+      excludedCategoriesByName[name] = r.excluded_categories.join('\\n')
+    } catch { /* optional endpoint */ }
+  }
+}
+
+async function saveExcluded(name: string) {
+  const lines = (excludedCategoriesByName[name] ?? '').split('\\n').map(s => s.trim()).filter(Boolean)
+  try {
+    await api(`/api/scrapers/${name}/excluded-categories`, {
+      method: 'PUT',
+      body: JSON.stringify({ excluded_categories: lines }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    toast.success(`${name}: denylist saved`)
+  } catch (e: any) {
+    toast.error('Save failed: ' + (e?.message ?? e))
+  }
+}
 async function testNow(name: string) {
   const s = testStateFor(name)
   s.busy = true
@@ -380,6 +408,18 @@ async function cancelBench() {
               ✗ {{ testStateFor(name).error }}
             </template>
           </div>
+          <!-- Phase 6w.6: denylist editor for applicable scrapers -->
+          <details v-if="_DENYLIST_SCRAPERS.includes(name)" class="mt-2">
+            <summary class="text-[11px] text-muted-foreground cursor-pointer select-none">
+              Excluded categories
+            </summary>
+            <textarea
+              v-model="excludedCategoriesByName[name]"
+              @blur="saveExcluded(name)"
+              class="mt-1 w-full text-[11px] font-mono bg-background border border-border rounded px-2 py-1 h-24 resize-y"
+              placeholder="One category per line…"
+            />
+          </details>
         </div>
         <div class="flex flex-col gap-1 shrink-0">
           <Button size="sm" variant="outline" :loading="testStateFor(name).busy" @click="testNow(name)">

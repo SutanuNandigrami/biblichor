@@ -702,6 +702,29 @@ def register(app: FastAPI) -> None:
         save_config(deps.cfg, request.app.state.config_path)
         return {"ok": True, "order": deps.cfg.scrapers.order}
 
+
+    @router.get("/scrapers/{name}/excluded-categories")
+    def get_excluded_categories(name: str, request: Request):
+        deps = request.app.state.deps
+        per_source = getattr(deps.cfg.scrapers, name, None)
+        if per_source is None:
+            raise HTTPException(404, f"no per-source config for: {name}")
+        cats = getattr(per_source, "excluded_categories", None) or []
+        return {"excluded_categories": cats}
+
+    @router.put("/scrapers/{name}/excluded-categories")
+    def put_excluded_categories(name: str, payload: dict, request: Request):
+        deps = request.app.state.deps
+        per_source = getattr(deps.cfg.scrapers, name, None)
+        if per_source is None:
+            raise HTTPException(404, f"no per-source config for: {name}")
+        cats = payload.get("excluded_categories")
+        if not isinstance(cats, list):
+            raise HTTPException(400, "excluded_categories must be a list")
+        per_source.excluded_categories = [str(c) for c in cats]
+        save_config(deps.cfg, request.app.state.config_path)
+        return {"ok": True, "excluded_categories": per_source.excluded_categories}
+
     @router.get("/bench/history")
     def bench_history(request: Request, limit: int = 7):
         """Per-scraper recent bench outcomes. Returns the last N runs for
