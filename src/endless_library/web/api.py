@@ -1674,6 +1674,11 @@ def register(app: FastAPI) -> None:
         target = (payload or {}).get("target_version") or ""
         if not target:
             raise HTTPException(400, "missing target_version")
+        try:
+            from endless_library.bookorbit.upgrade import _validate_target_version
+            _validate_target_version(target)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
         deps = request.app.state.deps
         svc = _bookorbit_service(request)
@@ -1724,6 +1729,11 @@ def register(app: FastAPI) -> None:
         submitted_token = (payload or {}).get("token") or ""
         if not target or not submitted_token:
             raise HTTPException(400, "missing target_version and/or token")
+        try:
+            from endless_library.bookorbit.upgrade import _validate_target_version
+            _validate_target_version(target)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
         state = _upgrade_state(request.app)
         expected_token = state.get("token", "")

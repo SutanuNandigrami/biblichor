@@ -563,3 +563,17 @@ def test_subprocess_runner_handles_missing_docker_cli(monkeypatch, tmp_path: Pat
     monkeypatch.setattr("endless_library.bookorbit.upgrade.shutil.which", lambda _: None)
     runner = SubprocessDockerRunner()
     assert runner.available() is False
+
+def test_validate_target_version_accepts_canonical():
+    from endless_library.bookorbit.upgrade import _validate_target_version
+    assert _validate_target_version("v1.3.0") == "v1.3.0"
+    assert _validate_target_version("1.3.0") == "1.3.0"
+    assert _validate_target_version("v2.0.0-beta.1") == "v2.0.0-beta.1"
+
+
+def test_validate_target_version_rejects_injection():
+    from endless_library.bookorbit.upgrade import _validate_target_version
+    import pytest
+    for bad in ("", "x", "v1.3", "1.3.0; rm -rf", "v1.3.0\nimage:evil", "v" * 70):
+        with pytest.raises(ValueError):
+            _validate_target_version(bad)

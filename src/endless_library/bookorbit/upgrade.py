@@ -41,6 +41,21 @@ import httpx
 log = logging.getLogger(__name__)
 
 
+_TARGET_VERSION_RE = re.compile(r"^v?\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?$")
+
+
+def _validate_target_version(v: str) -> str:
+    """Strict validation: vX.Y.Z or X.Y.Z, optional pre-release suffix.
+    Length cap 64. Returns the validated string (no transformation)."""
+    if not isinstance(v, str) or not v:
+        raise ValueError("target_version must be a non-empty string")
+    if len(v) > 64:
+        raise ValueError("target_version too long (>64 chars)")
+    if not _TARGET_VERSION_RE.match(v):
+        raise ValueError(f"target_version {v!r} doesn't match vX.Y.Z[-suffix]")
+    return v
+
+
 BOOKORBIT_IMAGE = "ghcr.io/bookorbit/bookorbit"
 BOOKORBIT_CONTAINER = "biblichor-bookorbit"
 BOOKORBIT_DB_CONTAINER = "biblichor-bookorbit-db"
@@ -554,6 +569,8 @@ def _swap_compose_image(compose_path: Path, new_image_ref: str) -> str | None:
         return None
     old_ref = m.group(2)
     new_text = text[: m.start(2)] + new_image_ref + text[m.end(2) :]
+    if "\n" in new_image_ref or "\r" in new_image_ref:
+        raise ValueError(f"new_image_ref contains newline characters: {new_image_ref!r}")
     compose_path.write_text(new_text, encoding="utf-8")
     return old_ref
 
