@@ -16,9 +16,14 @@ from urllib.parse import urlparse
 
 import httpx
 
+from endless_library.url_safety import UnsafeUrlError, assert_safe_url
+
 # Docker-network service names that must never be proxied through the
 # cf-bypass sidecar (SSRF: sidecar lives on the biblichor network and
-# could otherwise reach internal services).
+# could otherwise reach internal services). These are checked IN ADDITION
+# to the canonical assert_safe_url which covers all RFC1918/link-local
+# ranges, cloud metadata endpoints, .local/.internal TLDs, and DNS
+# resolution (C-NEW-3 second pass).
 _BLOCKED_NETLOCS = frozenset({
     "biblichor",
     "bookorbit",
@@ -32,32 +37,20 @@ _BLOCKED_NETLOCS = frozenset({
 })
 
 
-def _is_safe_url(url: str) -> bool:
-    try:
-        parsed = urlparse(url)
-    except Exception:
-        return False
-    if parsed.scheme not in ("http", "https"):
-        return False
-    netloc = (parsed.hostname or "").lower()
-    if not netloc:
-        return False
-    if netloc in _BLOCKED_NETLOCS:
-        return False
-    if netloc == "localhost" or netloc.startswith("127.") or netloc == "::1":
-        return False
-    if netloc.startswith("10.") or netloc.startswith("192.168."):
-        return False
-    return True
-
-
 def resolve(url: str, *, timeout: float = 90.0) -> str:
     """POST `url` to the sidecar; return its resolved HTML.
     Raises ValueError on unsafe URLs.
     Raises httpx.HTTPError on transport failure / non-2xx.
     """
-    if not _is_safe_url(url):
-        raise ValueError(f"refusing to proxy untrusted URL through cf-bypass: {url!r}")
+    # C-NEW-3: use canonical assert_safe_url (covers 169.254/16, 172.16/12,
+    # 100.64/10, IPv6 link-local, .internal/.local TLDs, DNS resolution).
+    try:
+        assert_safe_url(url)
+    except UnsafeUrlError as e:
+        raise ValueError(f"refusing to proxy untrusted URL: {e}") from e
+    parsed = urlparse(url)
+    if (parsed.hostname or "").lower() in _BLOCKED_NETLOCS:
+        raise ValueError(f"refusing to proxy to docker service: {url!r}")
     base = os.environ.get("CF_BYPASS_URL", "http://cf-bypass:8000")
     # M13: single retry with 5s backoff on transport errors.
     for attempt in range(2):
