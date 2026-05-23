@@ -107,3 +107,11 @@ def test_annas_cloakbrowser_cools_mirror_on_resolve_failure(monkeypatch):
     # at least one mirror should now be cool
     assert any(annas_domains._is_cool(m) for m in annas_domains._MIRRORS)
 
+def test_cf_bypass_refuses_internal_url():
+    from endless_library.scrapers.cf_bypass_client import resolve
+    import pytest
+    for bad in ("http://bookorbit:3000/", "http://flaresolverr:8191/",
+                "http://127.0.0.1:8090/", "http://localhost/",
+                "file:///etc/passwd", "ftp://example.com/"):
+        with pytest.raises(ValueError, match="refusing to proxy"):
+            resolve(bad)
