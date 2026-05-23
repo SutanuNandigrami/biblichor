@@ -13,6 +13,7 @@ from endless_library.config import Config
 from endless_library.db.bench import BenchRunRepo
 from endless_library.domain.models import SearchQuery
 from endless_library.scrapers import registry
+from endless_library.scrapers.base import NotConfigured
 
 log = logging.getLogger(__name__)
 
@@ -130,6 +131,19 @@ def run_bench(
     for s_name in strats:
         try:
             scraper = registry.build(s_name, cfg.scrapers)
+        except NotConfigured as e:
+            log.info("bench: %s not configured, recording per-query outcomes", s_name)
+            _nc_scoped = queries_for_scraper(all_queries, s_name, tag_map)
+            for _ncq in _nc_scoped:
+                _note = f"creds-missing: {e}"
+                outcomes.append(BenchOutcome(
+                    scraper=s_name, query=_ncq.title, success=False,
+                    duration_ms=0, candidates=0, matched_isbn=False, note=_note,
+                ))
+                if repo:
+                    repo.record(scraper=s_name, query=_ncq.title, success=False,
+                                duration_ms=0, notes=_note)
+            continue
         except Exception as e:
             log.warning("could not build %s: %s", s_name, e)
             continue

@@ -126,6 +126,7 @@ queries:
 # the full corpus (general-purpose backends).
 corpus_tags:
   kindlebangla_curl: [kindlebangla]
+  zlib_singlelogin: [en, modern]
   gutendex: [pd]
   standard_ebooks: [pd]
   oapen_doab: [pd]

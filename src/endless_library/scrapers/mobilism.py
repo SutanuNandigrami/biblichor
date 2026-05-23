@@ -29,8 +29,7 @@ _LOGIN_URL = "https://forum.mobilism.org/ucp.php?mode=login"
 _SESSION_TTL = 24 * 3600  # seconds
 
 
-class NotConfigured(Exception):
-    """Raised when Mobilism credentials have not been configured."""
+from endless_library.scrapers.base import NotConfigured  # noqa: F401
 
 
 class AuthFailed(Exception):
