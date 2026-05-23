@@ -86,8 +86,8 @@ class WelibPlaywright(WelibCurl):
         if not candidate.md5:
             return None
         try:
-            from playwright.sync_api import TimeoutError as PWTimeout
-            from playwright.sync_api import sync_playwright
+            from patchright.sync_api import TimeoutError as PWTimeout
+            from patchright.sync_api import sync_playwright
         except ImportError:
             log.warning("playwright not installed; install with: pip install playwright")
             return None
