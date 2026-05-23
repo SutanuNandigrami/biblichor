@@ -1529,10 +1529,17 @@ def register(app: FastAPI) -> None:
     @router.post("/scrapers/mobilism/creds")
     def mobilism_store_creds(payload: _MobilismCredsPayload, request: Request):
         """Phase 6w.5d: store Mobilism forum credentials in the encrypted
-        secrets store. SPA Scrapers page card uses this."""
+        secrets store. SPA Scrapers page card uses this.
+
+        Uses set_secret_values for atomic rotation: both username and
+        password are written in a single sqlite transaction so the store
+        is never left with new username + old password (ultrareview I13).
+        """
         svc = _bookorbit_service(request)
-        svc.set_secret_value("mobilism.username", payload.username)
-        svc.set_secret_value("mobilism.password", payload.password)
+        svc.set_secret_values({
+            "mobilism.username": payload.username,
+            "mobilism.password": payload.password,
+        })
         return {"ok": True}
 
     @router.delete("/scrapers/mobilism/creds")

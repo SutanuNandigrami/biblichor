@@ -116,10 +116,10 @@ class BookOrbitService:
         return None
 
     def store_admin_creds(self, username: str, password: str) -> None:
-        with connect(self._db_path) as conn:
-            init_secrets_table(conn)
-            set_secret(conn, self._secrets_key, SECRET_ADMIN_USER, username)
-            set_secret(conn, self._secrets_key, SECRET_ADMIN_PASSWORD, password)
+        self.set_secret_values({
+            SECRET_ADMIN_USER: username,
+            SECRET_ADMIN_PASSWORD: password,
+        })
 
     def clear_admin_creds(self) -> None:
         with connect(self._db_path) as conn:
@@ -414,6 +414,52 @@ class BookOrbitService:
             init_secrets_table(conn)
             set_secret(conn, self._secrets_key, name, value)
 
+    def set_secret_values(self, kv: dict[str, str]) -> None:
+        """Atomically set multiple secret values. All-or-nothing: if any
+        write fails the transaction is rolled back and no values change
+        (ultrareview I13).
+
+        All encryption happens before the transaction opens so the
+        potentially-slow HKDF + AESGCM work occurs outside the DB lock.
+        """
+        if not kv:
+            return
+        import os as _os
+        import time as _time
+        from endless_library.db.schema import connect
+        from endless_library.secrets_store import init_secrets_table
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        key = self._secrets_key
+        aes = AESGCM(key)
+        NONCE_LEN = 12
+        # Encrypt outside the transaction (slow work before any DB lock).
+        encrypted: list[tuple[str, bytes, bytes]] = []
+        for name, value in kv.items():
+            nonce = _os.urandom(NONCE_LEN)
+            ct = aes.encrypt(nonce, value.encode("utf-8"), associated_data=name.encode("utf-8"))
+            encrypted.append((name, nonce, ct))
+
+        with connect(self._db_path) as conn:
+            init_secrets_table(conn)
+            now = int(_time.time())
+            conn.execute("BEGIN")
+            try:
+                for name, nonce, ct in encrypted:
+                    conn.execute(
+                        """INSERT INTO secrets (name, nonce, ciphertext, updated_at)
+                           VALUES (?, ?, ?, ?)
+                           ON CONFLICT(name) DO UPDATE SET
+                               nonce=excluded.nonce,
+                               ciphertext=excluded.ciphertext,
+                               updated_at=excluded.updated_at""",
+                        (name, nonce, ct, now),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
     def get_secret_value(self, name: str) -> str | None:
         from endless_library.db.schema import connect
         from endless_library.secrets_store import get_secret, init_secrets_table
@@ -433,8 +479,7 @@ class BookOrbitService:
     # ---------- Z-Library credentials ----------
 
     def store_zlib_creds(self, email: str, password: str) -> None:
-        self.set_secret_value("zlib.email", email)
-        self.set_secret_value("zlib.password", password)
+        self.set_secret_values({"zlib.email": email, "zlib.password": password})
 
     def get_zlib_creds(self) -> tuple[str, str] | None:
         email = self.get_secret_value("zlib.email")
