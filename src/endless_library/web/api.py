@@ -24,6 +24,10 @@ from endless_library.url_safety import UnsafeUrlError, assert_safe_url
 
 log = logging.getLogger(__name__)
 
+# SSE bench stream poll interval — module-level so tests can monkeypatch.
+# monkeypatch.setattr("endless_library.web.api.SSE_POLL_INTERVAL_SEC", 0.05)
+SSE_POLL_INTERVAL_SEC: float = 2.0
+
 # ---------- pydantic models for inbound payloads ----------
 
 
@@ -827,7 +831,6 @@ def register(app: FastAPI) -> None:
         if row is None:
             raise HTTPException(404, f"no bench job with id={job_id}")
 
-        _SSE_POLL_INTERVAL = 2.0  # seconds; configurable for tests
         async def _events():
             last_progress = -1
             while True:
@@ -845,7 +848,7 @@ def register(app: FastAPI) -> None:
                     summary = r.summary_json or "{}"
                     yield "event: " + r.status + "\ndata: " + summary + "\n\n"
                     return
-                await asyncio.sleep(_SSE_POLL_INTERVAL)
+                await asyncio.sleep(SSE_POLL_INTERVAL_SEC)
         return StreamingResponse(_events(), media_type="text/event-stream")
 
     def _job_row_to_dict(r):

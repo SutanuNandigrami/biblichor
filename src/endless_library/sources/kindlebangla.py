@@ -34,12 +34,13 @@ import httpx
 from bs4 import BeautifulSoup
 
 from endless_library.domain.models import BookRef
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT as _BIBLICHOR_UA
 from endless_library.sources.base import normalize_isbn  # noqa: F401  (re-exported in case future sub-source needs it)
 
 log = logging.getLogger(__name__)
 
 BASE = "https://www.kindlebangla.com"
-USER_AGENT = "Mozilla/5.0 (compatible; biblichor/0.1; +kindlebangla source)"
+USER_AGENT = f"Mozilla/5.0 (compatible; {_BIBLICHOR_UA}; +kindlebangla source)"
 REQ_DELAY_SEC = 0.5
 DEFAULT_MAX_PAGES = 500
 

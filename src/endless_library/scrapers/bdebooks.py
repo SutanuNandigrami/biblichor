@@ -15,12 +15,12 @@ from bs4 import BeautifulSoup
 
 from endless_library.config import BdebooksCfg
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
-from endless_library.scrapers.http_client import make_client
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT as _BIBLICHOR_UA, make_client
 
 log = logging.getLogger(__name__)
 
 BASE = "https://bdebooks.com"
-USER_AGENT = "Mozilla/5.0 (compatible; biblichor/0.1; +bdebooks scraper)"
+USER_AGENT = f"Mozilla/5.0 (compatible; {_BIBLICHOR_UA}; +bdebooks scraper)"
 
 # Cap the number of detail-page fetches per search so the bench's 20s per-query
 # timeout is not exceeded by N*1-3s/page serial fetches (ultrareview D).

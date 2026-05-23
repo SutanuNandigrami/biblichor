@@ -20,7 +20,6 @@ written to events.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import shutil
 from dataclasses import dataclass
@@ -133,10 +132,19 @@ def unpack_if_archive(
     # The downloaded filename is derived from the provider's unique
     # identifier (kindlebangla slug, Anna's md5, etc) so collisions are
     # structurally impossible.
-    with contextlib.suppress(OSError):
+    try:
         downloaded_path.rename(
             downloaded_path.with_suffix(downloaded_path.suffix + ".orig")
         )
+    except OSError as e:
+        log.warning(
+            "unpack: could not preserve original at %s.orig: %s",
+            downloaded_path,
+            e,
+        )
+        raise UnpackError(
+            f"refused to overwrite {downloaded_path} without successful .orig preservation"
+        ) from e
 
     final_path = downloaded_path  # original slot, now free
     if final_path.exists():

@@ -28,7 +28,7 @@ import logging
 from typing import Any
 from urllib.parse import quote_plus, urljoin
 
-from endless_library.scrapers.http_client import make_client
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT as _BIBLICHOR_UA, make_client
 from bs4 import BeautifulSoup
 
 from endless_library.config import KindleBanglaCfg, ScrapersCfg
@@ -43,7 +43,7 @@ from endless_library.scrapers.drive_helpers import (
 log = logging.getLogger(__name__)
 
 BASE = "https://www.kindlebangla.com"
-USER_AGENT = "Mozilla/5.0 (compatible; biblichor/0.1; +kindlebangla scraper)"
+USER_AGENT = f"Mozilla/5.0 (compatible; {_BIBLICHOR_UA}; +kindlebangla scraper)"
 
 
 class KindleBanglaCurl:

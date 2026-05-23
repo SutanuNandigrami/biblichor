@@ -558,6 +558,8 @@ def _swap_compose_image(compose_path: Path, new_image_ref: str) -> str | None:
     which preserves comments and handles anchors correctly.
     """
     text = compose_path.read_text(encoding="utf-8")
+    if "\n" in new_image_ref or "\r" in new_image_ref:
+        raise ValueError(f"new_image_ref contains newline characters: {new_image_ref!r}")
     # Match the bookorbit service block's `image:` line. The bookorbit
     # service is named exactly `bookorbit` in compose.yml; we anchor on
     # the service header to avoid touching biblichor / flaresolverr.
@@ -575,8 +577,6 @@ def _swap_compose_image(compose_path: Path, new_image_ref: str) -> str | None:
         return None
     old_ref = m.group(2)
     new_text = text[: m.start(2)] + new_image_ref + text[m.end(2) :]
-    if "\n" in new_image_ref or "\r" in new_image_ref:
-        raise ValueError(f"new_image_ref contains newline characters: {new_image_ref!r}")
     compose_path.write_text(new_text, encoding="utf-8")
     return old_ref
 

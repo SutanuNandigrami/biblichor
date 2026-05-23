@@ -259,17 +259,24 @@ def test_bench_job_stream_emits_terminal_event_on_done(tmp_path: Path):
 
 
 def test_bench_job_stream_poll_interval_is_2s(tmp_path):
-    """SSE stream poll interval must default to 2.0 s (ultrareview I9)."""
-    import ast, textwrap
-    # Parse the api.py source and check _SSE_POLL_INTERVAL assignment
+    """SSE stream poll interval must default to 2.0 s (ultrareview I9 / m-NEW-3).
+
+    Phase 6aa m-NEW-3: constant moved to module level as SSE_POLL_INTERVAL_SEC
+    so tests can monkeypatch it without rewriting internal function scopes.
+    """
     import pathlib
     src = pathlib.Path('/home/ubuntu/endless-library/src/endless_library/web/api.py').read_text()
-    assert '_SSE_POLL_INTERVAL = 2.0' in src, (
-        'Expected _SSE_POLL_INTERVAL = 2.0 in api.py; SSE poll interval not updated'
+    assert 'SSE_POLL_INTERVAL_SEC: float = 2.0' in src, (
+        'Expected module-level SSE_POLL_INTERVAL_SEC = 2.0 in api.py (m-NEW-3)'
     )
-    assert 'asyncio.sleep(_SSE_POLL_INTERVAL)' in src, (
-        'asyncio.sleep should use _SSE_POLL_INTERVAL'
+    assert 'asyncio.sleep(SSE_POLL_INTERVAL_SEC)' in src, (
+        'asyncio.sleep should reference module-level SSE_POLL_INTERVAL_SEC'
     )
     assert 'asyncio.sleep(0.5)' not in src, (
         'asyncio.sleep(0.5) still present; interval was not updated'
+    )
+    # Verify module attribute is accessible for monkeypatching
+    from endless_library.web import api as api_mod
+    assert api_mod.SSE_POLL_INTERVAL_SEC == 2.0, (
+        f"Expected api.SSE_POLL_INTERVAL_SEC == 2.0, got {api_mod.SSE_POLL_INTERVAL_SEC}"
     )
