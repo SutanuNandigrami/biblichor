@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+
+from endless_library.async_utils import _run_async
 import logging
 import mimetypes
 import ssl
@@ -182,4 +184,6 @@ def send_to_kindle(
         body=body,
         attachment=attachment,
     )
-    return asyncio.run(_send_smtp(msg, smtp=smtp))
+    # I-NEW-3: use _run_async so this works even when called from
+    # within a running event loop (e.g. from an executor).
+    return _run_async(_send_smtp(msg, smtp=smtp))

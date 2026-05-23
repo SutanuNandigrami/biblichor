@@ -69,7 +69,6 @@ services:
       # config/.env, which may carry stale localhost values from
       # pre-compose installs.
       FLARESOLVERR_URL: "http://flaresolverr:8191/v1"
-      CF_BYPASS_URL: "http://cf-bypass:8000"
       BOOKORBIT_URL: "${BOOKORBIT_URL:-http://bookorbit:3000}"
       # Phase 6v.1 hotfix: relative bind-mount paths in compose.yml
       # (e.g. ../data/bookorbit-db) resolve against the project
@@ -87,8 +86,6 @@ services:
     depends_on:
       flaresolverr:
         condition: service_healthy
-      cf-bypass:
-        condition: service_started
       bookorbit:
         condition: service_started
     healthcheck:
@@ -118,9 +115,13 @@ services:
 
   # Phase 6w.2: sarperavci/CloudflareBypassForScraping sidecar.
   # Used by annas_cloakbrowser when curl-cffi + FlareSolverr both fail
-  # against a Cloudflare interactive challenge. Default-on (no profile).
+  # against a Cloudflare interactive challenge. Opt-in via profile (Phase 6z:
+  # the sarperavci image is not published on Docker Hub; enable with
+  # --profile bypass when you have built the image locally).
   cf-bypass:
     image: sarperavci/cloudflarebypassforscraping:latest
+    profiles:
+      - bypass
     container_name: biblichor-cf-bypass
     restart: unless-stopped
     healthcheck:

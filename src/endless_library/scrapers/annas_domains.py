@@ -69,8 +69,11 @@ def parse_domains_from_html(html: bytes | str) -> list[str]:
 
     out: list[str] = []
     for table in tables:
-        # Find spans with class containing "url"
-        for span in table.xpath('.//span[contains(@class, "url")]'):
+        # Find spans with class word "url" (word-boundary via concat trick
+        # to avoid matching "sourceurl", "urlbar", etc.) — I-NEW-1
+        for span in table.xpath(
+            './/span[contains(concat(" ", normalize-space(@class), " "), " url ")]'
+        ):
             # Find external links within the span
             for a in span.xpath('.//a[contains(@class, "external")][@href]'):
                 href_str = (a.get("href") or "").strip()

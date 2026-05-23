@@ -88,7 +88,8 @@ def test_anubis_middleware_solves_and_retries(monkeypatch):
                 status_code = 200
                 cookies = {"techaro-anubis-auth": "JWT"}
             return _R()
-    cookie = _solve_and_get_cookie(challenge_html, "https://example.com/page", _Sess())
+    _sess = _Sess()
+    cookie = _solve_and_get_cookie(challenge_html, "https://example.com/page", raw_post=_sess.post)
     assert cookie == "JWT"
     assert posted["url"].endswith("/anubis/pass")
     assert "nonce" in posted["data"] and "challenge" in posted["data"]
@@ -123,6 +124,7 @@ def test_anubis_cache_thread_safe():
     def run():
         try:
             with patch.object(hc, "_solve_and_get_cookie", return_value="JWT-TOKEN"):
+                _fake_post_fn = lambda url, **kw: type("R2", (), {"status_code": 302, "cookies": {}})()
                 wrapped = hc._make_anubis_wrapper(
                     object(),
                     lambda url, **kw: type(
@@ -134,6 +136,7 @@ def test_anubis_cache_thread_safe():
                             "headers": {"content-type": "text/html"},
                         },
                     )(),
+                    _fake_post_fn,
                 )
                 wrapped("https://" + host + "/page")
         except Exception as e:
