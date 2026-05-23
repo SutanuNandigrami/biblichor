@@ -22,6 +22,14 @@ from endless_library.config import save_config
 from endless_library.db.schema import connect
 from endless_library.url_safety import UnsafeUrlError, assert_safe_url
 
+from endless_library.kindle_stk import (
+    KindleStkService,
+    KindleStkAuthExpired,
+    KindleStkNotConfigured,
+    KindleStkRateLimited,
+    KindleStkUploadFailed,
+)
+
 log = logging.getLogger(__name__)
 
 # SSE bench stream poll interval — module-level so tests can monkeypatch.
@@ -1184,6 +1192,25 @@ def register(app: FastAPI) -> None:
                         external[_site] = st
             if external:
                 body["external_sources"] = external
+        # Phase STK 10: STK delivery health
+        try:
+            stk_svc = KindleStkService(deps.bookorbit_service)
+            if stk_svc.is_configured():
+                from endless_library.stk_rate import quota_status as _stk_qs
+
+                qs = _stk_qs(deps.db_path, daily_cap=deps.cfg.stk.daily_cap)
+                body["stk"] = {
+                    "configured": True,
+                    "sent_24h": qs.sent_24h,
+                    "cap": qs.cap,
+                    "remaining": qs.remaining,
+                    "exhausted": qs.exhausted,
+                }
+            else:
+                body["stk"] = {"configured": False}
+        except Exception:  # pragma: no cover
+            body["stk"] = {"configured": False}
+
         if not ok:
             return JSONResponse(status_code=503, content=body)
         return body
@@ -1836,6 +1863,123 @@ def register(app: FastAPI) -> None:
         from endless_library.bookorbit.service import BookOrbitService
 
         return {"token": BookOrbitService.generate_setup_token()}
+
+
+    # Kindle Send-to-Kindle (Phase STK 9) --------------------------------
+
+    @router.get("/kindle-stk/status")
+    def kindle_stk_status(request: Request) -> dict:
+        deps = request.app.state.deps
+        svc = KindleStkService(deps.bookorbit_service)
+        if not svc.is_configured():
+            return {"configured": False}
+        return {
+            "configured": True,
+            "customer_id": deps.bookorbit_service.get_secret_value(
+                "kindle_stk.amazon_customer_id"
+            ),
+            "registered_at": deps.bookorbit_service.get_secret_value(
+                "kindle_stk.registered_at"
+            ),
+            "default_destination": deps.bookorbit_service.get_secret_value(
+                "kindle_stk.default_destination_name"
+            ),
+            "default_destination_sn": deps.bookorbit_service.get_secret_value(
+                "kindle_stk.default_destination_sn"
+            ),
+        }
+
+    @router.post("/kindle-stk/oauth/start")
+    def kindle_stk_oauth_start(request: Request) -> dict:
+        deps = request.app.state.deps
+        svc = KindleStkService(deps.bookorbit_service)
+        url, _ = svc.start_oauth()
+        return {"authorize_url": url}
+
+    @router.post("/kindle-stk/oauth/complete")
+    def kindle_stk_oauth_complete(payload: dict, request: Request) -> dict:
+        deps = request.app.state.deps
+        redirect_url = (payload or {}).get("redirect_url", "")
+        if not redirect_url:
+            raise HTTPException(400, "redirect_url is required")
+        svc = KindleStkService(deps.bookorbit_service)
+        try:
+            return svc.complete_oauth(redirect_url)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except KindleStkUploadFailed as e:
+            raise HTTPException(502, str(e)) from e
+
+    @router.get("/kindle-stk/devices")
+    def kindle_stk_devices(request: Request) -> dict:
+        deps = request.app.state.deps
+        svc = KindleStkService(deps.bookorbit_service)
+        try:
+            devs = svc.list_devices()
+        except KindleStkNotConfigured as e:
+            raise HTTPException(400, str(e)) from e
+        return {
+            "devices": [
+                {
+                    "device_serial_number": d.device_serial_number,
+                    "device_type": d.device_type,
+                    "device_name": d.device_name,
+                }
+                for d in devs
+            ]
+        }
+
+    @router.put("/kindle-stk/default-destination")
+    def kindle_stk_set_destination(payload: dict, request: Request) -> dict:
+        deps = request.app.state.deps
+        sn = (payload or {}).get("device_sn", "")
+        if not sn:
+            raise HTTPException(400, "device_sn is required")
+        svc = KindleStkService(deps.bookorbit_service)
+        try:
+            svc.set_default_destination(sn)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except KindleStkNotConfigured as e:
+            raise HTTPException(400, str(e)) from e
+        return {"ok": True}
+
+    @router.post("/kindle-stk/test-send")
+    def kindle_stk_test_send(request: Request) -> dict:
+        """Send a tiny test file to verify the configured device works."""
+        import tempfile
+
+        deps = request.app.state.deps
+        svc = KindleStkService(deps.bookorbit_service)
+        with tempfile.NamedTemporaryFile(
+            suffix=".txt", delete=False, mode="w"
+        ) as f:
+            f.write("biblichor connection test -- Phase STK 9.")
+            tmp = Path(f.name)
+        try:
+            result = svc.send_file(
+                tmp, format="TXT", title="biblichor test", author="biblichor"
+            )
+            return {"ok": True, "result": result}
+        except KindleStkNotConfigured as e:
+            raise HTTPException(400, str(e)) from e
+        except KindleStkAuthExpired as e:
+            raise HTTPException(401, str(e)) from e
+        except KindleStkRateLimited as e:
+            raise HTTPException(
+                429, str(e), headers={"Retry-After": str(e.retry_after_sec)}
+            ) from e
+        except KindleStkUploadFailed as e:
+            raise HTTPException(502, str(e)) from e
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    @router.delete("/kindle-stk/connection")
+    def kindle_stk_deregister(request: Request) -> dict:
+        deps = request.app.state.deps
+        svc = KindleStkService(deps.bookorbit_service)
+        svc.deregister()
+        return {"ok": True}
 
     app.include_router(router)
 
