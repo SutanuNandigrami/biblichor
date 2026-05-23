@@ -228,6 +228,17 @@ class BookRepo:
         with self._connect() as conn:
             conn.execute(f"UPDATE books SET {', '.join(sets)} WHERE id = ?", params)
 
+    def mark_kindled(self, book_id: int, *, method: str | None = None) -> None:
+        """Mark a book as successfully delivered to Kindle.
+
+        method: 'stk' or 'smtp' (Phase STK 7); leave None for legacy callers.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE books SET status = 'kindled', sent_method = ?, updated_at = datetime('now') WHERE id = ?",
+                (method, book_id),
+            )
+
     def set_failed(self, book_id: int, *, error: str) -> None:
         """Atomically transition a book to status='failed' AND bump
         attempts by 1. Called from the pipeline at every genuine
