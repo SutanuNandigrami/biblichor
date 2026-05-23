@@ -67,6 +67,20 @@ class KindleBanglaCurl:
     # ---------------- Public API ----------------
 
     def search(self, query: SearchQuery) -> list[Candidate]:
+        results = self._search_upstream(query)
+        excluded = set(getattr(self.cfg, "excluded_categories", None) or [])
+        if not excluded:
+            return results
+        filtered = []
+        for c in results:
+            # categories tuple from the card; also check edition_hints for compat
+            cats = set(c.categories) | ({c.edition_hints} if c.edition_hints else set())
+            if cats & excluded:
+                continue
+            filtered.append(c)
+        return filtered
+
+    def _search_upstream(self, query: SearchQuery) -> list[Candidate]:
         url = f"{BASE}/index.php?search={quote_plus(query.title)}"
         html = self._get_text(url)
         if not html:
@@ -158,6 +172,7 @@ class KindleBanglaCurl:
                     publisher=None,
                     edition_hints=category or "",
                     detail_url=urljoin(BASE, a.get("href", "")),
+                    categories=(category,) if category else (),
                     raw={"slug": slug, "cover_url": cover},
                 )
             )

@@ -131,3 +131,59 @@ def test_bdebooks_excludes_islamic_when_in_denylist(monkeypatch):
     cands = b.search(SearchQuery(title="কোরআন", author=None, isbn13=None,
                                  format_priority=("pdf",), language="bn"))
     assert cands == []
+
+
+# ============ Task 4: KindleBangla retroactive excluded_categories filter ============
+
+KB_SEARCH_HTML = """
+<html><body>
+<div class="grid">
+  <div class="bg-white rounded-xl">
+    <div class="relative h-64">
+      <img alt="হিমু সমগ্র-১" src="https://cdn.example.com/cover-1.webp" />
+      <div class="absolute"><a href="/book/himu-1">বিস্তারিত</a></div>
+    </div>
+    <div class="p-4">
+      <h3>হিমু সমগ্র-১</h3>
+      <p>হুমায়ূন আহমেদ</p>
+      <div><span>হিমু সিরিজ</span></div>
+    </div>
+  </div>
+  <div class="bg-white rounded-xl">
+    <div class="relative h-64">
+      <img alt="কোরআন শরীফ" src="https://cdn.example.com/cover-quran.webp" />
+      <div class="absolute"><a href="/book/quran">বিস্তারিত</a></div>
+    </div>
+    <div class="p-4">
+      <h3>কোরআন শরীফ</h3>
+      <p>অনুবাদক</p>
+      <div><span>Quran</span></div>
+    </div>
+  </div>
+</div>
+</body></html>
+"""
+
+
+def test_kindlebangla_filters_excluded_categories_via_search_upstream(monkeypatch):
+    from endless_library.scrapers.kindlebangla_curl import KindleBanglaCurl
+    from endless_library.domain.models import SearchQuery
+
+    class _KBCfg:
+        excluded_categories = ["Quran", "ধর্মীয়"]
+
+    results_from_upstream = []
+
+    scraper = KindleBanglaCurl(
+        _KBCfg(),
+        http_get=lambda url: (200, KB_SEARCH_HTML.encode("utf-8")),
+    )
+
+    q = SearchQuery(title="হিমু", author=None, isbn13=None,
+                    format_priority=("epub",), language="bn")
+    hits = scraper.search(q)
+    titles = [c.title for c in hits]
+
+    # হিমু should pass filter, কোরআন should be filtered out
+    assert "হিমু সমগ্র-১" in titles
+    assert not any("কোরআন" in (t or "") for t in titles)
