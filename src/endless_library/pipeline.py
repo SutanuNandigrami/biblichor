@@ -36,6 +36,27 @@ from endless_library.sources import registry as sources_registry
 log = logging.getLogger(__name__)
 
 
+def _book_context(
+    book,
+    cfg,
+) -> tuple[bool, bool, str | None]:
+    """Return (is_pd, is_recent_release, source) for a book row.
+
+    Extracted from the duplicate computation that appeared in both
+    _search_with_strategies and _resolve_and_download (ultrareview M7).
+    """
+    is_pd = bool(getattr(book, "is_public_domain", None)) or (
+        getattr(book, "pub_year", None) is not None
+        and (book.pub_year or 0) > 0
+        and book.pub_year < 1928
+    )
+    source = getattr(book, "source", None)
+    current_year = datetime.datetime.now().year
+    recent_window = getattr(cfg.scrapers, "recent_release_window_years", 1)
+    is_recent = (getattr(book, "pub_year", None) or 0) >= (current_year - recent_window)
+    return is_pd, is_recent, source
+
+
 @dataclass(slots=True)
 class PipelineDeps:
     cfg: Config
@@ -210,12 +231,7 @@ def _search_with_strategies(
     pool: list[Candidate] = []
     seen_md5: set[str] = set()
     last_strategy: str | None = None
-    _is_pd = bool(getattr(book, "is_public_domain", None)) or (
-        getattr(book, "pub_year", None) is not None
-        and (book.pub_year or 0) > 0
-        and book.pub_year < 1928
-    )
-    _book_source = getattr(book, "source", None)
+    _is_pd, _is_recent, _book_source = _book_context(book, deps.cfg)
     # Phase 6u.4: when the Source already emits a per-book slug (e.g.
     # kindlebangla.com Bengali slugs), bypass the scraper's search step
     # — synthesise a Candidate directly so we don't depend on
@@ -247,9 +263,6 @@ def _search_with_strategies(
         deps.books.mark_stage(book.id, "searched")
         return [synth], "kindlebangla_curl"
 
-    _current_year = datetime.datetime.now().year
-    _recent_window = getattr(deps.cfg.scrapers, "recent_release_window_years", 1)
-    _is_recent = (getattr(book, "pub_year", None) or 0) >= (_current_year - _recent_window)
     for s_name in scrapers_registry.chain_for_source(
         deps.cfg.scrapers, source=_book_source, query_title=book.title or "",
         is_pd=_is_pd, is_recent_release=_is_recent
@@ -369,18 +382,10 @@ def _resolve_and_download(
     Drive HTTP 403, no candidates) so the book's failed message is
     actionable instead of the generic 'all scrapers failed'."""
     last_error: str | None = None
-    _is_pd = bool(getattr(book, "is_public_domain", None)) or (
-        getattr(book, "pub_year", None) is not None
-        and (book.pub_year or 0) > 0
-        and book.pub_year < 1928
-    )
-    _book_source = getattr(book, "source", None)
-    _current_year2 = datetime.datetime.now().year
-    _recent_window2 = getattr(deps.cfg.scrapers, "recent_release_window_years", 1)
-    _is_recent2 = (getattr(book, "pub_year", None) or 0) >= (_current_year2 - _recent_window2)
+    _is_pd, _is_recent, _book_source = _book_context(book, deps.cfg)
     for s_name in scrapers_registry.chain_for_source(
         deps.cfg.scrapers, source=_book_source, query_title=book.title or "",
-        is_pd=_is_pd, is_recent_release=_is_recent2
+        is_pd=_is_pd, is_recent_release=_is_recent
     ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
