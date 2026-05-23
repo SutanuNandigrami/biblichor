@@ -13,6 +13,8 @@ import logging
 from urllib.parse import urljoin
 
 import httpx
+
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
 from bs4 import BeautifulSoup
 from rapidfuzz import fuzz
 
@@ -39,7 +41,7 @@ class StandardEbooks:
             r = httpx.get(
                 FEED_URL,
                 timeout=30.0,
-                headers={"User-Agent": "endless-library/0.1"},
+                headers={"User-Agent": BIBLICHOR_USER_AGENT},
             )
         except httpx.HTTPError as e:
             log.info("standard_ebooks: %s", e)

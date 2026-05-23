@@ -14,6 +14,8 @@ from urllib.parse import urljoin
 
 import httpx
 
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
+
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 
 log = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ def _query(url: str, q: str) -> list[dict]:
             params={"query": q, "expand": "metadata,bitstreams"},
             timeout=15.0,
             headers={
-                "User-Agent": "endless-library/0.1",
+                "User-Agent": BIBLICHOR_USER_AGENT,
                 "Accept": "application/json",
             },
         )

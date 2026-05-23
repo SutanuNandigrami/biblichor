@@ -9,6 +9,8 @@ from typing import Any
 from urllib.parse import quote_plus, urljoin
 
 import httpx
+
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
 from bs4 import BeautifulSoup
 
 from endless_library.config import ScrapersCfg
@@ -401,7 +403,7 @@ async def _probe_slow_servers_async(urls: list[str], *, timeout: float = 15.0) -
         return None
     async with httpx.AsyncClient(
         timeout=timeout,
-        headers={"User-Agent": "endless-library/0.1"},
+        headers={"User-Agent": BIBLICHOR_USER_AGENT},
         follow_redirects=True,
     ) as client:
 

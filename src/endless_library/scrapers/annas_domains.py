@@ -231,7 +231,7 @@ def _now() -> float:
     return time.time()
 
 
-def _reset_state() -> None:
+def _reset_state_for_tests() -> None:
     global _last_working
     with _STATE_LOCK:
         _state.clear()
