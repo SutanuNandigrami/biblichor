@@ -25,6 +25,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from importlib.metadata import version as _pkg_version
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -54,7 +55,11 @@ _ANUBIS_DEPTH_LIMIT = 2
 # M15: project-default User-Agent for scrapers that do NOT impersonate
 # a specific browser. Scrapers using make_client(impersonate="chrome")
 # should NOT set this header — curl-cffi will set it to match Chrome.
-BIBLICHOR_USER_AGENT = "biblichor/0.1 (+https://github.com/SutanuNandigrami/biblichor)"
+try:
+    _VERSION = _pkg_version("biblichor")
+except Exception:
+    from endless_library import __version__ as _VERSION
+BIBLICHOR_USER_AGENT = f"biblichor/{_VERSION} (+https://github.com/SutanuNandigrami/biblichor)"
 
 
 def make_client(
