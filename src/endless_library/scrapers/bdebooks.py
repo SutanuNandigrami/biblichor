@@ -13,6 +13,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from endless_library.config import BdebooksCfg
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.scrapers.http_client import make_client
 
@@ -28,7 +29,7 @@ class BDeBooks:
     name = "bdebooks"
     provider = "bdebooks"
 
-    def __init__(self, cfg, **kw) -> None:
+    def __init__(self, cfg: BdebooksCfg, **kw) -> None:
         self._cfg = cfg
 
     # ---------------- Public API ----------------

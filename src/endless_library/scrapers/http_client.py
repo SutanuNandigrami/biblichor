@@ -9,6 +9,16 @@ Also installs an Anubis PoW middleware: any response whose HTML
 matches the Anubis fingerprint is intercepted, the PoW is solved
 in-process, the JWT cookie is captured, and the original request
 is retried automatically. Cache keyed by host (50-min TTL).
+
+Scraper routing summary
+-----------------------
+make_client() is used by: anubis solver path, HathiTrust, DOAB, BDeBooks,
+mobilism_books, the migrated sub-methods of archive_curl/kindlebangla_curl/
+welib_curl, and the cf-bypass client (NOT -- cf-bypass uses raw httpx).
+
+PD scrapers (gutendex, standard_ebooks, oapen_doab, wikisource) and the
+async slow_servers probe in annas_curl still use httpx -- they do not benefit
+from TLS fingerprint impersonation and their respx-based tests would break.
 """
 from __future__ import annotations
 

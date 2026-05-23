@@ -31,7 +31,7 @@ from urllib.parse import quote_plus, urljoin
 from endless_library.scrapers.http_client import make_client
 from bs4 import BeautifulSoup
 
-from endless_library.config import ScrapersCfg
+from endless_library.config import KindleBanglaCfg, ScrapersCfg
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.scrapers.drive_helpers import (
     find_in_folder,
@@ -53,7 +53,7 @@ class KindleBanglaCurl:
 
     def __init__(
         self,
-        cfg: ScrapersCfg,
+        cfg: KindleBanglaCfg,
         *,
         http_get: Any | None = None,
         # http_redirect: callable(url) -> (status, headers, body) — used by

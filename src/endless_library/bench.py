@@ -182,9 +182,19 @@ def run_bench(
             matched = False
             note = ""
             try:
-                with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+                ex = _cf.ThreadPoolExecutor(max_workers=1)
+                try:
                     fut = ex.submit(scraper.search, sq)
-                    cands = fut.result(timeout=timeout_sec)
+                    try:
+                        cands = fut.result(timeout=timeout_sec)
+                    except _cf.TimeoutError:
+                        # Hard cancellation requires async-native scrapers; thread runs
+                        # to its own network timeout. Don't wait for it.
+                        ex.shutdown(wait=False, cancel_futures=True)
+                        raise
+                    ex.shutdown(wait=True)
+                except _cf.TimeoutError:
+                    raise
                 n_cands = len(cands)
                 if cands:
                     # Match if any candidate's title/author roughly matches AND format ok.

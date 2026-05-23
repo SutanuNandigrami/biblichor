@@ -19,6 +19,7 @@ AuthFailed     -- raised when the login POST redirects back to the login page
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 from endless_library.scrapers.http_client import make_client
@@ -40,6 +41,7 @@ class AuthFailed(Exception):
 class MobilismSession:
     _session = None
     _expires_at: float = 0.0
+    _lock: threading.Lock = threading.Lock()
 
     @classmethod
     def get(cls, cfg):
@@ -66,45 +68,48 @@ class MobilismSession:
                 "Set mobilism_username + mobilism_password in ScrapersCfg."
             )
 
-        now = time.monotonic()
-        if cls._session is not None and now < cls._expires_at:
-            return cls._session
+        with cls._lock:
+            now = time.monotonic()
+            if cls._session is not None and now < cls._expires_at:
+                return cls._session
 
-        # Need a fresh login
-        client = make_client(timeout=30)
-        resp = client.post(
-            _LOGIN_URL,
-            data={
-                "username": username,
-                "password": password,
-                "login": "Login",
-                "redirect": "./index.php",
-                "sid": "",
-            },
-            follow_redirects=True,
-        )
-
-        # phpBB redirects to the index on success; if the final URL is still
-        # the login page, credentials were rejected.
-        final_url = str(resp.url)
-        if "ucp.php?mode=login" in final_url or "mode=login" in final_url:
-            raise AuthFailed(
-                f"Mobilism login failed: redirected back to login page ({final_url})"
+            # Need a fresh login
+            client = make_client(timeout=30)
+            resp = client.post(
+                _LOGIN_URL,
+                data={
+                    "username": username,
+                    "password": password,
+                    "login": "Login",
+                    "redirect": "./index.php",
+                    "sid": "",
+                },
+                follow_redirects=True,
             )
 
-        cls._session = client
-        cls._expires_at = now + _SESSION_TTL
-        log.info("mobilism: session established (expires in 24h)")
-        return cls._session
+            # phpBB redirects to the index on success; if the final URL is still
+            # the login page, credentials were rejected.
+            final_url = str(resp.url)
+            if "ucp.php?mode=login" in final_url or "mode=login" in final_url:
+                raise AuthFailed(
+                    f"Mobilism login failed: redirected back to login page ({final_url})"
+                )
+
+            cls._session = client
+            cls._expires_at = now + _SESSION_TTL
+            log.info("mobilism: session established (expires in 24h)")
+            return cls._session
 
     @classmethod
     def invalidate(cls) -> None:
         """Force re-login on the next call to get()."""
-        cls._session = None
-        cls._expires_at = 0.0
+        with cls._lock:
+            cls._session = None
+            cls._expires_at = 0.0
 
 
 def _reset_session() -> None:
     """Test hook: clear the class-level singleton."""
-    MobilismSession._session = None
-    MobilismSession._expires_at = 0.0
+    with MobilismSession._lock:
+        MobilismSession._session = None
+        MobilismSession._expires_at = 0.0

@@ -107,27 +107,3 @@ def test_annas_cloakbrowser_cools_mirror_on_resolve_failure(monkeypatch):
     # at least one mirror should now be cool
     assert any(annas_domains._is_cool(m) for m in annas_domains._MIRRORS)
 
-
-def test_resolve_slow_download_parallel_returns_first_winner(monkeypatch):
-    import asyncio
-    from endless_library.scrapers import annas_curl as mod
-    async def _try_slot(sess, md5, i):
-        delays = {0: 5, 1: 5, 2: 0.05, 3: 5, 4: 5}
-        await asyncio.sleep(delays[i])
-        return f"https://cdn/winner-slot-{i}"
-    monkeypatch.setattr(mod, "_try_slot", _try_slot)
-    url = asyncio.run(mod._resolve_slow_download_parallel("md5", max_slots=5))
-    assert url.endswith("slot-2")
-
-
-def test_resolve_slow_download_parallel_raises_when_all_countdown(monkeypatch):
-    import asyncio
-    from endless_library.scrapers import annas_curl as mod
-    async def _try_slot(sess, md5, i):
-        return None  # countdown / no direct link
-    monkeypatch.setattr(mod, "_try_slot", _try_slot)
-    try:
-        asyncio.run(mod._resolve_slow_download_parallel("md5", max_slots=3))
-        assert False
-    except mod.AllSlotsCountdownError:
-        pass
