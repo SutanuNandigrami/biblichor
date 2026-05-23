@@ -107,6 +107,41 @@ class MobilismSession:
             cls._session = None
             cls._expires_at = 0.0
 
+    @classmethod
+    def try_login(cls, cfg) -> tuple[bool, str | None]:
+        """Attempt a login WITHOUT touching the singleton session.
+
+        Safe entry-point for credential-validation endpoints: builds a fresh
+        client, POSTs credentials, inspects the redirect, and discards the
+        client on return.  The singleton is never read or written, so concurrent
+        requests that call get() cannot pick up a test-credential session.
+
+        Returns (True, None) on success; (False, error_message) on failure.
+        """
+        username = getattr(cfg, "mobilism_username", "") or ""
+        password = getattr(cfg, "mobilism_password", "") or ""
+        if not username or not password:
+            return False, "Mobilism credentials not configured."
+        try:
+            client = make_client(timeout=30)
+            resp = client.post(
+                _LOGIN_URL,
+                data={
+                    "username": username,
+                    "password": password,
+                    "login": "Login",
+                    "redirect": "./index.php",
+                    "sid": "",
+                },
+                follow_redirects=True,
+            )
+            final_url = str(resp.url)
+            if "ucp.php?mode=login" in final_url or "mode=login" in final_url:
+                return False, f"Login failed: redirected back to login page ({final_url})"
+            return True, None
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}"
+
 
 def _reset_session() -> None:
     """Test hook: clear the class-level singleton."""

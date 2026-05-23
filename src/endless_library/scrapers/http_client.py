@@ -97,25 +97,33 @@ def _solve_and_get_cookie(html: str, request_url: str, session: Any) -> str | No
     return None
 
 
-def _install_anubis_middleware(session: Any) -> None:
-    """Wrap session.get/post so that on an Anubis-flavored response,
-    we solve the PoW, store the cookie, and retry."""
-    orig_get = session.get
+def _make_anubis_wrapper(session: Any, orig_fn: Any):
+    """Return a wrapped version of orig_fn that handles Anubis PoW challenges.
 
-    def get(url: str, **kw):
+    Factored out so the same logic applies uniformly to get/post/head/put/delete
+    (ultrareview I2).
+    """
+    def wrapper(url: str, **kw):
         host = urlparse(url).netloc
         cached = _ANUBIS_COOKIE_CACHE.get(host)
         if cached and cached[1] > time.time():
             kw.setdefault("cookies", {})
             kw["cookies"].setdefault("techaro-anubis-auth", cached[0])
-        r = orig_get(url, **kw)
+        r = orig_fn(url, **kw)
         if _is_anubis_response(r):
             cookie = _solve_and_get_cookie(r.text, url, session)
             if cookie:
                 _ANUBIS_COOKIE_CACHE[host] = (cookie, time.time() + _ANUBIS_TTL_SEC)
                 kw.setdefault("cookies", {})
                 kw["cookies"]["techaro-anubis-auth"] = cookie
-                r = orig_get(url, **kw)
+                r = orig_fn(url, **kw)
         return r
+    return wrapper
 
-    session.get = get
+
+def _install_anubis_middleware(session: Any) -> None:
+    """Wrap get/post/head/put/delete so that on an Anubis-flavored response,
+    we solve the PoW, store the cookie, and retry (ultrareview I2)."""
+    for method in ("get", "post", "head", "put", "delete"):
+        orig = getattr(session, method)
+        setattr(session, method, _make_anubis_wrapper(session, orig))

@@ -1523,26 +1523,25 @@ def register(app: FastAPI) -> None:
 
     @router.post("/scrapers/mobilism/test-creds")
     def mobilism_test_creds(payload: _MobilismCredsPayload, request: Request):
-        """Phase 6w.5d: verify Mobilism credentials by attempting login."""
+        """Phase 6w.5d: verify Mobilism credentials by attempting login.
+
+        Uses MobilismSession.try_login() which builds a throw-away client and
+        never touches the class-level singleton, so concurrent requests cannot
+        accidentally pick up a test-credential session (ultrareview I1).
+        """
         from types import SimpleNamespace
-        from endless_library.scrapers.mobilism import (
-            AuthFailed, MobilismSession, NotConfigured, _reset_session,
-        )
-        _reset_session()
+        from endless_library.scrapers.mobilism import MobilismSession
         cfg_stub = SimpleNamespace(
             mobilism_username=payload.username,
             mobilism_password=payload.password,
         )
-        try:
-            MobilismSession.get(cfg_stub)
-            _reset_session()
+        ok, err = MobilismSession.try_login(cfg_stub)
+        if ok:
             return {"ok": True, "message": "Login successful"}
-        except NotConfigured as e:
-            raise HTTPException(400, str(e)) from e
-        except AuthFailed as e:
-            raise HTTPException(401, str(e)) from e
-        except Exception as e:
-            raise HTTPException(502, f"{type(e).__name__}: {e}") from e
+        # Decide HTTP status from the error text
+        if err and "not configured" in err.lower():
+            raise HTTPException(400, err)
+        raise HTTPException(401, err or "Login failed")
 
     @router.post("/scrapers/cookies")
     async def upload_cookies(request: Request):
