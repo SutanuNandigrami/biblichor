@@ -27,6 +27,9 @@ from endless_library.scrapers.doab import Doab
 # Phase 6w.5 — Mobilism books
 from endless_library.scrapers.mobilism_books import MobilismBooks
 
+# Phase 6w.6 — BDeBooks Bengali source
+from endless_library.scrapers.bdebooks import BDeBooks
+
 _REGISTRY = {
     "annas_curl": AnnasArchiveCurl,
     "annas_flaresolverr": AnnasArchiveFlareSolverr,
@@ -45,6 +48,7 @@ _REGISTRY = {
     "hathitrust": HathiTrust,
     "doab": Doab,
     "mobilism_books": MobilismBooks,
+    "bdebooks": BDeBooks,
 }
 
 _PD_PRIORITY = (
@@ -83,7 +87,7 @@ def enabled_order(cfg: ScrapersCfg) -> list[str]:
 # Strategies that natively serve non-Latin (esp. Bengali) catalogs. When the
 # query title is non-Latin, we promote these to the head of the iteration
 # order so we don't waste a roundtrip through Anna's English-fallback noise.
-_NON_LATIN_PRIORITY = ("kindlebangla_curl",)
+_NON_LATIN_PRIORITY = ("kindlebangla_curl", "bdebooks")
 
 
 def enabled_order_for_query(cfg: ScrapersCfg, query_title: str) -> list[str]:

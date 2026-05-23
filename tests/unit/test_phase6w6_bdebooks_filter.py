@@ -187,3 +187,25 @@ def test_kindlebangla_filters_excluded_categories_via_search_upstream(monkeypatc
     # হিমু should pass filter, কোরআন should be filtered out
     assert "হিমু সমগ্র-১" in titles
     assert not any("কোরআন" in (t or "") for t in titles)
+
+
+# ============ Task 5: Registry + chain promotion ============
+
+
+def test_enabled_order_for_query_promotes_bdebooks_for_bengali():
+    from endless_library.config import ScrapersCfg
+    from endless_library.scrapers.registry import enabled_order_for_query
+
+    cfg = ScrapersCfg(
+        order=["annas_curl", "kindlebangla_curl", "bdebooks", "libgen_curl"],
+        enabled={
+            "annas_curl": True,
+            "kindlebangla_curl": True,
+            "bdebooks": True,
+            "libgen_curl": True,
+        },
+    )
+    order = enabled_order_for_query(cfg, query_title="হিমু সমগ্র")
+    # Bengali query → kindlebangla_curl and bdebooks should be promoted to front
+    assert order.index("kindlebangla_curl") < order.index("annas_curl")
+    assert order.index("bdebooks") < order.index("annas_curl")
