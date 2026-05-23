@@ -890,6 +890,38 @@ def register(app: FastAPI) -> None:
             )
         return {"outcome": asdict(outcomes[0])}
 
+    @router.post("/scrapers/test_pd_chain")
+    async def test_pd_chain(request: Request):
+        """Phase 6w.9c: build a PD-chain for a classic query and bench it.
+
+        Uses "Pride and Prejudice" / Austen / is_pd=True as the probe query.
+        Returns the ordered chain plus live outcomes so the SPA (or any
+        caller) can verify that PD scrapers are promoted correctly.
+        """
+        from dataclasses import asdict as _asdict
+        from functools import partial as _partial
+
+        from endless_library.bench import BenchQuery as _BQ
+        from endless_library.bench import load_corpus_tags, run_bench as _run_bench
+        from endless_library.scrapers import registry
+
+        deps = request.app.state.deps
+        query = _BQ("Pride and Prejudice", "Austen", "", "en", tags=("en", "pd"))
+        chain = registry.pd_aware_order(
+            deps.cfg.scrapers, query_title=query.title, is_pd=True
+        )
+        corpus_tags = load_corpus_tags()
+        outcomes = await asyncio.to_thread(
+            _partial(
+                _run_bench,
+                deps.cfg,
+                [query],
+                strategies=chain,
+                corpus_tags=corpus_tags,
+            )
+        )
+        return {"chain": chain, "outcomes": [_asdict(o) for o in outcomes]}
+
     # ---------- settings ----------
 
     @router.get("/settings")

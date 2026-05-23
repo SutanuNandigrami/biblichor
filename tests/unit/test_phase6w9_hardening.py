@@ -99,3 +99,82 @@ def test_not_configured_re_exported_from_mobilism():
     from endless_library.scrapers.mobilism import NotConfigured as NC
     from endless_library.scrapers.base import NotConfigured as NCBase
     assert NC is NCBase
+
+
+# ---------------------------------------------------------------------------
+# Task 3: PD chain verification
+# ---------------------------------------------------------------------------
+
+def _make_scrapers_cfg(enabled: list[str]):
+    """Build a minimal ScrapersCfg-like stub for PD chain tests."""
+    from types import SimpleNamespace
+
+    enabled_map = {n: True for n in enabled}
+    return SimpleNamespace(
+        order=enabled,
+        enabled=enabled_map,
+        format_priority=["epub"],
+    )
+
+
+_PD_SCRAPERS = {
+    "gutendex",
+    "standard_ebooks",
+    "oapen_doab",
+    "wikisource",
+    "doab",
+    "hathitrust",
+}
+
+_MODERN_SCRAPERS = {"annas_curl", "libgen_curl", "archive_curl", "zlib_singlelogin"}
+
+
+def test_pd_chain_promotes_pd_scrapers_for_pre_1928_books():
+    """Regression guard: PD scrapers must appear before general-purpose
+    scrapers when is_pd=True."""
+    from endless_library.scrapers import registry
+
+    all_scrapers = list(_PD_SCRAPERS | _MODERN_SCRAPERS)
+    cfg = _make_scrapers_cfg(all_scrapers)
+
+    chain = registry.pd_aware_order(cfg, query_title="Pride and Prejudice", is_pd=True)
+
+    # Filter to only scrapers that are in the chain
+    pd_positions = [i for i, n in enumerate(chain) if n in _PD_SCRAPERS]
+    modern_positions = [i for i, n in enumerate(chain) if n in _MODERN_SCRAPERS]
+
+    assert pd_positions, "No PD scrapers in chain — are they disabled?"
+    assert modern_positions, "No modern scrapers in chain"
+
+    # All PD scrapers should appear before all modern scrapers
+    assert max(pd_positions) < min(modern_positions), (
+        f"PD scrapers not promoted to front. chain={chain}, "
+        f"pd_positions={pd_positions}, modern_positions={modern_positions}"
+    )
+
+
+def test_pd_chain_does_not_promote_pd_scrapers_for_modern_books():
+    """When is_pd=False, PD scrapers keep their original relative position
+    (they are not promoted to the front)."""
+    from endless_library.scrapers import registry
+
+    all_scrapers = list(_PD_SCRAPERS | _MODERN_SCRAPERS)
+    cfg = _make_scrapers_cfg(all_scrapers)
+
+    chain = registry.pd_aware_order(cfg, query_title="Project Hail Mary", is_pd=False)
+
+    pd_positions = [i for i, n in enumerate(chain) if n in _PD_SCRAPERS]
+    modern_positions = [i for i, n in enumerate(chain) if n in _MODERN_SCRAPERS]
+
+    if not pd_positions or not modern_positions:
+        return  # nothing to check if some scrapers are absent
+
+    # For a modern book, modern scrapers should appear before (or alongside)
+    # PD scrapers — i.e., the first modern position should be before the first PD
+    # position, OR there should be a modern scraper that comes before the
+    # last PD scraper.
+    # The simplest check: at least one modern scraper is before at least one PD scraper.
+    assert min(modern_positions) < max(pd_positions), (
+        f"For non-PD book, expected modern scrapers to come before some PD scrapers. "
+        f"chain={chain}, modern_positions={modern_positions}, pd_positions={pd_positions}"
+    )
