@@ -126,6 +126,11 @@ CREATE TABLE IF NOT EXISTS metadata_cache (
     fetched_at  INTEGER NOT NULL
 );
 
+-- bench_jobs uses AUTOINCREMENT (unlike other tables which use plain
+-- INTEGER PRIMARY KEY) because job IDs appear in the SSE stream URL
+-- and dashboard. AUTOINCREMENT guarantees monotonically increasing
+-- IDs with no reuse after deletion, which prevents a stale tab from
+-- confusing an old job ID with a new one.
 CREATE TABLE IF NOT EXISTS bench_jobs (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   started_at      TEXT NOT NULL,

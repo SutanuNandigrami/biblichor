@@ -550,6 +550,12 @@ def _swap_compose_image(compose_path: Path, new_image_ref: str) -> str | None:
     roll back. We do this as a literal-line replacement rather than a
     yaml round-trip to preserve comments + formatting (the compose
     file is heavily commented and a PyYAML round-trip loses that).
+
+    M9 NOTE: the regex anchored on the bookorbit service header is
+    correct for today's compose.yml layout. If future changes add
+    YAML anchors or multi-service image blocks, migrate to a
+    ruamel.yaml round-trip (round_trip_load / round_trip_dump)
+    which preserves comments and handles anchors correctly.
     """
     text = compose_path.read_text(encoding="utf-8")
     # Match the bookorbit service block's `image:` line. The bookorbit
