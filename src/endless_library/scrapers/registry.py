@@ -66,6 +66,30 @@ _SCRAPER_TO_CFG_KEY: dict[str, str] = {
     "bdebooks": "bdebooks",
 }
 
+# Maps scraper name → Open Slum site key for upstream-health lookups.
+SCRAPER_TO_OPEN_SLUM_SITE: dict[str, str] = {
+    "annas_curl": "annas_archive",
+    "annas_flaresolverr": "annas_archive",
+    "annas_playwright": "annas_archive",
+    "annas_cloakbrowser": "annas_archive",
+    "libgen_curl": "libgen",
+    "zlib_singlelogin": "zlibrary",
+    "welib_curl": "welib",
+    "welib_playwright": "welib",
+}
+
+# Maps scraper name -> Open Slum site key for upstream-health lookups.
+SCRAPER_TO_OPEN_SLUM_SITE: dict[str, str] = {
+    "annas_curl": "annas_archive",
+    "annas_flaresolverr": "annas_archive",
+    "annas_playwright": "annas_archive",
+    "annas_cloakbrowser": "annas_archive",
+    "libgen_curl": "libgen",
+    "zlib_singlelogin": "zlibrary",
+    "welib_curl": "welib",
+    "welib_playwright": "welib",
+}
+
 def available() -> list[str]:
     return list(_REGISTRY.keys())
 

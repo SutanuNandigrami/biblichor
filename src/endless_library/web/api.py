@@ -167,16 +167,8 @@ def _compute_bookorbit_urls(request: Request, cfg) -> dict[str, str]:
     }
 
 
-# Phase 6w.9e: scraper-name → Open Slum site-name mapping
-_SCRAPER_TO_SITE: dict[str, str] = {
-    "annas_curl": "annas_archive",
-    "annas_flaresolverr": "annas_archive",
-    "annas_cloakbrowser": "annas_archive",
-    "libgen_curl": "libgen",
-    "zlib_singlelogin": "zlibrary",
-    "welib_curl": "welib",
-    "welib_playwright": "welib",
-}
+# Phase 6w ultrareview C3: consolidated scraper→site mapping lives in registry.
+from endless_library.scrapers.registry import SCRAPER_TO_OPEN_SLUM_SITE as _SCRAPER_TO_SITE
 
 
 def _scraper_upstream_status(request) -> dict[str, dict]:
@@ -1145,15 +1137,8 @@ def register(app: FastAPI) -> None:
         # Phase 6w.9d: Open Slum upstream status
         slum = getattr(request.app.state, "open_slum_monitor", None)
         if slum is not None:
-            _NAME_TO_SITE = {
-                "annas_curl": "annas_archive",
-                "annas_flaresolverr": "annas_archive",
-                "annas_cloakbrowser": "annas_archive",
-                "libgen_curl": "libgen",
-                "zlib_singlelogin": "zlibrary",
-            }
             external: dict = {}
-            for _sn, _site in _NAME_TO_SITE.items():
+            for _sn, _site in _SCRAPER_TO_SITE.items():
                 if _site not in external:
                     st = slum.get(_site)
                     if st is not None:
