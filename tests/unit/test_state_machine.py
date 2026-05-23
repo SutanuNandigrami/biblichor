@@ -161,6 +161,8 @@ def test_provider_literal_only_lists_implemented_scrapers() -> None:
         "hathitrust",
         # Phase 6w.5 — Mobilism books
         "mobilism_books",
+        # Phase 6w.6 — BDeBooks Bengali source
+        "bdebooks",
     }
     assert "ebanglalibrary" not in provider_values
 

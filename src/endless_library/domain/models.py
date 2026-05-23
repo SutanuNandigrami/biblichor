@@ -43,6 +43,7 @@ class Candidate:
         "zlib",
         "hathitrust",
         "mobilism_books",
+        "bdebooks",
     ]
     md5: str | None
     title: str | None
@@ -55,6 +56,7 @@ class Candidate:
     edition_hints: str
     detail_url: str
     raw: dict = field(default_factory=dict)
+    categories: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
