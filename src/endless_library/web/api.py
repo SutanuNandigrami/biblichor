@@ -355,14 +355,20 @@ def register(app: FastAPI) -> None:
             except ValueError as e:
                 raise HTTPException(400, detail=f"invalid created_after: {e}") from e
             where.append("created_at >= ?")
-            args.append(dt_after.isoformat())
+            # C-NEW-2: use space-separated format to match SQLite stored format
+            # (.isoformat() emits T-separator; SQLite stores YYYY-MM-DD HH:MM:SS)
+            if dt_after.tzinfo is not None:
+                dt_after = dt_after.astimezone(UTC).replace(tzinfo=None)
+            args.append(dt_after.strftime("%Y-%m-%d %H:%M:%S"))
         if payload.created_before:
             try:
                 dt_before = datetime.fromisoformat(payload.created_before)
             except ValueError as e:
                 raise HTTPException(400, detail=f"invalid created_before: {e}") from e
             where.append("created_at <= ?")
-            args.append(dt_before.isoformat())
+            if dt_before.tzinfo is not None:
+                dt_before = dt_before.astimezone(UTC).replace(tzinfo=None)
+            args.append(dt_before.strftime("%Y-%m-%d %H:%M:%S"))
         if not where:
             raise HTTPException(400, detail="must provide at least one filter")
         clause = " AND ".join(where)
