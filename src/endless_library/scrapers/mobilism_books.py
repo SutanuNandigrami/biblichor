@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from urllib.parse import quote_plus, urljoin
 
 from bs4 import BeautifulSoup
@@ -45,6 +46,38 @@ _MF_LINK_RE = re.compile(
     re.IGNORECASE,
 )
 
+# I-NEW-2: Rate-limit the drift probe (once per 6 hours max).
+_DRIFT_PROBE_TTL = 6 * 3600
+_drift_probe_last_at: float = 0.0
+
+
+
+def _check_drift(session) -> None:
+    """Fire a drift probe at most once per _DRIFT_PROBE_TTL seconds (I-NEW-2).
+
+    Checks whether forum_id=15 returns results for a known-good probe term.
+    Rate-limited: rapid empty-result bursts do not hammer the forum.
+    """
+    global _drift_probe_last_at
+    if time.time() - _drift_probe_last_at < _DRIFT_PROBE_TTL:
+        log.debug(
+            "mobilism_books: drift probe skipped (last %.0fs ago)",
+            time.time() - _drift_probe_last_at,
+        )
+        return
+    _drift_probe_last_at = time.time()  # claim slot before request
+    probe_url = _SEARCH_URL.format(query=quote_plus(_DRIFT_PROBE_TERM))
+    try:
+        probe_resp = session.get(probe_url, follow_redirects=True)
+        probe_soup = BeautifulSoup(probe_resp.text, "html.parser")
+        if probe_resp.status_code == 200 and not probe_soup.select("a.topictitle"):
+            log.warning(
+                "mobilism_books: forum_id=15 drift detected — "
+                "probe query %r returned 0 threads; subforum may have moved",
+                _DRIFT_PROBE_TERM,
+            )
+    except Exception as _e:
+        log.debug("mobilism_books: drift probe failed: %s", _e)
 
 def _ext_from_text(text: str) -> str | None:
     m = _EXT_RE.search(text)
@@ -94,18 +127,7 @@ class MobilismBooks:
             # nothing. Only probe when the query itself is non-trivial so
             # we don't false-alarm on very rare book titles.
             if search_query and search_query.lower() != _DRIFT_PROBE_TERM:
-                probe_url = _SEARCH_URL.format(query=quote_plus(_DRIFT_PROBE_TERM))
-                try:
-                    probe_resp = session.get(probe_url, follow_redirects=True)
-                    probe_soup = BeautifulSoup(probe_resp.text, "html.parser")
-                    if probe_resp.status_code == 200 and not self._extract_thread_links(probe_soup):
-                        log.warning(
-                            "mobilism_books: forum_id=15 drift detected — "
-                            "probe query %r returned 0 threads; subforum may have moved",
-                            _DRIFT_PROBE_TERM,
-                        )
-                except Exception as _e:
-                    log.debug("mobilism_books: drift probe failed: %s", _e)
+                _check_drift(session)
             return []
 
         candidates: list[Candidate] = []
