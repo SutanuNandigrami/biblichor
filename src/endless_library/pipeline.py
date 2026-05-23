@@ -70,7 +70,7 @@ class PipelineDeps:
     bench: BenchRunRepo
     bench_jobs: BenchJobsRepo
     mirrors: MirrorRepo
-    bookorbit_svc: Any = field(default=None)
+    bookorbit_service: Any = field(default=None)
 
     @classmethod
     def build(cls, *, cfg: Config, db_path: Path) -> PipelineDeps:
@@ -78,7 +78,7 @@ class PipelineDeps:
         mirrors = MirrorRepo(db_path)
         mirrors.seed_curated()  # idempotent
         secrets_dir = Path(cfg.general.books_dir).parent / "secrets"
-        bookorbit_svc = BookOrbitService(
+        bookorbit_service = BookOrbitService(
             cfg=cfg,
             db_path=db_path,
             restore_key_path=secrets_dir / "restore.key",
@@ -94,7 +94,7 @@ class PipelineDeps:
             bench=BenchRunRepo(db_path),
             bench_jobs=BenchJobsRepo(db_path),
             mirrors=mirrors,
-            bookorbit_svc=bookorbit_svc,
+            bookorbit_service=bookorbit_service,
         )
 
 
@@ -837,7 +837,7 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
         book=book,
         cfg=deps.cfg,
         db_path=deps.db_path,
-        svc=deps.bookorbit_svc,
+        svc=deps.bookorbit_service,
     )
     if result.ok:
         deps.books.mark_kindled(book.id, method=result.method.value)
