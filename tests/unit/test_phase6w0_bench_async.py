@@ -20,6 +20,7 @@ def test_bench_jobs_columns_are_correct(tmp_path: Path):
     assert cols >= {
         "id", "started_at", "finished_at", "mode", "status",
         "progress_done", "progress_total", "summary_json",
+        "cancel_requested",
     }
 
 
@@ -62,7 +63,8 @@ def test_finish_sets_finished_at_and_status_and_summary(tmp_path: Path):
     assert row.summary_json == '{"x":1}'
 
 
-def test_request_cancel_flips_status(tmp_path: Path):
+def test_request_cancel_sets_flag_without_changing_status(tmp_path: Path):
+    """C2: request_cancel sets cancel_requested flag but keeps status=running."""
     db = tmp_path / "x.db"
     init_db(db)
     repo = BenchJobsRepo(db)
@@ -70,6 +72,9 @@ def test_request_cancel_flips_status(tmp_path: Path):
     assert repo.is_cancel_requested(job_id) is False
     repo.request_cancel(job_id)
     assert repo.is_cancel_requested(job_id) is True
+    # Status must still be running — worker hasn't finished yet
+    row = repo.get(job_id)
+    assert row.status == "running"
 
 
 def test_list_recent_returns_newest_first_with_limit(tmp_path: Path):
@@ -233,7 +238,7 @@ def test_post_bench_job_cancel_flips_status(tmp_path: Path):
     c = client.post(f'/api/bench/jobs/{job_id}/cancel')
     assert c.status_code == 200
     g = client.get(f'/api/bench/jobs/{job_id}')
-    assert g.json()['status'] in ('cancelled', 'done')
+    assert g.json()['status'] in ('running', 'cancelled', 'done')
 
 
 def test_bench_job_stream_emits_terminal_event_on_done(tmp_path: Path):

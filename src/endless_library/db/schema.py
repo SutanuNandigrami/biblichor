@@ -134,7 +134,8 @@ CREATE TABLE IF NOT EXISTS bench_jobs (
   status          TEXT NOT NULL CHECK(status IN ('running','done','cancelled','failed')),
   progress_done   INTEGER NOT NULL DEFAULT 0,
   progress_total  INTEGER NOT NULL,
-  summary_json    TEXT
+  summary_json    TEXT,
+  cancel_requested INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -181,3 +182,7 @@ def _migrate(conn) -> None:
     ):
         if new_col not in cols:
             conn.execute(ddl)
+    # Phase 6w ultrareview C2: cancel_requested flag column
+    bj_cols = {row[1] for row in conn.execute("PRAGMA table_info(bench_jobs)")}
+    if "cancel_requested" not in bj_cols:
+        conn.execute("ALTER TABLE bench_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")

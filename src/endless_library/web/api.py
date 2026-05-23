@@ -813,7 +813,7 @@ def register(app: FastAPI) -> None:
                     data = json.dumps({"done": r.progress_done, "total": r.progress_total})
                     yield "event: progress\ndata: " + data + "\n\n"
                     last_progress = r.progress_done
-                if r.status in ("done", "cancelled", "failed"):
+                if r.status in ("done", "cancelled", "failed") and r.finished_at is not None:
                     summary = r.summary_json or "{}"
                     yield "event: " + r.status + "\ndata: " + summary + "\n\n"
                     return

@@ -18,7 +18,7 @@ class BenchJobRow:
     progress_done: int
     progress_total: int
     summary_json: str | None
-    cancel_requested: bool = False  # derived, not stored
+    cancel_requested: int = 0  # stored in DB column
 
     @classmethod
     def from_row(cls, r: sqlite3.Row) -> "BenchJobRow":
@@ -31,6 +31,7 @@ class BenchJobRow:
             progress_done=r["progress_done"],
             progress_total=r["progress_total"],
             summary_json=r["summary_json"],
+            cancel_requested=r["cancel_requested"],
         )
 
 
@@ -59,7 +60,8 @@ class BenchJobsRepo:
             )
 
     def finish(self, job_id: int, *, status: str, summary_json: str | None = None) -> None:
-        assert status in ("done", "cancelled", "failed")
+        if status not in ("done", "cancelled", "failed"):
+            raise ValueError(f"invalid bench job status: {status!r}")
         with connect(self.db_path) as conn:
             conn.execute(
                 """UPDATE bench_jobs SET status = ?, finished_at = ?, summary_json = ?
@@ -70,13 +72,13 @@ class BenchJobsRepo:
     def request_cancel(self, job_id: int) -> None:
         with connect(self.db_path) as conn:
             conn.execute(
-                "UPDATE bench_jobs SET status = 'cancelled' WHERE id = ? AND status = 'running'",
+                "UPDATE bench_jobs SET cancel_requested = 1 WHERE id = ? AND status = 'running'",
                 (job_id,),
             )
 
     def is_cancel_requested(self, job_id: int) -> bool:
         row = self.get(job_id)
-        return row is not None and row.status == "cancelled"
+        return row is not None and bool(row.cancel_requested)
 
     def get(self, job_id: int) -> BenchJobRow | None:
         with connect(self.db_path) as conn:
