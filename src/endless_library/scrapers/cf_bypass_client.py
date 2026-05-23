@@ -56,7 +56,7 @@ def resolve(url: str, *, timeout: float = 90.0) -> str:
     if (parsed.hostname or "").lower() in _BLOCKED_NETLOCS:
         raise ValueError(f"refusing to proxy to docker service: {url!r}")
     base = os.environ.get("CF_BYPASS_URL", "http://cf-bypass:8000")
-    # M13: single retry with 5s backoff on transport errors.
+    # M13: single retry with 4-6s jittered backoff on transport errors.
     for attempt in range(2):
         try:
             r = httpx.post(

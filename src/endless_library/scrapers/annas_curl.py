@@ -10,10 +10,10 @@ from urllib.parse import quote_plus, urljoin
 
 import httpx
 
-from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
 from bs4 import BeautifulSoup
 
 from endless_library.config import ScrapersCfg
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.domain.scoring import _is_non_latin as _query_is_non_latin
 from endless_library.scrapers.base import ANNAS_CDN_REGEX, parse_filesize, url_has_book_ext
