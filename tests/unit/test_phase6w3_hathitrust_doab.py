@@ -101,3 +101,60 @@ class _FakeSession:
         self._r = resp
     def get(self, url, **kw): 
         return self._r
+
+
+def test_hathitrust_closes_client_after_search(monkeypatch):
+    """HathiTrust.search() must close its HTTP client after each call (ultrareview I8)."""
+    from endless_library.scrapers.hathitrust import HathiTrust
+    from endless_library.domain.models import SearchQuery
+
+    closed = []
+
+    class _FakeClient:
+        def get(self, url, **kw):
+            class _R:
+                status_code = 200
+                def json(self):
+                    return {}
+            return _R()
+        def close(self):
+            closed.append(True)
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            self.close()
+
+    monkeypatch.setattr("endless_library.scrapers.hathitrust.make_client", lambda **kw: _FakeClient())
+    ht = HathiTrust(cfg=None)
+    ht.search(SearchQuery(title="test", author="", isbn13="9780143127741",
+                          format_priority=("pdf",), language="en"))
+    assert closed, "HathiTrust.search() did not close the HTTP client"
+
+
+def test_doab_closes_client_after_search(monkeypatch):
+    """Doab.search() must close its HTTP client after each call (ultrareview I8)."""
+    import json as _json
+    from endless_library.scrapers.doab import Doab
+    from endless_library.domain.models import SearchQuery
+
+    closed = []
+
+    class _FakeClient:
+        def get(self, url, params=None, **kw):
+            class _R:
+                status_code = 200
+                def json(self):
+                    return []
+            return _R()
+        def close(self):
+            closed.append(True)
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            self.close()
+
+    monkeypatch.setattr("endless_library.scrapers.doab.make_client", lambda **kw: _FakeClient())
+    d = Doab(cfg=None)
+    d.search(SearchQuery(title="openaccess", author="", isbn13="",
+                         format_priority=("pdf",), language="en"))
+    assert closed, "Doab.search() did not close the HTTP client"

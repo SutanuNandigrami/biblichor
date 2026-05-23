@@ -41,9 +41,14 @@ def test_doab_keeps_first_metadata_value():
     fake_resp.status_code = 200
     fake_resp.json.return_value = [item]
 
-    scraper = Doab(cfg)
+    class _FakeClient:
+        def get(self, url, params=None, **kw):
+            return fake_resp
+        def close(self):
+            pass
 
-    with patch.object(scraper.client, "get", return_value=fake_resp):
+    with patch("endless_library.scrapers.doab.make_client", return_value=_FakeClient()):
+        scraper = Doab(cfg)
         from endless_library.domain.models import SearchQuery
         sq = SearchQuery("Open Access Book", None, None, ("epub", "pdf"), "en")
         cands = scraper.search(sq)
@@ -72,9 +77,14 @@ def test_doab_prefers_oapen_relation_over_identifier():
     fake_resp.status_code = 200
     fake_resp.json.return_value = [item]
 
-    scraper = Doab(cfg)
+    class _FakeClient:
+        def get(self, url, params=None, **kw):
+            return fake_resp
+        def close(self):
+            pass
 
-    with patch.object(scraper.client, "get", return_value=fake_resp):
+    with patch("endless_library.scrapers.doab.make_client", return_value=_FakeClient()):
+        scraper = Doab(cfg)
         from endless_library.domain.models import SearchQuery
         sq = SearchQuery("Scholarly Work", None, None, ("epub", "pdf"), "en")
         cands = scraper.search(sq)

@@ -813,9 +813,12 @@ def register(app: FastAPI) -> None:
         if row is None:
             raise HTTPException(404, f"no bench job with id={job_id}")
 
+        _SSE_POLL_INTERVAL = 2.0  # seconds; configurable for tests
         async def _events():
             last_progress = -1
             while True:
+                if await request.is_disconnected():
+                    return
                 r = deps.bench_jobs.get(job_id)
                 if r is None:
                     yield "event: gone\ndata: {}\n\n"
@@ -828,7 +831,7 @@ def register(app: FastAPI) -> None:
                     summary = r.summary_json or "{}"
                     yield "event: " + r.status + "\ndata: " + summary + "\n\n"
                     return
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(_SSE_POLL_INTERVAL)
         return StreamingResponse(_events(), media_type="text/event-stream")
 
     def _job_row_to_dict(r):
@@ -1526,10 +1529,17 @@ def register(app: FastAPI) -> None:
     @router.post("/scrapers/mobilism/creds")
     def mobilism_store_creds(payload: _MobilismCredsPayload, request: Request):
         """Phase 6w.5d: store Mobilism forum credentials in the encrypted
-        secrets store. SPA Scrapers page card uses this."""
+        secrets store. SPA Scrapers page card uses this.
+
+        Uses set_secret_values for atomic rotation: both username and
+        password are written in a single sqlite transaction so the store
+        is never left with new username + old password (ultrareview I13).
+        """
         svc = _bookorbit_service(request)
-        svc.set_secret_value("mobilism.username", payload.username)
-        svc.set_secret_value("mobilism.password", payload.password)
+        svc.set_secret_values({
+            "mobilism.username": payload.username,
+            "mobilism.password": payload.password,
+        })
         return {"ok": True}
 
     @router.delete("/scrapers/mobilism/creds")

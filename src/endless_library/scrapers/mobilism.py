@@ -143,8 +143,13 @@ class MobilismSession:
             return False, f"{type(e).__name__}: {e}"
 
 
-def _reset_session() -> None:
-    """Test hook: clear the class-level singleton."""
+def _reset_session_for_tests() -> None:
+    """Test-only hook: clear the class-level MobilismSession singleton.
+
+    Must not be called from production code paths. Named with the
+    _for_tests suffix to make its test-only scope unambiguous
+    (ultrareview I10).
+    """
     with MobilismSession._lock:
         MobilismSession._session = None
         MobilismSession._expires_at = 0.0

@@ -58,22 +58,22 @@ def _make_cfg(*, username: str = "user", password: str = "pass") -> SimpleNamesp
 
 def test_mobilism_session_raises_not_configured_when_no_creds():
     """MobilismSession.get() raises NotConfigured when credentials are absent."""
-    from endless_library.scrapers.mobilism import MobilismSession, NotConfigured, _reset_session
+    from endless_library.scrapers.mobilism import MobilismSession, NotConfigured, _reset_session_for_tests
 
-    _reset_session()
+    _reset_session_for_tests()
 
     cfg = SimpleNamespace(mobilism_username="", mobilism_password="")
     with __import__("pytest").raises(NotConfigured):
         MobilismSession.get(cfg)
 
-    _reset_session()
+    _reset_session_for_tests()
 
 
 def test_mobilism_session_is_cached():
     """MobilismSession.get() returns the same object on second call."""
-    from endless_library.scrapers.mobilism import MobilismSession, _reset_session
+    from endless_library.scrapers.mobilism import MobilismSession, _reset_session_for_tests
 
-    _reset_session()
+    _reset_session_for_tests()
 
     fake_session = MagicMock()
     fake_response = MagicMock()
@@ -87,15 +87,15 @@ def test_mobilism_session_is_cached():
         s2 = MobilismSession.get(cfg)
 
     assert s1 is s2
-    _reset_session()
+    _reset_session_for_tests()
 
 
 def test_mobilism_session_raises_auth_failed_on_redirect_to_login():
     """MobilismSession.get() raises AuthFailed when post redirects back to login page."""
     import pytest
-    from endless_library.scrapers.mobilism import MobilismSession, AuthFailed, _reset_session
+    from endless_library.scrapers.mobilism import MobilismSession, AuthFailed, _reset_session_for_tests
 
-    _reset_session()
+    _reset_session_for_tests()
 
     fake_session = MagicMock()
     fake_response = MagicMock()
@@ -109,7 +109,7 @@ def test_mobilism_session_raises_auth_failed_on_redirect_to_login():
         with pytest.raises(AuthFailed):
             MobilismSession.get(cfg)
 
-    _reset_session()
+    _reset_session_for_tests()
 
 
 # ---------------------------------------------------------------------------

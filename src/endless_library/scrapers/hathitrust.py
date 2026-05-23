@@ -20,17 +20,20 @@ class HathiTrust:
 
     def __init__(self, cfg, **kw):
         self._cfg = cfg
-        self.client = make_client(timeout=20)
 
     def search(self, query: SearchQuery) -> list[Candidate]:
         if not query.isbn13:
             return []
         url = f"https://catalog.hathitrust.org/api/volumes/brief/json/isbn:{query.isbn13}"
+        client = make_client(timeout=20)
         try:
-            r = self.client.get(url)
+            r = client.get(url)
         except Exception as e:
             log.warning("hathitrust: lookup failed: %s", e)
             return []
+        finally:
+            if hasattr(client, "close"):
+                client.close()
         if r.status_code != 200:
             return []
         try:

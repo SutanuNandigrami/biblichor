@@ -210,3 +210,84 @@ def test_ensure_idempotent_on_second_run(respx_mock, tmp_path):
     # Neither destructive endpoint should have been called
     assert not setup_route.called
     assert not create_route.called
+
+
+def test_set_secret_values_is_atomic_on_failure(tmp_path):
+    """set_secret_values must roll back all changes when any insert fails
+    (ultrareview I13). We verify atomicity by patching the connect helper to
+    return a wrapper that raises on the second INSERT, then asserting that
+    neither value was written."""
+    import sqlite3
+    from unittest.mock import patch, MagicMock
+    from contextlib import contextmanager
+    from endless_library.bookorbit.service import BookOrbitService
+    from endless_library.config import Config
+    from endless_library.db.schema import connect
+    from endless_library.secrets_store import init_secrets_table
+
+    db_path = tmp_path / "test.db"
+    key_path = tmp_path / "restore.key"
+    key_path.write_bytes(b"x" * 64)
+
+    cfg = Config()
+    svc = BookOrbitService(cfg, db_path, key_path)
+    with connect(db_path) as conn:
+        init_secrets_table(conn)
+
+    # Track INSERT calls; raise on the 2nd one.
+    insert_count = [0]
+    real_conn_ref = [None]
+
+    @contextmanager
+    def _failing_connect(path):
+        real_conn = sqlite3.connect(path)
+        real_conn_ref[0] = real_conn
+        orig_execute = real_conn.execute
+
+        def tracking_execute(sql, params=()):
+            if "INSERT INTO secrets" in sql:
+                insert_count[0] += 1
+                if insert_count[0] >= 2:
+                    raise sqlite3.OperationalError("simulated second-insert failure")
+            return orig_execute(sql, params)
+
+        real_conn.execute = tracking_execute
+        try:
+            yield real_conn
+        finally:
+            real_conn.close()
+
+    raised = False
+    with patch("endless_library.db.schema.connect", _failing_connect):
+        try:
+            svc.set_secret_values({"k1": "v1", "k2": "v2"})
+        except Exception:
+            raised = True
+
+    assert raised, "Expected an exception from the simulated second-insert failure"
+    # Confirm neither key persisted (query directly via a real connection).
+    with connect(db_path) as conn:
+        row_k1 = conn.execute("SELECT name FROM secrets WHERE name=?", ("k1",)).fetchone()
+        row_k2 = conn.execute("SELECT name FROM secrets WHERE name=?", ("k2",)).fetchone()
+    assert row_k1 is None, "k1 was persisted despite rollback"
+    assert row_k2 is None, "k2 was persisted despite rollback"
+def test_set_secret_values_stores_all_on_success(tmp_path):
+    """set_secret_values must atomically persist all provided values (ultrareview I13)."""
+    from endless_library.bookorbit.service import BookOrbitService
+    from endless_library.config import Config
+    from endless_library.db.schema import connect
+    from endless_library.secrets_store import init_secrets_table
+
+    db_path = tmp_path / "test.db"
+    key_path = tmp_path / "restore.key"
+    key_path.write_bytes(b"y" * 64)
+
+    cfg = Config()
+    svc = BookOrbitService(cfg, db_path, key_path)
+    with connect(db_path) as conn:
+        init_secrets_table(conn)
+
+    svc.set_secret_values({"alpha": "hello", "beta": "world"})
+
+    assert svc.get_secret_value("alpha") == "hello"
+    assert svc.get_secret_value("beta") == "world"
