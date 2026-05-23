@@ -71,11 +71,14 @@ class OpenSlumMonitor:
             data = self._fetch_remote()
             if isinstance(data, dict):
                 self._cache = data
-                self._last_refresh = time.monotonic()
                 log.debug("open_slum: refreshed %d sites", len(self._cache))
+            else:
+                log.debug("open_slum: unexpected response type %s (expected dict)", type(data).__name__)
         except Exception as exc:  # noqa: BLE001
             log.debug("open_slum: refresh failed: %s", exc)
-            # Update timestamp so we don't hammer a dead endpoint
+        finally:
+            # Always advance the timestamp so we never hammer a dead or
+            # misbehaving endpoint (ultrareview I4).
             self._last_refresh = time.monotonic()
 
     def _fetch_remote(self) -> dict[str, Any]:
