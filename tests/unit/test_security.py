@@ -232,6 +232,36 @@ def test_unpack_fails_on_safety_violation(tmp_path: Path):
         unpack_if_archive(p)
 
 
+def test_unpack_raises_on_orig_rename_failure(tmp_path: Path, monkeypatch):
+    """m-NEW-4: if the .orig rename fails, UnpackError is raised and the
+    original file is not overwritten (no silent data loss)."""
+    inner = tmp_path / "inner.epub"
+    _minimal_epub(inner)
+    wrapper = tmp_path / "book.zip"
+    _zip_with_members(wrapper, {"book.epub": inner.read_bytes()})
+    inner.unlink()
+
+    original_bytes = wrapper.read_bytes()
+
+    # Monkeypatch Path.rename to raise OSError only when the destination
+    # has the .orig suffix (i.e. the preservation rename).
+    real_rename = wrapper.__class__.rename
+
+    def _failing_rename(self, target):
+        if str(target).endswith(".orig"):
+            raise OSError("simulated rename failure")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(wrapper.__class__, "rename", _failing_rename)
+
+    with pytest.raises(UnpackError, match="refused to overwrite"):
+        unpack_if_archive(wrapper)
+
+    # Original file must still exist and be intact
+    assert wrapper.exists(), "Original archive was lost after failed .orig rename"
+    assert wrapper.read_bytes() == original_bytes, "Original archive content was corrupted"
+
+
 # ============ clamav.scan ============
 
 
