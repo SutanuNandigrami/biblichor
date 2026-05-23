@@ -16,6 +16,8 @@ type ScrapersResp = {
   last_run_at: Record<string, string | null>
   in_chain: Record<string, boolean>
   corpus_tags: Record<string, string[]>
+  // Phase 6w.9e: upstream status from OpenSlumMonitor
+  upstream_status?: Record<string, Record<string, unknown>>
 }
 type TestOutcome = {
   scraper: string; query: string; success: boolean
@@ -158,11 +160,50 @@ async function toggle(name: string) {
   catch (e: any) { toast.error('Toggle failed', String(e?.message ?? e)) }
 }
 
-// Two-way bound array for VueDraggable.
-const orderModel = computed<string[]>({
-  get: () => data.value?.order ?? [],
-  set: (next) => { if (data.value) data.value.order = next },
+// Phase 6w.9e: PD-only scrapers set
+const PD_SET = new Set(['gutendex', 'standard_ebooks', 'oapen_doab', 'wikisource', 'doab', 'hathitrust'])
+
+// Phase 6w.9e: split order into general and PD categories
+const generalScrapers = computed<string[]>(() =>
+  (data.value?.order ?? []).filter(n => !PD_SET.has(n))
+)
+const pdScrapers = computed<string[]>(() =>
+  (data.value?.order ?? []).filter(n => PD_SET.has(n))
+)
+const generalOrderModel = computed<string[]>({
+  get: () => generalScrapers.value,
+  set: (next) => {
+    if (!data.value) return
+    const pd = pdScrapers.value
+    data.value.order = [...next, ...pd]
+  },
 })
+const pdOrderModel = computed<string[]>({
+  get: () => pdScrapers.value,
+  set: (next) => {
+    if (!data.value) return
+    const gen = generalScrapers.value
+    data.value.order = [...gen, ...next]
+  },
+})
+
+// Phase 6w.9e: Test PD chain
+const pdChainBusy = ref(false)
+const pdChainResult = ref<string>('')
+async function testPdChain() {
+  pdChainBusy.value = true
+  pdChainResult.value = ''
+  try {
+    const r = await api<{ chain: string[]; outcomes: any[] }>('/api/scrapers/test_pd_chain', { method: 'POST' })
+    pdChainResult.value = JSON.stringify(r, null, 2)
+    toast.success(`PD chain: ${r.chain.length} scrapers`)
+  } catch (e: any) {
+    pdChainResult.value = `Error: ${e?.message ?? e}`
+    toast.error('PD chain test failed')
+  } finally {
+    pdChainBusy.value = false
+  }
+}
 
 async function saveOrder() {
   if (!data.value) return
@@ -336,101 +377,215 @@ async function cancelBench() {
     </div>
     <p class="text-sm text-muted-foreground">Strategy order = priority. Pipeline tries each enabled strategy in turn.</p>
 
-    <VueDraggable
-      v-model="orderModel"
-      handle=".drag-handle"
-      :animation="180"
-      class="space-y-2"
-      @update="saveOrder"
-    >
-      <div
-        v-for="(name, idx) in orderModel"
-        :key="name"
-        class="flex items-start gap-3 bg-card border border-border rounded-lg p-3"
+    <!-- Phase 6w.9e: General scrapers group -->
+    <details open class="space-y-2">
+      <summary class="text-sm font-medium text-muted-foreground cursor-pointer select-none mb-2 flex items-center gap-2">
+        General scrapers
+        <span class="text-xs font-normal opacity-60">({{ generalScrapers.length }})</span>
+      </summary>
+      <VueDraggable
+        v-model="generalOrderModel"
+        handle=".drag-handle"
+        :animation="180"
+        class="space-y-2"
+        @update="saveOrder"
       >
-        <GripVertical class="drag-handle w-5 h-5 text-muted-foreground cursor-grab shrink-0 touch-none mt-0.5" />
-        <span class="text-xs text-muted-foreground font-mono w-5 text-center shrink-0 mt-0.5">{{ idx + 1 }}</span>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 flex-wrap">
-            <h4 class="font-mono text-sm break-all">{{ name }}</h4>
-            <Badge :variant="data.enabled[name] ? 'success' : 'muted'">
-              {{ data.enabled[name] ? 'enabled' : 'disabled' }}
-            </Badge>
-            <!-- Phase 6v.4: in-chain is the difference between "the toggle says
-                 on" and "the pipeline will actually try it" -->
-            <Badge :variant="data.in_chain[name] ? 'success' : 'muted'"
-                   :title="data.in_chain[name]
-                     ? 'In the pipeline chain: requests will be routed here'
-                     : 'NOT in the chain — toggling enabled alone is not enough; reorder to add'">
-              <Link2 v-if="data.in_chain[name]" class="inline-block w-3 h-3 mr-0.5" />
-              <Unlink v-else class="inline-block w-3 h-3 mr-0.5" />
-              {{ data.in_chain[name] ? 'in chain' : 'not in chain' }}
-            </Badge>
-            <Badge v-if="(data.corpus_tags[name] ?? []).length" variant="muted"
-                   :title="`Benched only on queries tagged: ${(data.corpus_tags[name] ?? []).join(', ')}`">
-              corpus: {{ (data.corpus_tags[name] ?? []).join(',') }}
-            </Badge>
-          </div>
-          <p class="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
-            <!-- Never-tested vs broken: 0% on a scraper that's never been
-                 benched means nothing; show that explicitly. -->
-            <Badge v-if="!data.ever_run[name]" variant="muted"
-                   title="No bench outcome recorded yet — click Test now to find out if it works.">
-              never tested
-            </Badge>
-            <span v-else>
-              {{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)
-            </span>
-            <span v-if="(history[name] ?? []).length" class="inline-flex items-center gap-0.5">
-              <span v-for="(e, i) in (history[name] ?? [])" :key="i"
-                :title="`${e.query} — ${e.success ? 'OK' : 'fail'}${e.duration_ms ? ' (' + e.duration_ms + 'ms)' : ''}`"
-                :class="['inline-block w-2 h-2 rounded-full',
-                        e.success ? 'bg-emerald-500' : 'bg-red-500']"></span>
-            </span>
-          </p>
-          <!-- Phase 6v.4: inline test result -->
-          <div v-if="testStateFor(name).outcome || testStateFor(name).error"
-               class="mt-2 text-[11px] font-mono break-all"
-               :class="testStateFor(name).outcome?.success
-                       ? 'text-emerald-500' : 'text-red-500'">
-            <template v-if="testStateFor(name).outcome">
-              <span>{{ testStateFor(name).outcome!.success ? '✓' : '✗' }}</span>
-              <span class="ml-1">{{ testStateFor(name).outcome!.query }}</span>
-              <span class="ml-1 opacity-70">
-                {{ testStateFor(name).outcome!.candidates }} cand,
-                {{ testStateFor(name).outcome!.duration_ms }}ms
+        <div
+          v-for="(name, idx) in generalOrderModel"
+          :key="name"
+          class="flex items-start gap-3 bg-card border border-border rounded-lg p-3"
+        >
+          <GripVertical class="drag-handle w-5 h-5 text-muted-foreground cursor-grab shrink-0 touch-none mt-0.5" />
+          <span class="text-xs text-muted-foreground font-mono w-5 text-center shrink-0 mt-0.5">{{ idx + 1 }}</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h4 class="font-mono text-sm break-all">{{ name }}</h4>
+              <!-- Phase 6w.9e: upstream status dot -->
+              <span v-if="data.upstream_status?.[name]"
+                    :title="`upstream: ${JSON.stringify(data.upstream_status![name])}`"
+                    :class="['inline-block w-2 h-2 rounded-full shrink-0',
+                             (data.upstream_status![name] as any)?.ok === false
+                               ? 'bg-red-500' : 'bg-emerald-500']"></span>
+              <Badge :variant="data.enabled[name] ? 'success' : 'muted'">
+                {{ data.enabled[name] ? 'enabled' : 'disabled' }}
+              </Badge>
+              <Badge :variant="data.in_chain[name] ? 'success' : 'muted'"
+                     :title="data.in_chain[name]
+                       ? 'In the pipeline chain: requests will be routed here'
+                       : 'NOT in the chain — toggling enabled alone is not enough; reorder to add'">
+                <Link2 v-if="data.in_chain[name]" class="inline-block w-3 h-3 mr-0.5" />
+                <Unlink v-else class="inline-block w-3 h-3 mr-0.5" />
+                {{ data.in_chain[name] ? 'in chain' : 'not in chain' }}
+              </Badge>
+              <Badge v-if="(data.corpus_tags[name] ?? []).length" variant="muted"
+                     :title="`Benched only on queries tagged: ${(data.corpus_tags[name] ?? []).join(', ')}`">
+                corpus: {{ (data.corpus_tags[name] ?? []).join(',') }}
+              </Badge>
+            </div>
+            <p class="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
+              <Badge v-if="!data.ever_run[name]" variant="muted"
+                     title="No bench outcome recorded yet — click Test now to find out if it works.">
+                never tested
+              </Badge>
+              <span v-else>
+                {{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)
               </span>
-              <span v-if="testStateFor(name).outcome!.note" class="ml-1 opacity-70">
-                — {{ testStateFor(name).outcome!.note }}
+              <span v-if="(history[name] ?? []).length" class="inline-flex items-center gap-0.5">
+                <span v-for="(e, i) in (history[name] ?? [])" :key="i"
+                  :title="`${e.query} — ${e.success ? 'OK' : 'fail'}${e.duration_ms ? ' (' + e.duration_ms + 'ms)' : ''}`"
+                  :class="['inline-block w-2 h-2 rounded-full',
+                          e.success ? 'bg-emerald-500' : 'bg-red-500']"></span>
               </span>
-            </template>
-            <template v-else-if="testStateFor(name).error">
-              ✗ {{ testStateFor(name).error }}
-            </template>
+            </p>
+            <div v-if="testStateFor(name).outcome || testStateFor(name).error"
+                 class="mt-2 text-[11px] font-mono break-all"
+                 :class="testStateFor(name).outcome?.success
+                         ? 'text-emerald-500' : 'text-red-500'">
+              <template v-if="testStateFor(name).outcome">
+                <span>{{ testStateFor(name).outcome!.success ? '✓' : '✗' }}</span>
+                <span class="ml-1">{{ testStateFor(name).outcome!.query }}</span>
+                <span class="ml-1 opacity-70">
+                  {{ testStateFor(name).outcome!.candidates }} cand,
+                  {{ testStateFor(name).outcome!.duration_ms }}ms
+                </span>
+                <span v-if="testStateFor(name).outcome!.note" class="ml-1 opacity-70">
+                  — {{ testStateFor(name).outcome!.note }}
+                </span>
+              </template>
+              <template v-else-if="testStateFor(name).error">
+                ✗ {{ testStateFor(name).error }}
+              </template>
+            </div>
+            <details v-if="_DENYLIST_SCRAPERS.includes(name)" class="mt-2">
+              <summary class="text-[11px] text-muted-foreground cursor-pointer select-none">
+                Excluded categories
+              </summary>
+              <textarea
+                v-model="excludedCategoriesByName[name]"
+                @blur="saveExcluded(name)"
+                class="mt-1 w-full text-[11px] font-mono bg-background border border-border rounded px-2 py-1 h-24 resize-y"
+                placeholder="One category per line…"
+              />
+            </details>
           </div>
-          <!-- Phase 6w.6: denylist editor for applicable scrapers -->
-          <details v-if="_DENYLIST_SCRAPERS.includes(name)" class="mt-2">
-            <summary class="text-[11px] text-muted-foreground cursor-pointer select-none">
-              Excluded categories
-            </summary>
-            <textarea
-              v-model="excludedCategoriesByName[name]"
-              @blur="saveExcluded(name)"
-              class="mt-1 w-full text-[11px] font-mono bg-background border border-border rounded px-2 py-1 h-24 resize-y"
-              placeholder="One category per line…"
-            />
-          </details>
+          <div class="flex flex-col gap-1 shrink-0">
+            <Button size="sm" variant="outline" :loading="testStateFor(name).busy" @click="testNow(name)">
+              <FlaskConical class="w-4 h-4" /> Test now
+            </Button>
+            <Button size="sm" variant="ghost" @click="toggle(name)">
+              {{ data.enabled[name] ? 'Disable' : 'Enable' }}
+            </Button>
+          </div>
         </div>
-        <div class="flex flex-col gap-1 shrink-0">
-          <Button size="sm" variant="outline" :loading="testStateFor(name).busy" @click="testNow(name)">
-            <FlaskConical class="w-4 h-4" /> Test now
-          </Button>
-          <Button size="sm" variant="ghost" @click="toggle(name)">
-            {{ data.enabled[name] ? 'Disable' : 'Enable' }}
-          </Button>
+      </VueDraggable>
+    </details>
+
+    <!-- Phase 6w.9e: Public-domain scrapers group -->
+    <details open class="space-y-2">
+      <summary class="text-sm font-medium text-muted-foreground cursor-pointer select-none mb-2 flex items-center gap-2">
+        Public-domain scrapers
+        <span class="text-xs font-normal opacity-60">({{ pdScrapers.length }})</span>
+        <Badge variant="muted" class="text-xs">fires-when: PD</Badge>
+      </summary>
+      <VueDraggable
+        v-model="pdOrderModel"
+        handle=".drag-handle"
+        :animation="180"
+        class="space-y-2"
+        @update="saveOrder"
+      >
+        <div
+          v-for="(name, idx) in pdOrderModel"
+          :key="name"
+          class="flex items-start gap-3 bg-card border border-border rounded-lg p-3"
+        >
+          <GripVertical class="drag-handle w-5 h-5 text-muted-foreground cursor-grab shrink-0 touch-none mt-0.5" />
+          <span class="text-xs text-muted-foreground font-mono w-5 text-center shrink-0 mt-0.5">{{ idx + 1 }}</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h4 class="font-mono text-sm break-all">{{ name }}</h4>
+              <!-- upstream status dot -->
+              <span v-if="data.upstream_status?.[name]"
+                    :title="`upstream: ${JSON.stringify(data.upstream_status![name])}`"
+                    :class="['inline-block w-2 h-2 rounded-full shrink-0',
+                             (data.upstream_status![name] as any)?.ok === false
+                               ? 'bg-red-500' : 'bg-emerald-500']"></span>
+              <Badge variant="muted" title="fires-when: PD — promoted to front for pre-1928 books">
+                fires-when: PD
+              </Badge>
+              <Badge :variant="data.enabled[name] ? 'success' : 'muted'">
+                {{ data.enabled[name] ? 'enabled' : 'disabled' }}
+              </Badge>
+              <Badge :variant="data.in_chain[name] ? 'success' : 'muted'"
+                     :title="data.in_chain[name]
+                       ? 'In the pipeline chain: requests will be routed here'
+                       : 'NOT in the chain — toggling enabled alone is not enough; reorder to add'">
+                <Link2 v-if="data.in_chain[name]" class="inline-block w-3 h-3 mr-0.5" />
+                <Unlink v-else class="inline-block w-3 h-3 mr-0.5" />
+                {{ data.in_chain[name] ? 'in chain' : 'not in chain' }}
+              </Badge>
+              <Badge v-if="(data.corpus_tags[name] ?? []).length" variant="muted"
+                     :title="`Benched only on queries tagged: ${(data.corpus_tags[name] ?? []).join(', ')}`">
+                corpus: {{ (data.corpus_tags[name] ?? []).join(',') }}
+              </Badge>
+            </div>
+            <p class="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
+              <Badge v-if="!data.ever_run[name]" variant="muted"
+                     title="No bench outcome recorded yet — click Test now to find out if it works.">
+                never tested
+              </Badge>
+              <span v-else>
+                {{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)
+              </span>
+              <span v-if="(history[name] ?? []).length" class="inline-flex items-center gap-0.5">
+                <span v-for="(e, i) in (history[name] ?? [])" :key="i"
+                  :title="`${e.query} — ${e.success ? 'OK' : 'fail'}${e.duration_ms ? ' (' + e.duration_ms + 'ms)' : ''}`"
+                  :class="['inline-block w-2 h-2 rounded-full',
+                          e.success ? 'bg-emerald-500' : 'bg-red-500']"></span>
+              </span>
+            </p>
+            <div v-if="testStateFor(name).outcome || testStateFor(name).error"
+                 class="mt-2 text-[11px] font-mono break-all"
+                 :class="testStateFor(name).outcome?.success
+                         ? 'text-emerald-500' : 'text-red-500'">
+              <template v-if="testStateFor(name).outcome">
+                <span>{{ testStateFor(name).outcome!.success ? '✓' : '✗' }}</span>
+                <span class="ml-1">{{ testStateFor(name).outcome!.query }}</span>
+                <span class="ml-1 opacity-70">
+                  {{ testStateFor(name).outcome!.candidates }} cand,
+                  {{ testStateFor(name).outcome!.duration_ms }}ms
+                </span>
+                <span v-if="testStateFor(name).outcome!.note" class="ml-1 opacity-70">
+                  — {{ testStateFor(name).outcome!.note }}
+                </span>
+              </template>
+              <template v-else-if="testStateFor(name).error">
+                ✗ {{ testStateFor(name).error }}
+              </template>
+            </div>
+            <details v-if="_DENYLIST_SCRAPERS.includes(name)" class="mt-2">
+              <summary class="text-[11px] text-muted-foreground cursor-pointer select-none">
+                Excluded categories
+              </summary>
+              <textarea
+                v-model="excludedCategoriesByName[name]"
+                @blur="saveExcluded(name)"
+                class="mt-1 w-full text-[11px] font-mono bg-background border border-border rounded px-2 py-1 h-24 resize-y"
+                placeholder="One category per line…"
+              />
+            </details>
+          </div>
+          <div class="flex flex-col gap-1 shrink-0">
+            <Button size="sm" variant="outline" :loading="testStateFor(name).busy" @click="testNow(name)">
+              <FlaskConical class="w-4 h-4" /> Test now
+            </Button>
+            <Button size="sm" variant="ghost" @click="toggle(name)">
+              {{ data.enabled[name] ? 'Disable' : 'Enable' }}
+            </Button>
+          </div>
         </div>
-      </div>
-    </VueDraggable>
+      </VueDraggable>
+    </details>
 
     <div v-if="unusedScrapers.length" class="space-y-2">
       <p class="text-xs text-muted-foreground px-1">Unused — enable to add to the chain.</p>
@@ -476,6 +631,25 @@ async function cancelBench() {
         </div>
       </div>
     </div>
+
+    <!-- Phase 6w.9e: Test PD chain -->
+    <Card class="p-4 space-y-3">
+      <h2 class="font-semibold flex items-center gap-2 text-sm">
+        <FlaskConical class="w-4 h-4 text-primary" /> Test PD chain
+      </h2>
+      <p class="text-[11px] text-muted-foreground leading-relaxed">
+        Builds the scraper chain that would run for a classic pre-1928 public-domain title
+        (Pride and Prejudice / Austen, <code class="font-mono">is_pd=True</code>) and runs
+        a live bench pass. Verifies that PD scrapers are promoted to the front of the chain.
+      </p>
+      <div class="flex gap-2">
+        <Button size="sm" :loading="pdChainBusy" @click="testPdChain">
+          <Play class="w-4 h-4" /> Run PD chain test
+        </Button>
+      </div>
+      <pre v-if="pdChainResult"
+           class="bg-secondary p-3 rounded text-xs whitespace-pre-wrap overflow-x-auto max-h-64">{{ pdChainResult }}</pre>
+    </Card>
 
     <Card class="p-4">
       <div class="flex items-center gap-2 mb-3">

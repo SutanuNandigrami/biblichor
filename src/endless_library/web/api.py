@@ -176,6 +176,38 @@ def _compute_bookorbit_urls(request: Request, cfg) -> dict[str, str]:
     }
 
 
+# Phase 6w.9e: scraper-name → Open Slum site-name mapping
+_SCRAPER_TO_SITE: dict[str, str] = {
+    "annas_curl": "annas_archive",
+    "annas_flaresolverr": "annas_archive",
+    "annas_cloakbrowser": "annas_archive",
+    "libgen_curl": "libgen",
+    "zlib_singlelogin": "zlibrary",
+    "welib_curl": "welib",
+    "welib_playwright": "welib",
+}
+
+
+def _scraper_upstream_status(request) -> dict[str, dict]:
+    """Return per-scraper upstream status from OpenSlumMonitor, if available.
+
+    Only emits entries for scrapers that have a known site mapping AND for
+    which the monitor has data.  Scrapers without a mapping are omitted.
+    """
+    slum = getattr(request.app.state, "open_slum_monitor", None)
+    if slum is None:
+        return {}
+    result: dict[str, dict] = {}
+    seen_sites: dict[str, dict | None] = {}
+    for scraper_name, site_name in _SCRAPER_TO_SITE.items():
+        if site_name not in seen_sites:
+            seen_sites[site_name] = slum.get(site_name)
+        status = seen_sites[site_name]
+        if status is not None:
+            result[scraper_name] = status
+    return result
+
+
 def register(app: FastAPI) -> None:
     router = APIRouter(prefix="/api")
 
@@ -683,6 +715,8 @@ def register(app: FastAPI) -> None:
             # Specialised corpus this scraper is benched against; empty
             # tuple = general-purpose (sees every query).
             "corpus_tags": {n: sorted(corpus_tags.get(n, frozenset())) for n in all_names},
+            # Phase 6w.9e: upstream status from OpenSlumMonitor (optional)
+            "upstream_status": _scraper_upstream_status(request),
         }
 
     @router.post("/scrapers/{name}/toggle")
