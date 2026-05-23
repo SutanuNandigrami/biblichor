@@ -733,15 +733,33 @@ def register(app: FastAPI) -> None:
         qs, quick_idx = load_queries()
         if mode == "quick":
             qs = [qs[i] for i in quick_idx if i < len(qs)]
+        from endless_library.bench import load_corpus_tags, queries_for_scraper
         from endless_library.scrapers import registry
         strats = registry.enabled_order(deps.cfg.scrapers)
-        progress_total = len(strats) * len(qs)
+        # I5: load corpus_tags once -- not once per scraper inside the worker
+        # (each call to run_bench(corpus_tags=None) would reload from disk).
+        try:
+            corpus_tags = load_corpus_tags()
+        except Exception as _e:
+            log.warning("bench: could not load corpus_tags: %s", _e)
+            corpus_tags = {}
+        # I6: progress_total = actual query count per scraper (not len*len).
+        # Each scraper runs only against its corpus-filtered subset; using
+        # len(strats)*len(qs) overcounts and the progress bar never reaches 100%.
+        progress_total = sum(
+            len(queries_for_scraper(qs, s, corpus_tags)) for s in strats
+        )
         job_id = deps.bench_jobs.create(mode=mode, progress_total=progress_total)
-        asyncio.create_task(_bench_worker(deps, job_id, qs, strats))
+        asyncio.create_task(_bench_worker(deps, job_id, qs, strats, corpus_tags))
         return {"job_id": job_id}
 
-    async def _bench_worker(deps, job_id: int, qs, strats):
-        """Background worker: runs bench per-scraper, increments progress, checks cancel."""
+    async def _bench_worker(deps, job_id: int, qs, strats, corpus_tags: dict):
+        """Background worker: runs bench per-scraper, increments progress, checks cancel.
+
+        corpus_tags is pre-loaded once by the caller (ultrareview I5) so we avoid
+        one YAML file read per scraper -- run_bench(corpus_tags=None) re-reads the
+        file on every call.
+        """
         from functools import partial
         try:
             outcomes_so_far: list = []
@@ -751,7 +769,8 @@ def register(app: FastAPI) -> None:
                                            summary_json=json.dumps([asdict(o) for o in outcomes_so_far]))
                     return
                 os_for_one = await asyncio.to_thread(
-                    partial(run_bench, deps.cfg, qs, repo=deps.bench, strategies=[s_name])
+                    partial(run_bench, deps.cfg, qs, repo=deps.bench, strategies=[s_name],
+                            corpus_tags=corpus_tags)
                 )
                 outcomes_so_far.extend(os_for_one)
                 for _ in os_for_one:
