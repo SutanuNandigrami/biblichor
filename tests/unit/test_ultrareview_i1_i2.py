@@ -32,9 +32,9 @@ def test_try_login_returns_false_when_no_creds():
 
 def test_try_login_does_not_touch_singleton_on_success():
     """try_login must not write the class-level singleton, even on success."""
-    from endless_library.scrapers.mobilism import MobilismSession, _reset_session
+    from endless_library.scrapers.mobilism import MobilismSession, _reset_session_for_tests
 
-    _reset_session()
+    _reset_session_for_tests()
     assert MobilismSession._session is None
 
     fake_session = MagicMock()
@@ -49,14 +49,14 @@ def test_try_login_does_not_touch_singleton_on_success():
     assert err is None
     # Critical: singleton must still be None
     assert MobilismSession._session is None, "try_login must NOT write the singleton"
-    _reset_session()
+    _reset_session_for_tests()
 
 
 def test_try_login_returns_false_on_redirect_to_login():
     """try_login returns (False, msg) when login redirects back to the login page."""
-    from endless_library.scrapers.mobilism import MobilismSession, _reset_session
+    from endless_library.scrapers.mobilism import MobilismSession, _reset_session_for_tests
 
-    _reset_session()
+    _reset_session_for_tests()
 
     fake_session = MagicMock()
     fake_resp = MagicMock()
@@ -69,14 +69,14 @@ def test_try_login_returns_false_on_redirect_to_login():
     assert ok is False
     assert err is not None
     assert MobilismSession._session is None
-    _reset_session()
+    _reset_session_for_tests()
 
 
 def test_try_login_returns_false_on_network_error():
     """try_login returns (False, msg) when the network call raises."""
-    from endless_library.scrapers.mobilism import MobilismSession, _reset_session
+    from endless_library.scrapers.mobilism import MobilismSession, _reset_session_for_tests
 
-    _reset_session()
+    _reset_session_for_tests()
 
     fake_session = MagicMock()
     fake_session.post.side_effect = ConnectionError("simulated failure")
@@ -87,14 +87,14 @@ def test_try_login_returns_false_on_network_error():
     assert ok is False
     assert "ConnectionError" in (err or "")
     assert MobilismSession._session is None
-    _reset_session()
+    _reset_session_for_tests()
 
 
 def test_try_login_does_not_corrupt_existing_singleton():
     """try_login with bad creds must not overwrite an existing valid singleton."""
-    from endless_library.scrapers.mobilism import MobilismSession, _reset_session
+    from endless_library.scrapers.mobilism import MobilismSession, _reset_session_for_tests
 
-    _reset_session()
+    _reset_session_for_tests()
 
     sentinel = MagicMock()
     MobilismSession._session = sentinel
@@ -114,7 +114,7 @@ def test_try_login_does_not_corrupt_existing_singleton():
     assert MobilismSession._session is sentinel, (
         "try_login must not overwrite an existing valid singleton"
     )
-    _reset_session()
+    _reset_session_for_tests()
 
 
 # ---------------------------------------------------------------------------
