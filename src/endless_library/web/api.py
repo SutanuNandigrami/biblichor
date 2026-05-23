@@ -1735,64 +1735,71 @@ def register(app: FastAPI) -> None:
         or rolls back; the SPA polls /status to refresh the version
         chip after.
         """
-        from functools import partial
+        # Serialize concurrent upgrade requests. Two simultaneous POSTs
+        # would both pass the expires_at check and both start docker
+        # compose ops — the lock prevents that.
+        lock = request.app.state.bookorbit_upgrade_lock
+        if lock.locked():
+            raise HTTPException(409, "another bookorbit upgrade is already in progress")
+        async with lock:
+            from functools import partial
 
-        from endless_library.bookorbit.upgrade import (
-            BOOKORBIT_CONTAINER,
-            apply_upgrade,
-        )
-
-        deps = request.app.state.deps
-        target = (payload or {}).get("target_version") or ""
-        submitted_token = (payload or {}).get("token") or ""
-        if not target or not submitted_token:
-            raise HTTPException(400, "missing target_version and/or token")
-        try:
-            from endless_library.bookorbit.upgrade import _validate_target_version
-            _validate_target_version(target)
-        except ValueError as e:
-            raise HTTPException(400, str(e))
-
-        state = _upgrade_state(request.app)
-        expected_token = state.get("token", "")
-        expected_target = state.get("target_version", "")
-        if target != expected_target:
-            raise HTTPException(
-                400,
-                f"target {target} does not match the most recent preflight "
-                f"({expected_target or 'none'}) — run preflight first",
-            )
-
-        # Resolve compose + env file paths. The biblichor container
-        # bind-mounts /app/deploy from <repo>/deploy at build time.
-        compose_path = Path("/app/deploy/compose.yml")
-        env_file = Path("/app/.env")
-        if not compose_path.exists():
-            # Dev/host fallback — the SPA might be running outside the
-            # container in pytest.
-            from endless_library import __file__ as pkg_root
-            repo_root = Path(pkg_root).resolve().parent.parent.parent
-            compose_path = repo_root / "deploy" / "compose.yml"
-            env_file = repo_root / ".env"
-
-        result = await asyncio.to_thread(
-            partial(
+            from endless_library.bookorbit.upgrade import (
+                BOOKORBIT_CONTAINER,
                 apply_upgrade,
-                target,
-                submitted_token=submitted_token,
-                expected_token=expected_token,
-                preflight_expires_at=float(state.get("expires_at", 0)),
-                compose_path=compose_path,
-                env_file=env_file,
-                container=BOOKORBIT_CONTAINER,
-                bookorbit_url=deps.cfg.bookorbit.url or "http://bookorbit:3000",
             )
-        )
 
-        # On success the token is consumed (don't let it be reused).
-        if result.success or result.rolled_back:
-            state.clear()
-        return result.as_dict()
+            deps = request.app.state.deps
+            target = (payload or {}).get("target_version") or ""
+            submitted_token = (payload or {}).get("token") or ""
+            if not target or not submitted_token:
+                raise HTTPException(400, "missing target_version and/or token")
+            try:
+                from endless_library.bookorbit.upgrade import _validate_target_version
+                _validate_target_version(target)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+
+            state = _upgrade_state(request.app)
+            expected_token = state.get("token", "")
+            expected_target = state.get("target_version", "")
+            if target != expected_target:
+                raise HTTPException(
+                    400,
+                    f"target {target} does not match the most recent preflight "
+                    f"({expected_target or 'none'}) — run preflight first",
+                )
+
+            # Resolve compose + env file paths. The biblichor container
+            # bind-mounts /app/deploy from <repo>/deploy at build time.
+            compose_path = Path("/app/deploy/compose.yml")
+            env_file = Path("/app/.env")
+            if not compose_path.exists():
+                # Dev/host fallback — the SPA might be running outside the
+                # container in pytest.
+                from endless_library import __file__ as pkg_root
+                repo_root = Path(pkg_root).resolve().parent.parent.parent
+                compose_path = repo_root / "deploy" / "compose.yml"
+                env_file = repo_root / ".env"
+
+            result = await asyncio.to_thread(
+                partial(
+                    apply_upgrade,
+                    target,
+                    submitted_token=submitted_token,
+                    expected_token=expected_token,
+                    preflight_expires_at=float(state.get("expires_at", 0)),
+                    compose_path=compose_path,
+                    env_file=env_file,
+                    container=BOOKORBIT_CONTAINER,
+                    bookorbit_url=deps.cfg.bookorbit.url or "http://bookorbit:3000",
+                )
+            )
+
+            # On success the token is consumed (don't let it be reused).
+            if result.success or result.rolled_back:
+                state.clear()
+            return result.as_dict()
 
     @router.post("/bookorbit/setup-token")
     def bookorbit_generate_setup_token():

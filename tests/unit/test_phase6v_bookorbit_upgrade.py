@@ -577,3 +577,45 @@ def test_validate_target_version_rejects_injection():
     for bad in ("", "x", "v1.3", "1.3.0; rm -rf", "v1.3.0\nimage:evil", "v" * 70):
         with pytest.raises(ValueError):
             _validate_target_version(bad)
+
+
+# ============ bookorbit_upgrade_apply lock (TOCTOU fix) ============
+
+
+def test_bookorbit_upgrade_apply_409_when_lock_held(tmp_path: Path):
+    """Phase 6w I12: a second concurrent POST to /bookorbit/upgrade/apply
+    must receive 409 while the first is still running, preventing two
+    simultaneous docker compose ops.
+    """
+    import asyncio
+    import httpx
+    import pytest
+    from fastapi.testclient import TestClient
+    from endless_library.web.api import register
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    # Attach the lock exactly as create_app does
+    app.state.bookorbit_upgrade_lock = asyncio.Lock()
+    register(app)
+
+    # Pre-acquire the lock to simulate an in-progress upgrade
+    loop = asyncio.new_event_loop()
+    lock = app.state.bookorbit_upgrade_lock
+
+    async def acquire_and_hold():
+        await lock.acquire()
+
+    loop.run_until_complete(acquire_and_hold())
+    assert lock.locked()
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post(
+        "/api/bookorbit/upgrade/apply",
+        json={"target_version": "1.3.0", "token": "tok"},
+    )
+    assert resp.status_code == 409, f"expected 409, got {resp.status_code}: {resp.text}"
+    assert "in progress" in resp.json().get("detail", "").lower()
+
+    lock.release()
+    loop.close()
