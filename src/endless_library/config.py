@@ -123,6 +123,15 @@ class ScrapersCfg(BaseModel):
     # committed to config.yaml. Injected into both FlareSolverr and Playwright
     # so /fast_download/ works without the slow-download countdown.
     welib_auth_cookie: str | None = None
+    # Phase 6w.5: books published within this many years of today are
+    # considered "recent releases" and get mobilism_books promoted to
+    # the front of the scraper chain.
+    recent_release_window_years: int = 1
+    # Phase 6w.5: Mobilism forum credentials (stored via secrets store;
+    # these fields are populated from the encrypted DB at runtime by
+    # the scraper, not from config.yaml directly).
+    mobilism_username: str = ""
+    mobilism_password: str = ""
 
 
 class ScoringCfg(BaseModel):

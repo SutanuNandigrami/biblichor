@@ -157,6 +157,10 @@ def test_provider_literal_only_lists_implemented_scrapers() -> None:
         "wikisource",
         # Phase 6s.5 — Z-Library SingleLogin
         "zlib",
+        # Phase 6w.3 — HathiTrust
+        "hathitrust",
+        # Phase 6w.5 — Mobilism books
+        "mobilism_books",
     }
     assert "ebanglalibrary" not in provider_values
 

@@ -24,6 +24,9 @@ from endless_library.scrapers.zlib_singlelogin import ZlibSingleLogin
 from endless_library.scrapers.hathitrust import HathiTrust
 from endless_library.scrapers.doab import Doab
 
+# Phase 6w.5 — Mobilism books
+from endless_library.scrapers.mobilism_books import MobilismBooks
+
 _REGISTRY = {
     "annas_curl": AnnasArchiveCurl,
     "annas_flaresolverr": AnnasArchiveFlareSolverr,
@@ -41,6 +44,7 @@ _REGISTRY = {
     "zlib_singlelogin": ZlibSingleLogin,
     "hathitrust": HathiTrust,
     "doab": Doab,
+    "mobilism_books": MobilismBooks,
 }
 
 _PD_PRIORITY = (
@@ -109,14 +113,23 @@ def pd_aware_order(cfg: ScrapersCfg, *, query_title: str, is_pd: bool) -> list[s
 
 
 def chain_for_source(cfg: ScrapersCfg, *, source: str | None, query_title: str,
-                     is_pd: bool) -> list[str]:
+                     is_pd: bool, is_recent_release: bool = False) -> list[str]:
     """Source-aware chain. For sources where the Source adapter already
     knows the per-book download path (e.g. kindlebangla emits slugs that
     kindlebangla_curl resolves directly), short-circuit the chain to
     just that scraper. Otherwise fall back to pd_aware_order().
 
     Phase 6u.
+
+    Phase 6w.5: when is_recent_release=True and mobilism_books is in the
+    base chain, promote it to the front so recently-published books hit
+    Mobilism before the longer-latency open-access sources.
     """
     if source == "kindlebangla" and "kindlebangla_curl" in _REGISTRY:
         return ["kindlebangla_curl"]
-    return pd_aware_order(cfg, query_title=query_title, is_pd=is_pd)
+    base = pd_aware_order(cfg, query_title=query_title, is_pd=is_pd)
+    if is_recent_release and "mobilism_books" in base:
+        promoted = ["mobilism_books"]
+        rest = [n for n in base if n != "mobilism_books"]
+        return promoted + rest
+    return base
