@@ -115,25 +115,50 @@ def list_secret_names(conn: sqlite3.Connection) -> list[str]:
     return [r[0] for r in rows]
 
 
+def _set_secret_no_commit(
+    conn: sqlite3.Connection, key_bytes: bytes, name: str, value: str
+) -> None:
+    """Insert/replace a secret without committing — for use inside an open transaction."""
+    aes = AESGCM(key_bytes)
+    nonce = os.urandom(NONCE_LEN)
+    ct = aes.encrypt(nonce, value.encode("utf-8"), associated_data=name.encode("utf-8"))
+    conn.execute(
+        """
+        INSERT INTO secrets (name, nonce, ciphertext, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET
+            nonce=excluded.nonce,
+            ciphertext=excluded.ciphertext,
+            updated_at=excluded.updated_at
+        """,
+        (name, nonce, ct, int(time.time())),
+    )
+
+
 def rotate_secrets(conn: sqlite3.Connection, old_key_bytes: bytes, new_key_bytes: bytes) -> int:
     """Decrypt every secret under old_key, re-encrypt under new_key.
 
-    Returns the number of secrets rotated. Runs inside a single
-    transaction — if any decrypt fails (tampered ciphertext, wrong
-    old key), the whole rotation is rolled back.
+    Returns the number of secrets rotated. Atomic: ALL secrets are
+    decrypted with the old key first (fail-fast if any ciphertext is
+    corrupt or the old key is wrong), then a single transaction
+    re-encrypts them all. If decryption of ANY secret fails before the
+    transaction, nothing is written — no partial migration.
     """
     names = list_secret_names(conn)
-    count = 0
+    # Phase 1: decrypt everything with old key first — fail early, before any writes
+    plaintext_pairs: list[tuple[str, str]] = []
+    for name in names:
+        pt = get_secret(conn, old_key_bytes, name)
+        if pt is None:
+            continue
+        plaintext_pairs.append((name, pt))
+    # Phase 2: single transaction to re-encrypt all under new key
     try:
         conn.execute("BEGIN")
-        for name in names:
-            pt = get_secret(conn, old_key_bytes, name)
-            if pt is None:
-                continue
-            set_secret(conn, new_key_bytes, name, pt)
-            count += 1
+        for name, pt in plaintext_pairs:
+            _set_secret_no_commit(conn, new_key_bytes, name, pt)
         conn.commit()
     except Exception:
         conn.rollback()
         raise
-    return count
+    return len(plaintext_pairs)
