@@ -10,13 +10,17 @@ Phase 6w ultrareview C6: SSRF guard added.
 """
 from __future__ import annotations
 
+import logging
 import os
+import random
 import time
 from urllib.parse import urlparse
 
 import httpx
 
 from endless_library.url_safety import UnsafeUrlError, assert_safe_url
+
+log = logging.getLogger(__name__)
 
 # Docker-network service names that must never be proxied through the
 # cf-bypass sidecar (SSRF: sidecar lives on the biblichor network and
@@ -62,8 +66,9 @@ def resolve(url: str, *, timeout: float = 90.0) -> str:
             )
             r.raise_for_status()
             return r.json()["html"]
-        except httpx.HTTPError:
+        except httpx.HTTPError as e:
             if attempt == 0:
-                time.sleep(5)
+                log.info("cf_bypass: retrying %s after %s", url, e)
+                time.sleep(5 + random.uniform(-1, 1))
             else:
                 raise
