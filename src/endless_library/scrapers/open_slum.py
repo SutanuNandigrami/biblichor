@@ -8,6 +8,7 @@ health data only; a failure to refresh does not affect the main pipeline.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -41,6 +42,7 @@ class OpenSlumMonitor:
     ) -> None:
         self._url = url
         self._poll_interval = poll_interval
+        self._lock = threading.Lock()
         self._last_refresh: float = 0.0
         self._cache: dict[str, Any] = {}
 
@@ -55,9 +57,22 @@ class OpenSlumMonitor:
         (older than ``poll_interval`` seconds).  Any refresh error is
         swallowed — the last-known-good data (or empty cache) is
         returned instead.
+
+        Thread-safe: the lock ensures only one refresh happens per
+        poll interval even when N concurrent requests arrive after
+        expiry (ultrareview C).
         """
-        now = time.monotonic()
-        if now - self._last_refresh >= self._poll_interval:
+        with self._lock:
+            now = time.monotonic()
+            if now - self._last_refresh >= self._poll_interval:
+                # Stamp the time BEFORE the network call so any thread that
+                # acquires the lock while _refresh() is running sees a fresh
+                # enough timestamp and skips the redundant fetch.
+                self._last_refresh = now
+                do_refresh = True
+            else:
+                do_refresh = False
+        if do_refresh:
             self._refresh()
         return self._cache.get(site)
 
@@ -66,7 +81,12 @@ class OpenSlumMonitor:
     # ------------------------------------------------------------------
 
     def _refresh(self) -> None:
-        """Attempt a remote fetch and update the cache.  Never raises."""
+        """Attempt a remote fetch and update the cache.  Never raises.
+
+        Note: ``_last_refresh`` is stamped by ``get()`` *before* this method
+        is called so that concurrent callers see the fresh timestamp and skip
+        the redundant fetch (ultrareview C).  We do NOT update it here.
+        """
         try:
             data = self._fetch_remote()
             if isinstance(data, dict):
@@ -76,10 +96,6 @@ class OpenSlumMonitor:
                 log.debug("open_slum: unexpected response type %s (expected dict)", type(data).__name__)
         except Exception as exc:  # noqa: BLE001
             log.debug("open_slum: refresh failed: %s", exc)
-        finally:
-            # Always advance the timestamp so we never hammer a dead or
-            # misbehaving endpoint (ultrareview I4).
-            self._last_refresh = time.monotonic()
 
     def _fetch_remote(self) -> dict[str, Any]:
         """Fetch and return the remote status JSON.

@@ -74,3 +74,51 @@ def test_open_slum_cache_preserved_on_non_dict_response():
     # Second refresh returns non-dict; original cache must survive
     result2 = m.get("annas_archive")
     assert result2 == {"up": True}, "cache should be preserved on bad refresh response"
+
+
+# ---------------------------------------------------------------------------
+# Ultrareview C: OpenSlumMonitor serialised under concurrent calls
+# ---------------------------------------------------------------------------
+
+def test_open_slum_get_serialised_under_concurrent_calls():
+    """N threads calling get() concurrently after a stale interval must
+    trigger _fetch_remote at most once (no stampede)."""
+    import threading
+    from endless_library.scrapers.open_slum import OpenSlumMonitor
+
+    fetch_count = 0
+    counter_lock = threading.Lock()
+
+    class _CountingMonitor(OpenSlumMonitor):
+        def _fetch_remote(self):
+            nonlocal fetch_count
+            with counter_lock:
+                fetch_count += 1
+            return {"site": {"up": True}}
+
+    # poll_interval=3600 so that once one thread stamps _last_refresh,
+    # all subsequent threads see a fresh-enough timestamp and skip.
+    # Set _last_refresh=0 so all threads initially see stale data.
+    monitor = _CountingMonitor(poll_interval=3600)
+    # _last_refresh starts at 0.0 — every thread will see stale on first check
+
+    N = 20
+    results = []
+    errors = []
+
+    def worker():
+        try:
+            results.append(monitor.get("site"))
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(N)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], "Thread errors: " + str(errors)
+    assert len(results) == N
+    # Critical: only 1 actual network fetch despite N concurrent callers
+    assert fetch_count == 1, f"Expected exactly 1 fetch, got {fetch_count}"
