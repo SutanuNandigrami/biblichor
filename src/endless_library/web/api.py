@@ -7,7 +7,7 @@ import contextlib
 import json
 import logging
 from dataclasses import asdict
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -350,11 +350,19 @@ def register(app: FastAPI) -> None:
             where.append("source = ?")
             args.append(payload.source)
         if payload.created_after:
+            try:
+                dt_after = datetime.fromisoformat(payload.created_after)
+            except ValueError as e:
+                raise HTTPException(400, detail=f"invalid created_after: {e}") from e
             where.append("created_at >= ?")
-            args.append(payload.created_after)
+            args.append(dt_after.isoformat())
         if payload.created_before:
+            try:
+                dt_before = datetime.fromisoformat(payload.created_before)
+            except ValueError as e:
+                raise HTTPException(400, detail=f"invalid created_before: {e}") from e
             where.append("created_at <= ?")
-            args.append(payload.created_before)
+            args.append(dt_before.isoformat())
         if not where:
             raise HTTPException(400, detail="must provide at least one filter")
         clause = " AND ".join(where)
