@@ -368,3 +368,11 @@ reachable" banner with explicit remediation steps when omitted, and
 the rest of biblichor keeps working.
 
 **Test count: 893 passed.**
+
+## Phase 6w
+
+Phase 6w delivered a broad scraper sweep and a codebase-wide ultrareview cleanup pass. On the scraper side, four new sources were integrated: HathiTrust (ISBN-keyed public-domain lookup), DOAB (~90 k open-access scholarly titles via REST), Mobilism (forum-login + Mediafire link resolution with recent-release chain promotion), and BDeBooks (Bangla PDFs with a per-source category denylist). All scrapers were migrated to a shared `make_client()` factory that uses curl-cffi for Chrome TLS fingerprint impersonation, and an in-process Anubis proof-of-work middleware was added to handle challenge pages transparently. Anna's mirror rotation was hardened with per-mirror cool-downs, and a `cf-bypass` sidecar container provides a third anti-bot rung for the most aggressively protected targets.
+
+The bench subsystem was redesigned from a synchronous blocking call into a fully async job queue. `POST /api/bench/run` now returns 202 immediately; progress streams over SSE; per-query timeouts (20 s) and a 3-consecutive-failure circuit breaker per scraper prevent slow or broken scrapers from stalling an entire run. welib was revived via Patchright, and an Open Slum upstream-health monitor was added with 10-minute polling, surfaced in `/healthz` and the Scrapers page. The `Candidate` model gained a `categories` field with per-source `excluded_categories` denylists, giving operators fine-grained control over content filtering.
+
+The ultrareview cleanup (commits 91556d3..aef1b10) addressed all 7 Critical and 9 of 14 Important findings before the merge: thread-safety locks on three shared caches, atomic serialization of bookorbit upgrade applies, bsdtar path-traversal verification, and others. The remaining 5 Important and 15 Minor findings are deferred to Phase 6x and documented in `docs/superpowers/phase-6x-backlog.md`. A new `cf-bypass` service entry in `deploy/compose.yml` is the only new compose service introduced this phase; it runs `sarperavci/cloudflarebypassforscraping` on an internal Docker network and requires no host-port exposure.

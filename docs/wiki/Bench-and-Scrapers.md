@@ -309,3 +309,38 @@ unfiltered scrapers), runs it, and persists the outcome to
 `bench_runs` so the dashboard's success rate updates immediately.
 Useful for one-shot "is this scraper alive right now?" probes
 without kicking off the full bench.
+
+## Phase 6w
+
+### Bench is now async
+
+`POST /api/bench/run` returns **202 + job\_id** immediately; the caller polls progress via SSE at `GET /api/bench/jobs/{id}/stream`. Jobs can be cancelled with `POST /api/bench/jobs/{id}/cancel`. Each query carries a **20-second per-scraper timeout**; a scraper that fails 3 consecutive queries trips a **circuit breaker** and is skipped for the remainder of that job. Results are persisted to `bench_runs` as they arrive, so a partial run is never lost.
+
+### HTTP foundation
+
+All scrapers now share a `make_client()` factory that returns a **curl-cffi** session configured to impersonate a real Chrome TLS fingerprint. This eliminates the TLS-fingerprint mismatch that caused silent 403s on Cloudflare-protected targets. An **in-process Anubis proof-of-work solver** is wired in as HTTPX middleware; it intercepts `401 Anubis` challenges, solves them with the JS PoW algorithm, and replays the original request transparently. All five HTTP verbs (GET/POST/PUT/PATCH/DELETE) are wrapped.
+
+### New scrapers
+
+| Scraper | Notes |
+|---|---|
+| **HathiTrust** | ISBN-only lookup; returns public-domain full texts from HathiTrust Digital Library. |
+| **DOAB** | REST search over ~90 000 open-access scholarly titles. |
+| **Mobilism** | Forum login + per-post Mediafire link resolution; recent-release books are promoted to the front of the resolution chain. |
+| **BDeBooks** | Bangla PDFs; uses the new per-source `excluded_categories` denylist (default list excludes Islamic/religious content). |
+
+### Category filtering
+
+`Candidate` now carries a `categories` field populated from source metadata. Each scraper entry in config accepts `excluded_categories`; results matching any listed category are silently dropped before ranking. Default denylists for `bdebooks` and `kindlebangla` exclude Islamic/religious categories.
+
+### Anna's hardening
+
+Mirror rotation across `.gl` / `.li` / `.pm` / `.in` with a **5-minute cool-down** per mirror on failure. A `cf-bypass` sidecar (`sarperavci/cloudflarebypassforscraping`) is added to `compose.yml` as a third anti-bot rung; `annas_curl` falls back to it when the curl-cffi impersonation and Anubis middleware both fail.
+
+### welib
+
+Revived via **Patchright** (Playwright fork with stealth patches). The scraper launches a headless browser session only when the lightweight curl-cffi path fails, keeping normal latency low.
+
+### Open Slum health monitor
+
+`OpenSlumMonitor` polls upstream Open Slum every **10 minutes**. Health state is surfaced in `/healthz` and rendered as a badge on the Scrapers page. Thread-safety enforced with a lock + claim-before-fetch pattern (ultrareview I5).
