@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from urllib.parse import quote_plus, urljoin
 
@@ -49,6 +50,7 @@ _MF_LINK_RE = re.compile(
 # I-NEW-2: Rate-limit the drift probe (once per 6 hours max).
 _DRIFT_PROBE_TTL = 6 * 3600
 _drift_probe_last_at: float = 0.0
+_drift_probe_lock = threading.Lock()
 
 
 
@@ -57,27 +59,29 @@ def _check_drift(session) -> None:
 
     Checks whether forum_id=15 returns results for a known-good probe term.
     Rate-limited: rapid empty-result bursts do not hammer the forum.
+    Lock ensures only one concurrent caller runs the probe (M-3rd-2).
     """
-    global _drift_probe_last_at
-    if time.time() - _drift_probe_last_at < _DRIFT_PROBE_TTL:
-        log.debug(
-            "mobilism_books: drift probe skipped (last %.0fs ago)",
-            time.time() - _drift_probe_last_at,
-        )
-        return
-    _drift_probe_last_at = time.time()  # claim slot before request
-    probe_url = _SEARCH_URL.format(query=quote_plus(_DRIFT_PROBE_TERM))
-    try:
-        probe_resp = session.get(probe_url, follow_redirects=True)
-        probe_soup = BeautifulSoup(probe_resp.text, "html.parser")
-        if probe_resp.status_code == 200 and not probe_soup.select("a.topictitle"):
-            log.warning(
-                "mobilism_books: forum_id=15 drift detected — "
-                "probe query %r returned 0 threads; subforum may have moved",
-                _DRIFT_PROBE_TERM,
+    with _drift_probe_lock:
+        global _drift_probe_last_at
+        if time.time() - _drift_probe_last_at < _DRIFT_PROBE_TTL:
+            log.debug(
+                "mobilism_books: drift probe skipped (last %.0fs ago)",
+                time.time() - _drift_probe_last_at,
             )
-    except Exception as _e:
-        log.debug("mobilism_books: drift probe failed: %s", _e)
+            return
+        _drift_probe_last_at = time.time()  # claim slot before request
+        probe_url = _SEARCH_URL.format(query=quote_plus(_DRIFT_PROBE_TERM))
+        try:
+            probe_resp = session.get(probe_url, follow_redirects=True)
+            probe_soup = BeautifulSoup(probe_resp.text, "lxml")
+            if probe_resp.status_code == 200 and not probe_soup.select("a.topictitle"):
+                log.warning(
+                    "mobilism_books: forum_id=15 drift detected — "
+                    "probe query %r returned 0 threads; subforum may have moved",
+                    _DRIFT_PROBE_TERM,
+                )
+        except Exception as _e:
+            log.debug("mobilism_books: drift probe failed: %s", _e)
 
 def _ext_from_text(text: str) -> str | None:
     m = _EXT_RE.search(text)
@@ -119,7 +123,7 @@ class MobilismBooks:
             log.warning("mobilism_books: search returned HTTP %s", resp.status_code)
             return []
 
-        soup = BeautifulSoup(resp.text, "html.parser")
+        soup = BeautifulSoup(resp.text, "lxml")
         thread_links = self._extract_thread_links(soup)
         if not thread_links:
             log.debug("mobilism_books: no threads found for %r", search_query)
@@ -165,7 +169,7 @@ class MobilismBooks:
         if resp.status_code != 200:
             return []
 
-        soup = BeautifulSoup(resp.text, "html.parser")
+        soup = BeautifulSoup(resp.text, "lxml")
         # The first post usually contains the download link(s)
         post_body = soup.select_one("div.postbody") or soup.select_one("div.content")
         if post_body is None:

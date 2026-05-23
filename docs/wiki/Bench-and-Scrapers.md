@@ -335,7 +335,15 @@ All scrapers now share a `make_client()` factory that returns a **curl-cffi** se
 
 ### Anna's hardening
 
-Mirror rotation across `.gl` / `.li` / `.pm` / `.in` with a **5-minute cool-down** per mirror on failure. A `cf-bypass` sidecar (`sarperavci/cloudflarebypassforscraping`) is added to `compose.yml` as a third anti-bot rung; `annas_curl` falls back to it when the curl-cffi impersonation and Anubis middleware both fail.
+Mirror rotation across `.gl` / `.li` / `.pm` / `.in` with a **5-minute cool-down** per mirror on failure.
+
+The `cf-bypass` sidecar provides a third anti-bot tier (Chrome-stealth via
+DrissionPage). It is **opt-in** as of Phase 6z -- the sarperavci image is
+not published to Docker Hub, so users must build it locally from
+https://github.com/sarperavci/CloudflareBypassForScraping and start with
+`docker compose --profile bypass up -d`. Without the profile, the
+`annas_cloakbrowser` scraper gracefully returns no candidates and the
+chain falls through to its next rung.
 
 ### welib
 
