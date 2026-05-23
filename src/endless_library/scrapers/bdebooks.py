@@ -22,6 +22,10 @@ log = logging.getLogger(__name__)
 BASE = "https://bdebooks.com"
 USER_AGENT = "Mozilla/5.0 (compatible; biblichor/0.1; +bdebooks scraper)"
 
+# Cap the number of detail-page fetches per search so the bench's 20s per-query
+# timeout is not exceeded by N*1-3s/page serial fetches (ultrareview D).
+_MAX_DETAIL_FETCHES = 3
+
 
 class BDeBooks:
     """Strategy entry: bdebooks."""
@@ -74,6 +78,10 @@ class BDeBooks:
             if excluded and set(categories) & excluded:
                 log.debug("bdebooks: skipping %r — category %s in denylist", title, set(categories) & excluded)
                 continue
+
+            # Cap serial detail fetches to avoid bench timeout (ultrareview D)
+            if len(out) >= _MAX_DETAIL_FETCHES:
+                break
 
             # Fetch detail page to extract the PDF download URL
             pdf_url = self._extract_pdf(detail_url, client)

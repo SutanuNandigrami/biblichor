@@ -209,3 +209,58 @@ def test_enabled_order_for_query_promotes_bdebooks_for_bengali():
     # Bengali query → kindlebangla_curl and bdebooks should be promoted to front
     assert order.index("kindlebangla_curl") < order.index("annas_curl")
     assert order.index("bdebooks") < order.index("annas_curl")
+
+
+# ---------------------------------------------------------------------------
+# Ultrareview D: BDeBooks caps detail fetches to _MAX_DETAIL_FETCHES
+# ---------------------------------------------------------------------------
+
+def test_bdebooks_caps_detail_fetches_at_max(monkeypatch):
+    """search() must fetch at most _MAX_DETAIL_FETCHES detail pages regardless
+    of how many results the search page returns."""
+    from endless_library.scrapers.bdebooks import BDeBooks, _MAX_DETAIL_FETCHES
+    from endless_library.domain.models import SearchQuery
+
+    # Generate 10 articles — more than the cap
+    articles = "".join(
+        f'<article class="post">' +
+        f'<h2 class="entry-title"><a class="entry-title" href="https://bdebooks.com/books/book{i}/">Book {i}</a></h2>' +
+        f'<a href="/category/fiction/" rel="category tag">Fiction</a>' +
+        f'</article>'
+        for i in range(10)
+    )
+    search_html = f"<html><body>{articles}</body></html>"
+    detail_html = '<html><body><a href="https://bdebooks.com/files/x.pdf">Download</a></body></html>'
+
+    fetch_count = [0]
+
+    class _CapClient:
+        def get(self, url, **kwargs):
+            class _R:
+                status_code = 200
+            r = _R()
+            if "?" in url or url.rstrip("/") == "https://bdebooks.com":
+                r.text = search_html
+            else:
+                fetch_count[0] += 1
+                r.text = detail_html
+            return r
+
+    monkeypatch.setattr(
+        "endless_library.scrapers.bdebooks.make_client",
+        lambda **kw: _CapClient(),
+    )
+
+    class _Cfg:
+        excluded_categories = ()
+
+    b = BDeBooks(cfg=_Cfg())
+    cands = b.search(SearchQuery(title="test", author=None, isbn13=None,
+                                 format_priority=("pdf",), language="bn"))
+
+    assert len(cands) <= _MAX_DETAIL_FETCHES, (
+        f"Expected at most {_MAX_DETAIL_FETCHES} candidates, got {len(cands)}"
+    )
+    assert fetch_count[0] <= _MAX_DETAIL_FETCHES, (
+        f"Expected at most {_MAX_DETAIL_FETCHES} detail fetches, got {fetch_count[0]}"
+    )
