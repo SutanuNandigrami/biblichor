@@ -1159,7 +1159,25 @@ def register(app: FastAPI) -> None:
         except Exception as e:  # pragma: no cover
             components["smtp"] = f"unknown: {type(e).__name__}: {e}"
 
-        body = {"ok": ok, **components}
+        body: dict = {"ok": ok, **components}
+        # Phase 6w.9d: Open Slum upstream status
+        slum = getattr(request.app.state, "open_slum_monitor", None)
+        if slum is not None:
+            _NAME_TO_SITE = {
+                "annas_curl": "annas_archive",
+                "annas_flaresolverr": "annas_archive",
+                "annas_cloakbrowser": "annas_archive",
+                "libgen_curl": "libgen",
+                "zlib_singlelogin": "zlibrary",
+            }
+            external: dict = {}
+            for _sn, _site in _NAME_TO_SITE.items():
+                if _site not in external:
+                    st = slum.get(_site)
+                    if st is not None:
+                        external[_site] = st
+            if external:
+                body["external_sources"] = external
         if not ok:
             return JSONResponse(status_code=503, content=body)
         return body

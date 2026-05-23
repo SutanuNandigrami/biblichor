@@ -178,3 +178,54 @@ def test_pd_chain_does_not_promote_pd_scrapers_for_modern_books():
         f"For non-PD book, expected modern scrapers to come before some PD scrapers. "
         f"chain={chain}, modern_positions={modern_positions}, pd_positions={pd_positions}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Open Slum monitor
+# ---------------------------------------------------------------------------
+
+def test_open_slum_caches_within_poll_interval():
+    """A second call within the poll interval must NOT trigger a remote fetch."""
+    from endless_library.scrapers.open_slum import OpenSlumMonitor
+
+    fetch_count = 0
+
+    class _FastMonitor(OpenSlumMonitor):
+        def _fetch_remote(self):
+            nonlocal fetch_count
+            fetch_count += 1
+            return {"annas_archive": {"up": True}}
+
+    m = _FastMonitor(poll_interval=3600)  # 1-hour interval
+    m.get("annas_archive")  # first call → fetch
+    m.get("annas_archive")  # second call → cached
+    m.get("annas_archive")  # third call → cached
+
+    assert fetch_count == 1, f"expected 1 fetch, got {fetch_count}"
+
+
+def test_open_slum_returns_none_for_unknown_site():
+    """Sites not in the fetched data (or not fetched yet) return None."""
+    from endless_library.scrapers.open_slum import OpenSlumMonitor
+
+    class _EmptyMonitor(OpenSlumMonitor):
+        def _fetch_remote(self):
+            return {}  # no sites
+
+    m = _EmptyMonitor(poll_interval=3600)
+    result = m.get("nonexistent_site")
+    assert result is None
+
+
+def test_open_slum_handles_unreachable_endpoint():
+    """An unreachable endpoint must be swallowed; get() returns None, not raise."""
+    from endless_library.scrapers.open_slum import OpenSlumMonitor
+
+    class _BrokenMonitor(OpenSlumMonitor):
+        def _fetch_remote(self):
+            raise ConnectionError("simulated network failure")
+
+    m = _BrokenMonitor(poll_interval=0)  # always stale → always tries to refresh
+    # Must not raise:
+    result = m.get("annas_archive")
+    assert result is None
