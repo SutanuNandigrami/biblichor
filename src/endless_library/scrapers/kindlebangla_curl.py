@@ -49,6 +49,7 @@ USER_AGENT = "Mozilla/5.0 (compatible; biblichor/0.1; +kindlebangla scraper)"
 class KindleBanglaCurl:
     """Strategy entry: kindlebangla_curl."""
 
+    name = "kindlebangla_curl"
     provider = "kindlebangla"
 
     def __init__(

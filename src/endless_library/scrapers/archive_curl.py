@@ -62,6 +62,7 @@ def _ia_format(raw: str | None) -> str | None:
 class ArchiveOrgCurl:
     """Strategy entry: archive_org_curl."""
 
+    name = "archive_curl"
     provider = "archive"
 
     def __init__(
