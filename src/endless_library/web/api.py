@@ -84,15 +84,6 @@ class BulkDelete(BaseModel):
     hard: bool = False
 
 
-class BulkDelete(BaseModel):
-    ids: list[int] | None = None
-    status: str | None = None
-    source: str | None = None
-    created_after: str | None = None
-    created_before: str | None = None
-    hard: bool = False
-
-
 class SettingsPatch(BaseModel):
     poll_interval_minutes: int | None = None
     max_attempts: int | None = None
@@ -387,49 +378,6 @@ def register(app: FastAPI) -> None:
                 ).rowcount
             conn.commit()
         return {"deleted": n, "hard": payload.hard}
-
-    @router.post("/books/bulk_delete")
-    def bulk_delete(payload: BulkDelete, request: Request):
-        """Bulk delete books matching filters. Provide at least one filter.
-
-        Filters combine with AND. `hard=True` removes rows; default soft-deletes
-        (status='skipped', preserves audit trail).
-        """
-        deps = request.app.state.deps
-        where: list[str] = []
-        args: list = []
-        if payload.ids:
-            placeholders = ",".join(["?"] * len(payload.ids))
-            where.append(f"id IN ({placeholders})")
-            args.extend(payload.ids)
-        if payload.status:
-            where.append("status = ?")
-            args.append(payload.status)
-        if payload.source:
-            where.append("source = ?")
-            args.append(payload.source)
-        if payload.created_after:
-            where.append("created_at >= ?")
-            args.append(payload.created_after)
-        if payload.created_before:
-            where.append("created_at <= ?")
-            args.append(payload.created_before)
-        if not where:
-            raise HTTPException(400, detail="must provide at least one filter")
-        clause = " AND ".join(where)
-        with connect(deps.db_path) as conn:
-            if payload.hard:
-                n = conn.execute(f"DELETE FROM books WHERE {clause}", args).rowcount
-            else:
-                n = conn.execute(
-                    f"UPDATE books SET status='skipped', "
-                    f"last_error='deleted from dashboard', "
-                    f"updated_at=datetime('now') WHERE {clause}",
-                    args,
-                ).rowcount
-            conn.commit()
-        return {"deleted": n, "hard": payload.hard}
-
     @router.post("/books/{book_id}/delete")
     def soft_delete(book_id: int, request: Request):
         deps = request.app.state.deps
