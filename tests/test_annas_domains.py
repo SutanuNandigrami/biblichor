@@ -198,3 +198,48 @@ def test_effective_mirrors_ignores_empty_entries():
         "https://annas-archive.gl",
         "https://annas-archive.se",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Ultrareview B: thread-safe annas_domains state
+# ---------------------------------------------------------------------------
+
+def test_annas_domains_thread_safe():
+    """20 threads mix of mark_cool/mark_success/next_mirror — no exception,
+    state stays consistent (at most one _last_working value)."""
+    import threading
+    from endless_library.scrapers import annas_domains as ad
+
+    ad._reset_state()
+
+    errors = []
+    mirrors = list(ad._MIRRORS)
+
+    def worker(i):
+        try:
+            mirror = mirrors[i % len(mirrors)]
+            if i % 3 == 0:
+                ad.mark_cool(mirror)
+            elif i % 3 == 1:
+                ad.mark_success(mirror)
+            else:
+                ad.next_mirror()
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], "Thread errors: " + str(errors)
+    # _last_working must be None or a single valid mirror (never a torn value)
+    with ad._STATE_LOCK:
+        lw = ad._last_working
+    assert lw is None or lw in mirrors
+    # _state values must all be floats (no torn writes)
+    with ad._STATE_LOCK:
+        for v in ad._state.values():
+            assert isinstance(v, float), f"Non-float cool-until: {v!r}"
+    ad._reset_state()
