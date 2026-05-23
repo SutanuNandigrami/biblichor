@@ -15,6 +15,8 @@ import re
 
 import httpx
 
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
+
 from endless_library.domain.models import DownloadHandle
 
 log = logging.getLogger(__name__)
@@ -45,7 +47,7 @@ def recover_links(md5: str, *, limit: int = 5, db_path: Path | None = None) -> l
                 "limit": f"-{limit}",
             },
             timeout=10.0,
-            headers={"User-Agent": "endless-library/0.1"},
+            headers={"User-Agent": BIBLICHOR_USER_AGENT},
         )
         if r.status_code != 200:
             return []
@@ -67,7 +69,7 @@ def recover_links(md5: str, *, limit: int = 5, db_path: Path | None = None) -> l
             arch = httpx.get(
                 f"https://web.archive.org/web/{timestamp}/{original}",
                 timeout=15.0,
-                headers={"User-Agent": "endless-library/0.1"},
+                headers={"User-Agent": BIBLICHOR_USER_AGENT},
             )
             if arch.status_code != 200:
                 continue

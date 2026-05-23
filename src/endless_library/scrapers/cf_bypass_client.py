@@ -11,6 +11,7 @@ Phase 6w ultrareview C6: SSRF guard added.
 from __future__ import annotations
 
 import os
+import time
 from urllib.parse import urlparse
 
 import httpx
@@ -58,10 +59,18 @@ def resolve(url: str, *, timeout: float = 90.0) -> str:
     if not _is_safe_url(url):
         raise ValueError(f"refusing to proxy untrusted URL through cf-bypass: {url!r}")
     base = os.environ.get("CF_BYPASS_URL", "http://cf-bypass:8000")
-    r = httpx.post(
-        f"{base.rstrip('/')}/cf-clearance-scraper",
-        json={"url": url},
-        timeout=timeout,
-    )
-    r.raise_for_status()
-    return r.json()["html"]
+    # M13: single retry with 5s backoff on transport errors.
+    for attempt in range(2):
+        try:
+            r = httpx.post(
+                f"{base.rstrip('/')}/cf-clearance-scraper",
+                json={"url": url},
+                timeout=timeout,
+            )
+            r.raise_for_status()
+            return r.json()["html"]
+        except httpx.HTTPError:
+            if attempt == 0:
+                time.sleep(5)
+            else:
+                raise

@@ -210,7 +210,7 @@ def test_annas_domains_thread_safe():
     import threading
     from endless_library.scrapers import annas_domains as ad
 
-    ad._reset_state()
+    ad._reset_state_for_tests()
 
     errors = []
     mirrors = list(ad._MIRRORS)
@@ -242,4 +242,4 @@ def test_annas_domains_thread_safe():
     with ad._STATE_LOCK:
         for v in ad._state.values():
             assert isinstance(v, float), f"Non-float cool-until: {v!r}"
-    ad._reset_state()
+    ad._reset_state_for_tests()

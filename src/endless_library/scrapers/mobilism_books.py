@@ -33,6 +33,12 @@ _SEARCH_URL = (
 # Extension clues from thread title / post text
 _EXT_RE = re.compile(r"\b(epub|mobi|azw3|pdf|lit|djvu)\b", re.IGNORECASE)
 
+
+# M6: Configuration-drift probe: a search for this common term should
+# ALWAYS return results if forum_id=15 is valid. 0 results means the
+# subforum was restructured and forum_id needs updating.
+_DRIFT_PROBE_TERM = "the"
+
 # Mediafire share-page pattern
 _MF_LINK_RE = re.compile(
     r"https?://(?:www\.)?mediafire\.com/file/[^\s\"'<>]+",
@@ -84,6 +90,22 @@ class MobilismBooks:
         thread_links = self._extract_thread_links(soup)
         if not thread_links:
             log.debug("mobilism_books: no threads found for %r", search_query)
+            # M6: Check for forum_id drift when the real query also finds
+            # nothing. Only probe when the query itself is non-trivial so
+            # we don't false-alarm on very rare book titles.
+            if search_query and search_query.lower() != _DRIFT_PROBE_TERM:
+                probe_url = _SEARCH_URL.format(query=quote_plus(_DRIFT_PROBE_TERM))
+                try:
+                    probe_resp = session.get(probe_url, follow_redirects=True)
+                    probe_soup = BeautifulSoup(probe_resp.text, "html.parser")
+                    if probe_resp.status_code == 200 and not self._extract_thread_links(probe_soup):
+                        log.warning(
+                            "mobilism_books: forum_id=15 drift detected — "
+                            "probe query %r returned 0 threads; subforum may have moved",
+                            _DRIFT_PROBE_TERM,
+                        )
+                except Exception as _e:
+                    log.debug("mobilism_books: drift probe failed: %s", _e)
             return []
 
         candidates: list[Candidate] = []

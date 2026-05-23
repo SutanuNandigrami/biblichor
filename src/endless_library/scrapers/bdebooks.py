@@ -49,7 +49,7 @@ class BDeBooks:
         except Exception as e:
             log.warning("bdebooks: search failed: %s", e)
             return []
-        if getattr(r, "status_code", 0) != 200:
+        if r.status_code != 200:
             return []
 
         soup = BeautifulSoup(r.text, "lxml")
@@ -127,7 +127,7 @@ class BDeBooks:
         except Exception as e:
             log.warning("bdebooks: detail fetch %s failed: %s", detail_url, e)
             return None
-        if getattr(r, "status_code", 0) != 200:
+        if r.status_code != 200:
             return None
         soup = BeautifulSoup(r.text, "lxml")
         for a in soup.find_all("a", href=True):

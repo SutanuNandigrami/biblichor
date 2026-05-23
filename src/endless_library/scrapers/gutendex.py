@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
+
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 
 log = logging.getLogger(__name__)
@@ -39,7 +41,7 @@ class Gutendex:
                 f"{API_BASE}/books",
                 params={"search": q},
                 timeout=15.0,
-                headers={"User-Agent": "endless-library/0.1"},
+                headers={"User-Agent": BIBLICHOR_USER_AGENT},
             )
         except httpx.HTTPError as e:
             log.info("gutendex: %s", e)

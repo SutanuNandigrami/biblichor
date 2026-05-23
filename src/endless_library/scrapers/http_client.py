@@ -47,6 +47,12 @@ _ANUBIS_TTL_SEC = 50 * 60
 _ANUBIS_LOCK = threading.Lock()
 
 
+# M15: project-default User-Agent for scrapers that do NOT impersonate
+# a specific browser. Scrapers using make_client(impersonate="chrome")
+# should NOT set this header — curl-cffi will set it to match Chrome.
+BIBLICHOR_USER_AGENT = "biblichor/0.1 (+https://github.com/SutanuNandigrami/biblichor)"
+
+
 def make_client(
     *,
     impersonate: str = "chrome",

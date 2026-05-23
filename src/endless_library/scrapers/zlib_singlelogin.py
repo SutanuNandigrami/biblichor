@@ -24,6 +24,8 @@ from pathlib import Path
 from urllib.parse import quote, urljoin
 
 import httpx
+
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
 from bs4 import BeautifulSoup
 
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
@@ -108,7 +110,7 @@ class ZlibSingleLogin:
                     "gg_json_mode": "1",
                 },
                 timeout=30.0,
-                headers={"User-Agent": "endless-library/0.1"},
+                headers={"User-Agent": BIBLICHOR_USER_AGENT},
                 follow_redirects=True,
             )
         except httpx.HTTPError as e:
@@ -144,7 +146,7 @@ class ZlibSingleLogin:
             r = httpx.get(
                 f"{domain}/s/{quote(q)}",
                 timeout=20.0,
-                headers={"User-Agent": "endless-library/0.1"},
+                headers={"User-Agent": BIBLICHOR_USER_AGENT},
                 follow_redirects=True,
             )
         except httpx.HTTPError as e:

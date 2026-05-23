@@ -15,6 +15,8 @@ from urllib.parse import quote
 
 import httpx
 
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
+
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 
 log = logging.getLogger(__name__)
@@ -44,7 +46,7 @@ class Wikisource:
                 params={"query": query, "format": "json"},
                 timeout=15.0,
                 headers={
-                    "User-Agent": "endless-library/0.1",
+                    "User-Agent": BIBLICHOR_USER_AGENT,
                     "Accept": "application/sparql-results+json",
                 },
             )

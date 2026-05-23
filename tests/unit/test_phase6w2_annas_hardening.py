@@ -3,17 +3,17 @@ import time
 
 
 def test_next_mirror_returns_first_when_no_history():
-    from endless_library.scrapers.annas_domains import next_mirror, _reset_state
-    _reset_state()
+    from endless_library.scrapers.annas_domains import next_mirror, _reset_state_for_tests
+    _reset_state_for_tests()
     m = next_mirror()
     assert m in {"annas-archive.gl", "annas-archive.li", "annas-archive.pm", "annas-archive.in"}
 
 
 def test_mark_cool_skips_mirror_for_5min():
     from endless_library.scrapers.annas_domains import (
-        next_mirror, mark_cool, _reset_state, _MIRRORS,
+        next_mirror, mark_cool, _reset_state_for_tests, _MIRRORS,
     )
-    _reset_state()
+    _reset_state_for_tests()
     cooled = _MIRRORS[0]
     mark_cool(cooled)
     seen = set()
@@ -24,9 +24,9 @@ def test_mark_cool_skips_mirror_for_5min():
 
 def test_mark_success_prefers_last_working():
     from endless_library.scrapers.annas_domains import (
-        next_mirror, mark_success, _reset_state, _MIRRORS,
+        next_mirror, mark_success, _reset_state_for_tests, _MIRRORS,
     )
-    _reset_state()
+    _reset_state_for_tests()
     pick = _MIRRORS[2]
     mark_success(pick)
     assert next_mirror(prefer_last_working=True) == pick
@@ -34,7 +34,7 @@ def test_mark_success_prefers_last_working():
 
 def test_cool_expires_after_300_seconds(monkeypatch):
     import endless_library.scrapers.annas_domains as ad
-    ad._reset_state()
+    ad._reset_state_for_tests()
     ad.mark_cool(ad._MIRRORS[0])
     monkeypatch.setattr(ad, "_now", lambda: time.time() + 301)
     seen = set()
@@ -96,7 +96,7 @@ def test_annas_cloakbrowser_cools_mirror_on_resolve_failure(monkeypatch):
     from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
     from endless_library.scrapers import annas_domains
     from endless_library.domain.models import SearchQuery
-    annas_domains._reset_state()
+    annas_domains._reset_state_for_tests()
     def _fail(url, **kw):
         raise RuntimeError("sidecar down")
     monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.resolve", _fail)

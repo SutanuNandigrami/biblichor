@@ -125,12 +125,17 @@ def _check_member_safe(name: str) -> None:
     Phase 6u.7c: format check split from security check — kindlebangla
     RARs commonly contain `.epub + .kfx + .jpg + .opf + .original_kfx`
     siblings. Failing the whole archive on a `.kfx` extension loses the
-    EPUB we actually want."""
+    EPUB we actually want.
+    Phase 6y M10: normalize backslashes to forward slashes before the
+    traversal check so legacy Windows CBR members (e.g. 'ch01/page01.jpg')
+    are accepted. Absolute-path check is done after normalisation."""
     if not name:
         raise ArchiveSafetyError("empty member name")
-    if name.startswith("/") or "\\" in name:
+    # M10: normalise Windows-style separators before any security check.
+    name = name.replace("\\", "/")
+    if name.startswith("/"):
         raise ArchiveSafetyError(f"absolute-path member: {name!r}")
-    parts = name.replace("\\", "/").split("/")
+    parts = name.split("/")
     if any(p in ("..", "") for p in parts[:-1]):
         raise ArchiveSafetyError(f"path traversal: {name!r}")
     if any(p == ".." for p in parts):
