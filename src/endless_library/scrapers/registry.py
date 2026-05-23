@@ -57,6 +57,11 @@ _PD_PRIORITY = (
 )
 
 
+_SCRAPER_TO_CFG_KEY: dict[str, str] = {
+    "kindlebangla_curl": "kindlebangla",
+    "bdebooks": "bdebooks",
+}
+
 def available() -> list[str]:
     return list(_REGISTRY.keys())
 
@@ -64,7 +69,10 @@ def available() -> list[str]:
 def build(name: str, cfg: ScrapersCfg, **kwargs: Any):
     if name not in _REGISTRY:
         raise KeyError(f"unknown scraper: {name}")
-    return _REGISTRY[name](cfg, **kwargs)
+    klass = _REGISTRY[name]
+    cfg_key = _SCRAPER_TO_CFG_KEY.get(name)
+    per_source = getattr(cfg, cfg_key, None) if cfg_key else None
+    return klass(per_source if per_source is not None else cfg, **kwargs)
 
 
 def enabled_order(cfg: ScrapersCfg) -> list[str]:

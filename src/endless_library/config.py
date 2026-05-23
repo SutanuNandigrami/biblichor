@@ -103,6 +103,38 @@ class CalibreCfg(BaseModel):
     conversion_timeout_seconds: int = 300
 
 
+class BdebooksCfg(BaseModel):
+    excluded_categories: list[str] = Field(default_factory=lambda: [
+        "Islamic Books",
+        "ইসলামিক বই",
+        "Islamic",
+        "Islam",
+        "Religion",
+        "Religious",
+        "ধর্ম",
+        "ধর্মীয়",
+        "Hadith",
+        "হাদিস",
+        "Quran",
+        "কোরআন",
+        "Prophet",
+        "নবী",
+        "Islamic Studies",
+        "ইসলামিক স্টাডিজ",
+    ])
+
+
+class KindleBanglaCfg(BaseModel):
+    excluded_categories: list[str] = Field(default_factory=lambda: [
+        "Islamic",
+        "Religion",
+        "Religious",
+        "ধর্মীয়",
+        "Hadith",
+        "Quran",
+    ])
+
+
 class ScrapersCfg(BaseModel):
     order: list[str] = Field(default_factory=list)
     enabled: dict[str, bool] = Field(default_factory=dict)
@@ -132,6 +164,8 @@ class ScrapersCfg(BaseModel):
     # the scraper, not from config.yaml directly).
     mobilism_username: str = ""
     mobilism_password: str = ""
+    bdebooks: BdebooksCfg = Field(default_factory=BdebooksCfg)
+    kindlebangla: KindleBanglaCfg = Field(default_factory=KindleBanglaCfg)
 
 
 class ScoringCfg(BaseModel):
@@ -238,6 +272,7 @@ class StorageCfg(BaseModel):
     rclone_bucket_path: str = ""  # optional path prefix on the remote
     # hybrid only
     hybrid_mode: str = "mirror"  # "mirror" or "scheduled"
+
 
 
 
