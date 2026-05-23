@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import threading
 import time
 from collections.abc import Callable
@@ -35,18 +34,8 @@ WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/Anna%27s_Archive"
 DEFAULT_UPDATE_INTERVAL_SECONDS = 6 * 3600
 CACHE_FILENAME = "wiki_annas_domains.json"
 
-_INFOBOX_TABLE_RE = re.compile(
-    rb'<table[^>]*class="[^"]*infobox vcard[^"]*"[^>]*>(.*?)(?:<h2|</table)',
-    re.DOTALL | re.IGNORECASE,
-)
-_URL_SPAN_RE = re.compile(
-    rb'<span[^>]*class="[^"]*url[^"]*"[^>]*>(.*?)</span>',
-    re.DOTALL | re.IGNORECASE,
-)
-_EXTERNAL_LINK_RE = re.compile(
-    rb'<a[^>]*class="[^"]*external text[^"]*"[^>]*href="([^"]+)"',
-    re.IGNORECASE,
-)
+# M4: parse_domains_from_html now uses lxml instead of raw-byte regex
+# (lxml handles malformed HTML correctly and avoids regex fragility).
 
 
 def parse_domains_from_html(html: bytes | str) -> list[str]:
@@ -54,21 +43,45 @@ def parse_domains_from_html(html: bytes | str) -> list[str]:
 
     Returns [] if the infobox can't be located. Returns full URLs lowercased
     to bare host (no scheme, no path).
+
+    M4: switched from raw-byte regex to lxml for correct handling of
+    malformed HTML and Unicode entity decoding.
     """
-    if isinstance(html, str):
-        html = html.encode("utf-8", errors="replace")
-    table = _INFOBOX_TABLE_RE.search(html)
-    if not table:
+    from lxml import etree  # deferred; only needed during wiki refresh
+
+    if isinstance(html, bytes):
+        html_str = html.decode("utf-8", errors="replace")
+    else:
+        html_str = html
+
+    try:
+        tree = etree.fromstring(html_str.encode("utf-8"), etree.HTMLParser())
+    except Exception:
         return []
+
+    # Find the infobox vcard table
+    tables = tree.xpath(
+        '//table[contains(concat(" ", normalize-space(@class), " "), " infobox ")]'
+        '[contains(concat(" ", normalize-space(@class), " "), " vcard ")]'
+    )
+    if not tables:
+        return []
+
     out: list[str] = []
-    for span in _URL_SPAN_RE.findall(table.group(0)):
-        for href in _EXTERNAL_LINK_RE.findall(span):
-            href_str = href.decode("utf-8", errors="replace").strip()
-            if "://" not in href_str:
-                href_str = "https:" + href_str
-            parsed = urlparse(href_str)
-            if parsed.netloc:
-                out.append(parsed.netloc.lower())
+    for table in tables:
+        # Find spans with class containing "url"
+        for span in table.xpath('.//span[contains(@class, "url")]'):
+            # Find external links within the span
+            for a in span.xpath('.//a[contains(@class, "external")][@href]'):
+                href_str = (a.get("href") or "").strip()
+                if not href_str:
+                    continue
+                if "://" not in href_str:
+                    href_str = "https:" + href_str
+                parsed = urlparse(href_str)
+                if parsed.netloc:
+                    out.append(parsed.netloc.lower())
+
     # Dedup preserving order
     seen: set[str] = set()
     deduped: list[str] = []
