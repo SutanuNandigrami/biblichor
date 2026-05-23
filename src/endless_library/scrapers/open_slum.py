@@ -12,6 +12,15 @@ import threading
 import time
 from typing import Any
 
+# Keys we expect in the upstream status JSON. Extras are logged at DEBUG.
+_KNOWN_SITE_KEYS = frozenset({
+    "annas_archive", "libgen", "gutenberg", "open_library", "zlib",
+    "sci_hub", "internet_archive", "wikisource", "standard_ebooks",
+})
+
+# Number of consecutive refresh failures before bumping log level to WARNING.
+_WARN_AFTER_N_FAILURES = 3
+
 log = logging.getLogger(__name__)
 
 # Default URL for the Open Library / Anna's upstream status JSON
@@ -45,6 +54,7 @@ class OpenSlumMonitor:
         self._lock = threading.Lock()
         self._last_refresh: float = 0.0
         self._cache: dict[str, Any] = {}
+        self._consecutive_failures: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -91,11 +101,19 @@ class OpenSlumMonitor:
             data = self._fetch_remote()
             if isinstance(data, dict):
                 self._cache = data
+                self._consecutive_failures = 0
                 log.debug("open_slum: refreshed %d sites", len(self._cache))
             else:
                 log.debug("open_slum: unexpected response type %s (expected dict)", type(data).__name__)
         except Exception as exc:  # noqa: BLE001
-            log.debug("open_slum: refresh failed: %s", exc)
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= _WARN_AFTER_N_FAILURES:
+                log.warning(
+                    "open_slum: refresh failed (%d consecutive): %s",
+                    self._consecutive_failures, exc,
+                )
+            else:
+                log.debug("open_slum: refresh failed: %s", exc)
 
     def _fetch_remote(self) -> dict[str, Any]:
         """Fetch and return the remote status JSON.
@@ -108,4 +126,11 @@ class OpenSlumMonitor:
         with httpx.Client(timeout=10.0) as client:
             resp = client.get(self._url)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            # M3: whitelist known site keys; log unexpected ones so we can
+            # extend _KNOWN_SITE_KEYS when the upstream adds new sources.
+            if isinstance(data, dict):
+                unknown = set(data.keys()) - _KNOWN_SITE_KEYS
+                if unknown:
+                    log.debug("open_slum: unknown site keys in response: %s", sorted(unknown))
+            return data
