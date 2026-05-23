@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from endless_library.bookorbit.drop import (
 from endless_library.config import Config
 from endless_library.convert import ConvertError, convert_to_epub
 from endless_library.db.bench import BenchRunRepo
+from endless_library.db.bench_jobs import BenchJobsRepo
 from endless_library.db.books import BookRepo, BookRow
 from endless_library.db.candidates import CandidateRepo
 from endless_library.db.events import EventRepo
@@ -44,6 +46,7 @@ class PipelineDeps:
     events: EventRepo
     sources: SourceAccountRepo
     bench: BenchRunRepo
+    bench_jobs: BenchJobsRepo
     mirrors: MirrorRepo
 
     @classmethod
@@ -60,6 +63,7 @@ class PipelineDeps:
             events=EventRepo(db_path),
             sources=SourceAccountRepo(db_path),
             bench=BenchRunRepo(db_path),
+            bench_jobs=BenchJobsRepo(db_path),
             mirrors=mirrors,
         )
 
@@ -243,8 +247,12 @@ def _search_with_strategies(
         deps.books.mark_stage(book.id, "searched")
         return [synth], "kindlebangla_curl"
 
+    _current_year = datetime.datetime.now().year
+    _recent_window = getattr(deps.cfg.scrapers, "recent_release_window_years", 1)
+    _is_recent = (getattr(book, "pub_year", None) or 0) >= (_current_year - _recent_window)
     for s_name in scrapers_registry.chain_for_source(
-        deps.cfg.scrapers, source=_book_source, query_title=book.title or "", is_pd=_is_pd
+        deps.cfg.scrapers, source=_book_source, query_title=book.title or "",
+        is_pd=_is_pd, is_recent_release=_is_recent
     ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
@@ -367,8 +375,12 @@ def _resolve_and_download(
         and book.pub_year < 1928
     )
     _book_source = getattr(book, "source", None)
+    _current_year2 = datetime.datetime.now().year
+    _recent_window2 = getattr(deps.cfg.scrapers, "recent_release_window_years", 1)
+    _is_recent2 = (getattr(book, "pub_year", None) or 0) >= (_current_year2 - _recent_window2)
     for s_name in scrapers_registry.chain_for_source(
-        deps.cfg.scrapers, source=_book_source, query_title=book.title or "", is_pd=_is_pd
+        deps.cfg.scrapers, source=_book_source, query_title=book.title or "",
+        is_pd=_is_pd, is_recent_release=_is_recent2
     ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)

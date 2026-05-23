@@ -12,6 +12,7 @@ EXPECTED_TABLES = (
     "source_accounts",
     "bench_runs",
     "mirrors",
+    "bench_jobs",
 )
 
 SCHEMA_SQL = """
@@ -124,6 +125,18 @@ CREATE TABLE IF NOT EXISTS metadata_cache (
     payload     BLOB NOT NULL,
     fetched_at  INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS bench_jobs (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at      TEXT NOT NULL,
+  finished_at     TEXT,
+  mode            TEXT NOT NULL,
+  status          TEXT NOT NULL CHECK(status IN ('running','done','cancelled','failed')),
+  progress_done   INTEGER NOT NULL DEFAULT 0,
+  progress_total  INTEGER NOT NULL,
+  summary_json    TEXT,
+  cancel_requested INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -169,3 +182,7 @@ def _migrate(conn) -> None:
     ):
         if new_col not in cols:
             conn.execute(ddl)
+    # Phase 6w ultrareview C2: cancel_requested flag column
+    bj_cols = {row[1] for row in conn.execute("PRAGMA table_info(bench_jobs)")}
+    if "cancel_requested" not in bj_cols:
+        conn.execute("ALTER TABLE bench_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")

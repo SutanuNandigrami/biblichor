@@ -347,6 +347,10 @@ def safe_extract_rar(
             raise ArchiveSafetyError(
                 f"bsdtar extract failed: {(r.stderr or '').strip()[:200]}"
             )
+        # Post-extraction path safety check: ensure bsdtar didn't write
+        # anything outside target_dir (e.g. via relative-path escapes
+        # that slipped past _check_member_safe).
+        _verify_extracted_paths_safe(Path(target_dir))
 
     return _extract_and_pick(
         extractor=_extract_one,
@@ -407,6 +411,29 @@ def _safe_extract_rar_rarfile(
         members=[m.filename for m in members],
         dest_dir=dest_dir,
     )
+
+
+def _verify_extracted_paths_safe(dest_dir: Path) -> None:
+    """Post-extraction guard: verify every file bsdtar wrote actually
+    lives under dest_dir. bsdtar strips leading slashes by default, but
+    archive members with relative escapes (e.g. ``../../etc/passwd``)
+    could still resolve outside the destination after joining. Remove
+    any escapee and raise ArchiveSafetyError.
+
+    This is a second line of defence behind _check_member_safe; call it
+    after each bsdtar -xf completes.
+    """
+    dest_resolved = dest_dir.resolve()
+    for p in dest_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        try:
+            real = p.resolve()
+            real.relative_to(dest_resolved)
+        except (OSError, ValueError):
+            log.warning("archive_safety: removing extracted-outside-dest file: %s", p)
+            p.unlink(missing_ok=True)
+            raise ArchiveSafetyError(f"archive escaped dest_dir: {p}")
 
 
 def _check_archive_size(path: Path, limits: SafetyLimits) -> None:

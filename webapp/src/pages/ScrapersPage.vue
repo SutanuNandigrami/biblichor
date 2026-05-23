@@ -16,6 +16,8 @@ type ScrapersResp = {
   last_run_at: Record<string, string | null>
   in_chain: Record<string, boolean>
   corpus_tags: Record<string, string[]>
+  // Phase 6w.9e: upstream status from OpenSlumMonitor
+  upstream_status?: Record<string, Record<string, unknown>>
 }
 type TestOutcome = {
   scraper: string; query: string; success: boolean
@@ -33,11 +35,19 @@ const data = ref<ScrapersResp | null>(null)
 const history = ref<Record<string, BenchHistoryEntry[]>>({})
 const benchOutput = ref<string>('')
 const benching = ref(false)
+const benchJobId = ref<number | null>(null)
+const benchProgress = ref<{ done: number; total: number }>({ done: 0, total: 0 })
+const benchEventSrc = ref<EventSource | null>(null)
 
 // Phase 6s.8 — Z-Library + cookies cards
 const zlibEmail = ref('')
 const zlibPassword = ref('')
 const zlibBusy = ref(false)
+
+// Phase 6w.5d — Mobilism credentials card
+const mobiUser = ref('')
+const mobiPass = ref('')
+const mobiBusy = ref(false)
 const cookieFile = ref<File | null>(null)
 const cookieBusy = ref(false)
 const cookieResult = ref('')
@@ -65,6 +75,48 @@ async function clearZlibCreds() {
   if (!confirm('Clear stored Z-Library credentials?')) return
   await api('/api/scrapers/zlibrary/creds', { method: 'DELETE' })
   toast.success('Z-Library credentials cleared')
+}
+
+async function saveMobilismCreds() {
+  if (!mobiUser.value || !mobiPass.value) return
+  mobiBusy.value = true
+  try {
+    await api('/api/scrapers/mobilism/creds', {
+      method: 'POST',
+      body: JSON.stringify({ username: mobiUser.value, password: mobiPass.value }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    mobiUser.value = ''
+    mobiPass.value = ''
+    toast.success('Mobilism credentials saved (encrypted)')
+  } catch (e: any) {
+    toast.error('Save failed: ' + (e?.message ?? e))
+  } finally {
+    mobiBusy.value = false
+  }
+}
+
+async function clearMobilismCreds() {
+  if (!confirm('Clear stored Mobilism credentials?')) return
+  await api('/api/scrapers/mobilism/creds', { method: 'DELETE' })
+  toast.success('Mobilism credentials cleared')
+}
+
+async function testMobilismCreds() {
+  if (!mobiUser.value || !mobiPass.value) return
+  mobiBusy.value = true
+  try {
+    await api('/api/scrapers/mobilism/test-creds', {
+      method: 'POST',
+      body: JSON.stringify({ username: mobiUser.value, password: mobiPass.value }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    toast.success('Mobilism login successful')
+  } catch (e: any) {
+    toast.error('Login failed: ' + (e?.message ?? e))
+  } finally {
+    mobiBusy.value = false
+  }
 }
 
 function pickCookieFile(e: Event) {
@@ -99,6 +151,7 @@ async function load() {
     const r = await api<BenchHistoryResp>('/api/bench/history?limit=7')
     history.value = r.history
   } catch { history.value = {} }
+  await loadExcluded()
 }
 onMounted(load)
 
@@ -107,11 +160,50 @@ async function toggle(name: string) {
   catch (e: any) { toast.error('Toggle failed', String(e?.message ?? e)) }
 }
 
-// Two-way bound array for VueDraggable.
-const orderModel = computed<string[]>({
-  get: () => data.value?.order ?? [],
-  set: (next) => { if (data.value) data.value.order = next },
+// Phase 6w.9e: PD-only scrapers set
+const PD_SET = new Set(['gutendex', 'standard_ebooks', 'oapen_doab', 'wikisource', 'doab', 'hathitrust'])
+
+// Phase 6w.9e: split order into general and PD categories
+const generalScrapers = computed<string[]>(() =>
+  (data.value?.order ?? []).filter(n => !PD_SET.has(n))
+)
+const pdScrapers = computed<string[]>(() =>
+  (data.value?.order ?? []).filter(n => PD_SET.has(n))
+)
+const generalOrderModel = computed<string[]>({
+  get: () => generalScrapers.value,
+  set: (next) => {
+    if (!data.value) return
+    const pd = pdScrapers.value
+    data.value.order = [...next, ...pd]
+  },
 })
+const pdOrderModel = computed<string[]>({
+  get: () => pdScrapers.value,
+  set: (next) => {
+    if (!data.value) return
+    const gen = generalScrapers.value
+    data.value.order = [...gen, ...next]
+  },
+})
+
+// Phase 6w.9e: Test PD chain
+const pdChainBusy = ref(false)
+const pdChainResult = ref<string>('')
+async function testPdChain() {
+  pdChainBusy.value = true
+  pdChainResult.value = ''
+  try {
+    const r = await api<{ chain: string[]; outcomes: any[] }>('/api/scrapers/test_pd_chain', { method: 'POST' })
+    pdChainResult.value = JSON.stringify(r, null, 2)
+    toast.success(`PD chain: ${r.chain.length} scrapers`)
+  } catch (e: any) {
+    pdChainResult.value = `Error: ${e?.message ?? e}`
+    toast.error('PD chain test failed')
+  } finally {
+    pdChainBusy.value = false
+  }
+}
 
 async function saveOrder() {
   if (!data.value) return
@@ -144,6 +236,33 @@ function testStateFor(name: string) {
   return testState[name]
 }
 
+
+// Phase 6w.6: per-source excluded_categories denylist state
+const _DENYLIST_SCRAPERS = ['bdebooks', 'kindlebangla']
+const excludedCategoriesByName = reactive<Record<string, string>>({})
+
+async function loadExcluded() {
+  for (const name of _DENYLIST_SCRAPERS) {
+    try {
+      const r = await api<{ excluded_categories: string[] }>(`/api/scrapers/${name}/excluded-categories`)
+      excludedCategoriesByName[name] = r.excluded_categories.join('\\n')
+    } catch { /* optional endpoint */ }
+  }
+}
+
+async function saveExcluded(name: string) {
+  const lines = (excludedCategoriesByName[name] ?? '').split('\\n').map(s => s.trim()).filter(Boolean)
+  try {
+    await api(`/api/scrapers/${name}/excluded-categories`, {
+      method: 'PUT',
+      body: JSON.stringify({ excluded_categories: lines }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    toast.success(`${name}: denylist saved`)
+  } catch (e: any) {
+    toast.error('Save failed: ' + (e?.message ?? e))
+  }
+}
 async function testNow(name: string) {
   const s = testStateFor(name)
   s.busy = true
@@ -169,16 +288,84 @@ async function testNow(name: string) {
 
 async function bench(mode: 'quick' | 'full') {
   benching.value = true
-  benchOutput.value = `Running ${mode} bench…\n(may take ${mode === 'quick' ? '~2' : '~15'} min)`
+  benchOutput.value = `Starting ${mode} bench…`
+  benchProgress.value = { done: 0, total: 0 }
   try {
-    const r = await api<{ outcomes: any[]; table: string }>(`/api/bench/run?mode=${mode}`, { method: 'POST' })
-    benchOutput.value = r.table
-    toast.success(`Bench complete (${mode})`)
-    await load()
+    const r = await api<{ job_id: number }>(
+      `/api/bench/run?mode=${mode}`, { method: 'POST' },
+    )
+    benchJobId.value = r.job_id
+    _streamJob(r.job_id)
   } catch (e: any) {
     benchOutput.value = `FAILED: ${e?.message ?? e}`
     toast.error('Bench failed', String(e?.message ?? e))
-  } finally { benching.value = false }
+    benching.value = false
+  }
+}
+
+function _streamJob(jobId: number) {
+  const es = new EventSource(`/api/bench/jobs/${jobId}/stream`)
+  benchEventSrc.value = es
+  es.addEventListener('progress', (ev: MessageEvent) => {
+    const p = JSON.parse(ev.data) as { done: number; total: number }
+    benchProgress.value = p
+    benchOutput.value = `Running… ${p.done}/${p.total}`
+  })
+  for (const term of ['done', 'cancelled', 'failed', 'gone']) {
+    es.addEventListener(term, async (ev: MessageEvent) => {
+      benching.value = false
+      es.close()
+      if (term === 'done') {
+        const r = await api<{ summary_json: string | null }>(`/api/bench/jobs/${jobId}`)
+        benchOutput.value = r.summary_json
+          ? _formatSummary(JSON.parse(r.summary_json))
+          : 'done (no outcomes)'
+        toast.success(`Bench complete`)
+        await load()
+      } else {
+        benchOutput.value = `${term}: ${ev.data}`
+        toast.error(`Bench ${term}`)
+      }
+    })
+  }
+  es.onerror = () => {
+    es.close()
+    _pollJob(jobId)
+  }
+}
+
+async function _pollJob(jobId: number) {
+  while (true) {
+    const r = await api<any>(`/api/bench/jobs/${jobId}`)
+    benchProgress.value = { done: r.progress_done, total: r.progress_total }
+    if (r.status !== 'running') {
+      benching.value = false
+      benchOutput.value = r.status === 'done' && r.summary_json
+        ? _formatSummary(JSON.parse(r.summary_json))
+        : `${r.status}`
+      await load()
+      return
+    }
+    await new Promise(res => setTimeout(res, 2000))
+  }
+}
+
+function _formatSummary(outcomes: any[]): string {
+  if (!outcomes || outcomes.length === 0) return '(no outcomes)'
+  const by: Record<string, { p: number; f: number }> = {}
+  for (const o of outcomes) {
+    by[o.scraper] = by[o.scraper] || { p: 0, f: 0 }
+    if (o.success) by[o.scraper].p++; else by[o.scraper].f++
+  }
+  const lines = ['| Scraper | Pass | Fail |', '|---|---|---|']
+  for (const [name, s] of Object.entries(by)) lines.push(`| ${name} | ${s.p} | ${s.f} |`)
+  return lines.join('\n')
+}
+
+async function cancelBench() {
+  if (!benchJobId.value) return
+  await api(`/api/bench/jobs/${benchJobId.value}/cancel`, { method: 'POST' })
+  toast.success('Cancel requested')
 }
 </script>
 
@@ -190,89 +377,215 @@ async function bench(mode: 'quick' | 'full') {
     </div>
     <p class="text-sm text-muted-foreground">Strategy order = priority. Pipeline tries each enabled strategy in turn.</p>
 
-    <VueDraggable
-      v-model="orderModel"
-      handle=".drag-handle"
-      :animation="180"
-      class="space-y-2"
-      @update="saveOrder"
-    >
-      <div
-        v-for="(name, idx) in orderModel"
-        :key="name"
-        class="flex items-start gap-3 bg-card border border-border rounded-lg p-3"
+    <!-- Phase 6w.9e: General scrapers group -->
+    <details open class="space-y-2">
+      <summary class="text-sm font-medium text-muted-foreground cursor-pointer select-none mb-2 flex items-center gap-2">
+        General scrapers
+        <span class="text-xs font-normal opacity-60">({{ generalScrapers.length }})</span>
+      </summary>
+      <VueDraggable
+        v-model="generalOrderModel"
+        handle=".drag-handle"
+        :animation="180"
+        class="space-y-2"
+        @update="saveOrder"
       >
-        <GripVertical class="drag-handle w-5 h-5 text-muted-foreground cursor-grab shrink-0 touch-none mt-0.5" />
-        <span class="text-xs text-muted-foreground font-mono w-5 text-center shrink-0 mt-0.5">{{ idx + 1 }}</span>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 flex-wrap">
-            <h4 class="font-mono text-sm break-all">{{ name }}</h4>
-            <Badge :variant="data.enabled[name] ? 'success' : 'muted'">
-              {{ data.enabled[name] ? 'enabled' : 'disabled' }}
-            </Badge>
-            <!-- Phase 6v.4: in-chain is the difference between "the toggle says
-                 on" and "the pipeline will actually try it" -->
-            <Badge :variant="data.in_chain[name] ? 'success' : 'muted'"
-                   :title="data.in_chain[name]
-                     ? 'In the pipeline chain: requests will be routed here'
-                     : 'NOT in the chain — toggling enabled alone is not enough; reorder to add'">
-              <Link2 v-if="data.in_chain[name]" class="inline-block w-3 h-3 mr-0.5" />
-              <Unlink v-else class="inline-block w-3 h-3 mr-0.5" />
-              {{ data.in_chain[name] ? 'in chain' : 'not in chain' }}
-            </Badge>
-            <Badge v-if="(data.corpus_tags[name] ?? []).length" variant="muted"
-                   :title="`Benched only on queries tagged: ${(data.corpus_tags[name] ?? []).join(', ')}`">
-              corpus: {{ (data.corpus_tags[name] ?? []).join(',') }}
-            </Badge>
+        <div
+          v-for="(name, idx) in generalOrderModel"
+          :key="name"
+          class="flex items-start gap-3 bg-card border border-border rounded-lg p-3"
+        >
+          <GripVertical class="drag-handle w-5 h-5 text-muted-foreground cursor-grab shrink-0 touch-none mt-0.5" />
+          <span class="text-xs text-muted-foreground font-mono w-5 text-center shrink-0 mt-0.5">{{ idx + 1 }}</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h4 class="font-mono text-sm break-all">{{ name }}</h4>
+              <!-- Phase 6w.9e: upstream status dot -->
+              <span v-if="data.upstream_status?.[name]"
+                    :title="`upstream: ${JSON.stringify(data.upstream_status![name])}`"
+                    :class="['inline-block w-2 h-2 rounded-full shrink-0',
+                             (data.upstream_status![name] as any)?.ok === false
+                               ? 'bg-red-500' : 'bg-emerald-500']"></span>
+              <Badge :variant="data.enabled[name] ? 'success' : 'muted'">
+                {{ data.enabled[name] ? 'enabled' : 'disabled' }}
+              </Badge>
+              <Badge :variant="data.in_chain[name] ? 'success' : 'muted'"
+                     :title="data.in_chain[name]
+                       ? 'In the pipeline chain: requests will be routed here'
+                       : 'NOT in the chain — toggling enabled alone is not enough; reorder to add'">
+                <Link2 v-if="data.in_chain[name]" class="inline-block w-3 h-3 mr-0.5" />
+                <Unlink v-else class="inline-block w-3 h-3 mr-0.5" />
+                {{ data.in_chain[name] ? 'in chain' : 'not in chain' }}
+              </Badge>
+              <Badge v-if="(data.corpus_tags[name] ?? []).length" variant="muted"
+                     :title="`Benched only on queries tagged: ${(data.corpus_tags[name] ?? []).join(', ')}`">
+                corpus: {{ (data.corpus_tags[name] ?? []).join(',') }}
+              </Badge>
+            </div>
+            <p class="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
+              <Badge v-if="!data.ever_run[name]" variant="muted"
+                     title="No bench outcome recorded yet — click Test now to find out if it works.">
+                never tested
+              </Badge>
+              <span v-else>
+                {{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)
+              </span>
+              <span v-if="(history[name] ?? []).length" class="inline-flex items-center gap-0.5">
+                <span v-for="(e, i) in (history[name] ?? [])" :key="i"
+                  :title="`${e.query} — ${e.success ? 'OK' : 'fail'}${e.duration_ms ? ' (' + e.duration_ms + 'ms)' : ''}`"
+                  :class="['inline-block w-2 h-2 rounded-full',
+                          e.success ? 'bg-emerald-500' : 'bg-red-500']"></span>
+              </span>
+            </p>
+            <div v-if="testStateFor(name).outcome || testStateFor(name).error"
+                 class="mt-2 text-[11px] font-mono break-all"
+                 :class="testStateFor(name).outcome?.success
+                         ? 'text-emerald-500' : 'text-red-500'">
+              <template v-if="testStateFor(name).outcome">
+                <span>{{ testStateFor(name).outcome!.success ? '✓' : '✗' }}</span>
+                <span class="ml-1">{{ testStateFor(name).outcome!.query }}</span>
+                <span class="ml-1 opacity-70">
+                  {{ testStateFor(name).outcome!.candidates }} cand,
+                  {{ testStateFor(name).outcome!.duration_ms }}ms
+                </span>
+                <span v-if="testStateFor(name).outcome!.note" class="ml-1 opacity-70">
+                  — {{ testStateFor(name).outcome!.note }}
+                </span>
+              </template>
+              <template v-else-if="testStateFor(name).error">
+                ✗ {{ testStateFor(name).error }}
+              </template>
+            </div>
+            <details v-if="_DENYLIST_SCRAPERS.includes(name)" class="mt-2">
+              <summary class="text-[11px] text-muted-foreground cursor-pointer select-none">
+                Excluded categories
+              </summary>
+              <textarea
+                v-model="excludedCategoriesByName[name]"
+                @blur="saveExcluded(name)"
+                class="mt-1 w-full text-[11px] font-mono bg-background border border-border rounded px-2 py-1 h-24 resize-y"
+                placeholder="One category per line…"
+              />
+            </details>
           </div>
-          <p class="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
-            <!-- Never-tested vs broken: 0% on a scraper that's never been
-                 benched means nothing; show that explicitly. -->
-            <Badge v-if="!data.ever_run[name]" variant="muted"
-                   title="No bench outcome recorded yet — click Test now to find out if it works.">
-              never tested
-            </Badge>
-            <span v-else>
-              {{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)
-            </span>
-            <span v-if="(history[name] ?? []).length" class="inline-flex items-center gap-0.5">
-              <span v-for="(e, i) in (history[name] ?? [])" :key="i"
-                :title="`${e.query} — ${e.success ? 'OK' : 'fail'}${e.duration_ms ? ' (' + e.duration_ms + 'ms)' : ''}`"
-                :class="['inline-block w-2 h-2 rounded-full',
-                        e.success ? 'bg-emerald-500' : 'bg-red-500']"></span>
-            </span>
-          </p>
-          <!-- Phase 6v.4: inline test result -->
-          <div v-if="testStateFor(name).outcome || testStateFor(name).error"
-               class="mt-2 text-[11px] font-mono break-all"
-               :class="testStateFor(name).outcome?.success
-                       ? 'text-emerald-500' : 'text-red-500'">
-            <template v-if="testStateFor(name).outcome">
-              <span>{{ testStateFor(name).outcome!.success ? '✓' : '✗' }}</span>
-              <span class="ml-1">{{ testStateFor(name).outcome!.query }}</span>
-              <span class="ml-1 opacity-70">
-                {{ testStateFor(name).outcome!.candidates }} cand,
-                {{ testStateFor(name).outcome!.duration_ms }}ms
-              </span>
-              <span v-if="testStateFor(name).outcome!.note" class="ml-1 opacity-70">
-                — {{ testStateFor(name).outcome!.note }}
-              </span>
-            </template>
-            <template v-else-if="testStateFor(name).error">
-              ✗ {{ testStateFor(name).error }}
-            </template>
+          <div class="flex flex-col gap-1 shrink-0">
+            <Button size="sm" variant="outline" :loading="testStateFor(name).busy" @click="testNow(name)">
+              <FlaskConical class="w-4 h-4" /> Test now
+            </Button>
+            <Button size="sm" variant="ghost" @click="toggle(name)">
+              {{ data.enabled[name] ? 'Disable' : 'Enable' }}
+            </Button>
           </div>
         </div>
-        <div class="flex flex-col gap-1 shrink-0">
-          <Button size="sm" variant="outline" :loading="testStateFor(name).busy" @click="testNow(name)">
-            <FlaskConical class="w-4 h-4" /> Test now
-          </Button>
-          <Button size="sm" variant="ghost" @click="toggle(name)">
-            {{ data.enabled[name] ? 'Disable' : 'Enable' }}
-          </Button>
+      </VueDraggable>
+    </details>
+
+    <!-- Phase 6w.9e: Public-domain scrapers group -->
+    <details open class="space-y-2">
+      <summary class="text-sm font-medium text-muted-foreground cursor-pointer select-none mb-2 flex items-center gap-2">
+        Public-domain scrapers
+        <span class="text-xs font-normal opacity-60">({{ pdScrapers.length }})</span>
+        <Badge variant="muted" class="text-xs">fires-when: PD</Badge>
+      </summary>
+      <VueDraggable
+        v-model="pdOrderModel"
+        handle=".drag-handle"
+        :animation="180"
+        class="space-y-2"
+        @update="saveOrder"
+      >
+        <div
+          v-for="(name, idx) in pdOrderModel"
+          :key="name"
+          class="flex items-start gap-3 bg-card border border-border rounded-lg p-3"
+        >
+          <GripVertical class="drag-handle w-5 h-5 text-muted-foreground cursor-grab shrink-0 touch-none mt-0.5" />
+          <span class="text-xs text-muted-foreground font-mono w-5 text-center shrink-0 mt-0.5">{{ idx + 1 }}</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h4 class="font-mono text-sm break-all">{{ name }}</h4>
+              <!-- upstream status dot -->
+              <span v-if="data.upstream_status?.[name]"
+                    :title="`upstream: ${JSON.stringify(data.upstream_status![name])}`"
+                    :class="['inline-block w-2 h-2 rounded-full shrink-0',
+                             (data.upstream_status![name] as any)?.ok === false
+                               ? 'bg-red-500' : 'bg-emerald-500']"></span>
+              <Badge variant="muted" title="fires-when: PD — promoted to front for pre-1928 books">
+                fires-when: PD
+              </Badge>
+              <Badge :variant="data.enabled[name] ? 'success' : 'muted'">
+                {{ data.enabled[name] ? 'enabled' : 'disabled' }}
+              </Badge>
+              <Badge :variant="data.in_chain[name] ? 'success' : 'muted'"
+                     :title="data.in_chain[name]
+                       ? 'In the pipeline chain: requests will be routed here'
+                       : 'NOT in the chain — toggling enabled alone is not enough; reorder to add'">
+                <Link2 v-if="data.in_chain[name]" class="inline-block w-3 h-3 mr-0.5" />
+                <Unlink v-else class="inline-block w-3 h-3 mr-0.5" />
+                {{ data.in_chain[name] ? 'in chain' : 'not in chain' }}
+              </Badge>
+              <Badge v-if="(data.corpus_tags[name] ?? []).length" variant="muted"
+                     :title="`Benched only on queries tagged: ${(data.corpus_tags[name] ?? []).join(', ')}`">
+                corpus: {{ (data.corpus_tags[name] ?? []).join(',') }}
+              </Badge>
+            </div>
+            <p class="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
+              <Badge v-if="!data.ever_run[name]" variant="muted"
+                     title="No bench outcome recorded yet — click Test now to find out if it works.">
+                never tested
+              </Badge>
+              <span v-else>
+                {{ ((data.success_rates_30d[name] ?? 0) * 100).toFixed(0) }}% success (30d)
+              </span>
+              <span v-if="(history[name] ?? []).length" class="inline-flex items-center gap-0.5">
+                <span v-for="(e, i) in (history[name] ?? [])" :key="i"
+                  :title="`${e.query} — ${e.success ? 'OK' : 'fail'}${e.duration_ms ? ' (' + e.duration_ms + 'ms)' : ''}`"
+                  :class="['inline-block w-2 h-2 rounded-full',
+                          e.success ? 'bg-emerald-500' : 'bg-red-500']"></span>
+              </span>
+            </p>
+            <div v-if="testStateFor(name).outcome || testStateFor(name).error"
+                 class="mt-2 text-[11px] font-mono break-all"
+                 :class="testStateFor(name).outcome?.success
+                         ? 'text-emerald-500' : 'text-red-500'">
+              <template v-if="testStateFor(name).outcome">
+                <span>{{ testStateFor(name).outcome!.success ? '✓' : '✗' }}</span>
+                <span class="ml-1">{{ testStateFor(name).outcome!.query }}</span>
+                <span class="ml-1 opacity-70">
+                  {{ testStateFor(name).outcome!.candidates }} cand,
+                  {{ testStateFor(name).outcome!.duration_ms }}ms
+                </span>
+                <span v-if="testStateFor(name).outcome!.note" class="ml-1 opacity-70">
+                  — {{ testStateFor(name).outcome!.note }}
+                </span>
+              </template>
+              <template v-else-if="testStateFor(name).error">
+                ✗ {{ testStateFor(name).error }}
+              </template>
+            </div>
+            <details v-if="_DENYLIST_SCRAPERS.includes(name)" class="mt-2">
+              <summary class="text-[11px] text-muted-foreground cursor-pointer select-none">
+                Excluded categories
+              </summary>
+              <textarea
+                v-model="excludedCategoriesByName[name]"
+                @blur="saveExcluded(name)"
+                class="mt-1 w-full text-[11px] font-mono bg-background border border-border rounded px-2 py-1 h-24 resize-y"
+                placeholder="One category per line…"
+              />
+            </details>
+          </div>
+          <div class="flex flex-col gap-1 shrink-0">
+            <Button size="sm" variant="outline" :loading="testStateFor(name).busy" @click="testNow(name)">
+              <FlaskConical class="w-4 h-4" /> Test now
+            </Button>
+            <Button size="sm" variant="ghost" @click="toggle(name)">
+              {{ data.enabled[name] ? 'Disable' : 'Enable' }}
+            </Button>
+          </div>
         </div>
-      </div>
-    </VueDraggable>
+      </VueDraggable>
+    </details>
 
     <div v-if="unusedScrapers.length" class="space-y-2">
       <p class="text-xs text-muted-foreground px-1">Unused — enable to add to the chain.</p>
@@ -319,6 +632,25 @@ async function bench(mode: 'quick' | 'full') {
       </div>
     </div>
 
+    <!-- Phase 6w.9e: Test PD chain -->
+    <Card class="p-4 space-y-3">
+      <h2 class="font-semibold flex items-center gap-2 text-sm">
+        <FlaskConical class="w-4 h-4 text-primary" /> Test PD chain
+      </h2>
+      <p class="text-[11px] text-muted-foreground leading-relaxed">
+        Builds the scraper chain that would run for a classic pre-1928 public-domain title
+        (Pride and Prejudice / Austen, <code class="font-mono">is_pd=True</code>) and runs
+        a live bench pass. Verifies that PD scrapers are promoted to the front of the chain.
+      </p>
+      <div class="flex gap-2">
+        <Button size="sm" :loading="pdChainBusy" @click="testPdChain">
+          <Play class="w-4 h-4" /> Run PD chain test
+        </Button>
+      </div>
+      <pre v-if="pdChainResult"
+           class="bg-secondary p-3 rounded text-xs whitespace-pre-wrap overflow-x-auto max-h-64">{{ pdChainResult }}</pre>
+    </Card>
+
     <Card class="p-4">
       <div class="flex items-center gap-2 mb-3">
         <Cpu class="w-4 h-4 text-primary" />
@@ -327,9 +659,13 @@ async function bench(mode: 'quick' | 'full') {
       <p class="text-xs text-muted-foreground mb-3">
         Runs a curated set of queries against each enabled strategy to measure real-world success.
       </p>
-      <div class="flex gap-2 mb-3">
-        <Button :loading="benching" @click="bench('quick')"><Play class="w-4 h-4" /> Quick (3 queries)</Button>
-        <Button :loading="benching" variant="outline" @click="bench('full')">Full (10 queries)</Button>
+      <div class="flex gap-2 mb-3 items-center flex-wrap">
+        <Button :loading="benching" @click="bench('quick')"><Play class="w-4 h-4" /> Quick</Button>
+        <Button :loading="benching" variant="outline" @click="bench('full')">Full</Button>
+        <Button v-if="benching" variant="ghost" size="sm" @click="cancelBench">Cancel</Button>
+        <span v-if="benching && benchProgress.total > 0" class="text-xs text-muted-foreground font-mono">
+          {{ benchProgress.done }}/{{ benchProgress.total }}
+        </span>
       </div>
       <pre v-if="benchOutput" class="bg-secondary p-3 rounded text-xs whitespace-pre-wrap overflow-x-auto">{{ benchOutput }}</pre>
     </Card>
@@ -360,6 +696,39 @@ async function bench(mode: 'quick' | 'full') {
         <Button variant="ghost" size="sm" @click="clearZlibCreds">Clear stored creds</Button>
         <Button size="sm" :disabled="zlibBusy || !zlibEmail || !zlibPassword" @click="saveZlibCreds">
           {{ zlibBusy ? 'Saving...' : 'Save' }}
+        </Button>
+      </div>
+    </Card>
+
+    <Card class="p-4 space-y-3">
+      <h2 class="font-semibold flex items-center gap-2 text-sm">
+        <KeyRound class="w-4 h-4 text-primary" /> Mobilism credentials (optional)
+      </h2>
+      <p class="text-[11px] text-muted-foreground leading-relaxed">
+        Save Mobilism forum username + password to enable the
+        <code class="font-mono">mobilism_books</code> scraper. biblichor logs in via phpBB,
+        caches the session for 24 h, and extracts Mediafire links from the English Books subforum.
+        Stored encrypted in <code class="font-mono">library.db</code>.
+      </p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label class="text-xs space-y-1">
+          <span class="text-muted-foreground">Mobilism username</span>
+          <input v-model="mobiUser" type="text" autocomplete="username"
+            class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+        </label>
+        <label class="text-xs space-y-1">
+          <span class="text-muted-foreground">Mobilism password</span>
+          <input v-model="mobiPass" type="password" autocomplete="off"
+            class="w-full bg-background border border-border rounded px-2 py-1.5 text-sm" />
+        </label>
+      </div>
+      <div class="flex gap-2 justify-end">
+        <Button variant="ghost" size="sm" @click="clearMobilismCreds">Clear stored creds</Button>
+        <Button size="sm" variant="outline" :disabled="mobiBusy || !mobiUser || !mobiPass" @click="testMobilismCreds">
+          {{ mobiBusy ? 'Testing...' : 'Test login' }}
+        </Button>
+        <Button size="sm" :disabled="mobiBusy || !mobiUser || !mobiPass" @click="saveMobilismCreds">
+          {{ mobiBusy ? 'Saving...' : 'Save' }}
         </Button>
       </div>
     </Card>

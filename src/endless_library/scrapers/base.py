@@ -54,3 +54,11 @@ def parse_filesize(text: str) -> int | None:
     unit = m.group(2).upper()
     mult = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}[unit]
     return int(val * mult)
+
+
+class NotConfigured(Exception):
+    """Raised when a scraper's required credentials / configuration are missing.
+
+    Phase 6w.9b: moved here from scrapers.mobilism so bench.py can catch it
+    without importing the mobilism module.
+    """

@@ -1,63 +1,75 @@
-"""Anna's Archive via CloakBrowser — Chromium with C++ source-level stealth.
+"""annas_cloakbrowser — Phase 6w.2 rewrite.
 
-Drop-in Playwright API. Same Anna's parser. Use when standard Playwright
-gets fingerprinted (rare on Anna's specifically but useful insurance).
+Now talks to the `cf-bypass` sidecar (sarperavci/CloudflareBypassForScraping).
+Sidecar runs DrissionPage + patched Chromium inside the biblichor compose
+network and resolves Cloudflare interactive challenges. Same registry
+slot + name as before (so cfg.scrapers.order doesn't churn), but the
+internals are replaced.
+
+provider stays "annas" to satisfy the Candidate.provider Literal constraint.
 """
-
 from __future__ import annotations
 
 import logging
-import random
-import time
+from urllib.parse import urlencode
 
-from endless_library.config import ScrapersCfg
-from endless_library.scrapers.annas_curl import AnnasArchiveCurl
+from bs4 import BeautifulSoup
+
+from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
+from endless_library.scrapers import annas_domains, cf_bypass_client
 
 log = logging.getLogger(__name__)
 
 
-class AnnasArchiveCloakBrowser(AnnasArchiveCurl):
+class AnnasArchiveCloakBrowser:
     name = "annas_cloakbrowser"
     provider = "annas"
 
-    def __init__(self, cfg: ScrapersCfg, *, headless: bool = True, humanize: bool = True) -> None:
-        super().__init__(cfg)
-        self.headless = headless
-        self.humanize = humanize
+    def __init__(self, cfg, **kw):
+        self._cfg = cfg
 
-    def _get(self, url: str) -> str | None:
+    def search(self, query: SearchQuery) -> list[Candidate]:
+        host = annas_domains.next_mirror()
+        q = urlencode({"q": query.title, "ext": "epub", "sort": ""})
+        url = f"https://{host}/search?{q}"
         try:
-            from cloakbrowser import launch
-        except ImportError:
-            log.warning("cloakbrowser not installed; install with: pip install cloakbrowser")
-            return None
-        from playwright.sync_api import TimeoutError as PWTimeout
-
-        sleep_s = self.bucket.acquire(url)
-        if sleep_s > 0:
-            time.sleep(sleep_s)
-        else:
-            time.sleep(self.cfg.request_delay_seconds + random.uniform(0.3, 1.0))
-
-        try:
-            kwargs: dict = {"headless": self.headless}
-            try:
-                browser = launch(humanize=self.humanize, **kwargs)
-            except TypeError:
-                browser = launch(**kwargs)
-            ctx = browser.new_context()
-            page = ctx.new_page()
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            except PWTimeout:
-                log.warning("cloakbrowser nav timeout: %s", url)
-                browser.close()
-                return None
-            html = page.content()
-            self._last_status = 200
-            browser.close()
-            return html
+            html = cf_bypass_client.resolve(url)
+            annas_domains.mark_success(host)
         except Exception as e:
-            log.warning("annas_cloakbrowser error %s: %s", url, e)
-            self._last_status = None
+            log.warning("cf-bypass resolve failed for %s: %s", url, e)
+            annas_domains.mark_cool(host)
+            return []
+        return _parse_search_results(html, host)
+
+    def resolve_cdn(self, candidate: Candidate) -> DownloadHandle | None:
+        try:
+            html = cf_bypass_client.resolve(candidate.detail_url)
+        except Exception as e:
+            log.warning("cf-bypass resolve failed for %s: %s", candidate.detail_url, e)
             return None
+        soup = BeautifulSoup(html, "lxml")
+        for a in soup.select("a[href*='/d3/y/']"):
+            return DownloadHandle(url=a["href"], headers={})
+        return None
+
+
+def _parse_search_results(html: str, host: str) -> list[Candidate]:
+    soup = BeautifulSoup(html, "lxml")
+    out: list[Candidate] = []
+    for a in soup.select("a[href^='/md5/']"):
+        md5_url = f"https://{host}{a['href']}"
+        title = a.get_text(" ", strip=True)[:200]
+        out.append(Candidate(
+            title=title,
+            provider="annas",
+            md5=None,
+            author=None,
+            language=None,
+            format="epub",
+            filesize_bytes=None,
+            year=None,
+            publisher=None,
+            edition_hints="",
+            detail_url=md5_url,
+        ))
+    return out

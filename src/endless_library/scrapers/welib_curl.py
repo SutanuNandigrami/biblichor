@@ -27,6 +27,7 @@ from endless_library.flaresolverr import FlareSolverr, FlareSolverrError
 from endless_library.scrapers.base import BOOK_EXTENSIONS, parse_filesize
 from endless_library.scrapers.rate_limit import TokenBucket
 from endless_library.scrapers.welib_cookies import parse_cookie_string
+from endless_library.scrapers.http_client import make_client
 
 log = logging.getLogger(__name__)
 
@@ -222,17 +223,10 @@ class WelibCurl:
 
     def _ipfs_reachable(self, url: str, *, timeout: float = 8.0) -> bool:
         """HEAD-probe an IPFS URL. Returns True only on 2xx response."""
-        import httpx
-
         try:
-            with httpx.Client(
-                timeout=timeout,
-                follow_redirects=True,
-                verify=False,  # public IPFS gateways often have cert issues
-                headers={"User-Agent": "endless-library/0.1"},
-            ) as c:
-                r = c.head(url)
-                return 200 <= r.status_code < 300
+            c = make_client(timeout=timeout)
+            r = c.head(url, allow_redirects=True, verify=False)
+            return 200 <= r.status_code < 300
         except Exception as e:
             log.info("welib IPFS HEAD failed for %s: %s", url[:80], e)
             return False

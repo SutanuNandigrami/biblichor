@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures as _cf
 import logging
 import time
 from collections.abc import Iterable
@@ -12,6 +13,7 @@ from endless_library.config import Config
 from endless_library.db.bench import BenchRunRepo
 from endless_library.domain.models import SearchQuery
 from endless_library.scrapers import registry
+from endless_library.scrapers.base import NotConfigured
 
 log = logging.getLogger(__name__)
 
@@ -129,6 +131,19 @@ def run_bench(
     for s_name in strats:
         try:
             scraper = registry.build(s_name, cfg.scrapers)
+        except NotConfigured as e:
+            log.info("bench: %s not configured, recording per-query outcomes", s_name)
+            _nc_scoped = queries_for_scraper(all_queries, s_name, tag_map)
+            for _ncq in _nc_scoped:
+                _note = f"creds-missing: {e}"
+                outcomes.append(BenchOutcome(
+                    scraper=s_name, query=_ncq.title, success=False,
+                    duration_ms=0, candidates=0, matched_isbn=False, note=_note,
+                ))
+                if repo:
+                    repo.record(scraper=s_name, query=_ncq.title, success=False,
+                                duration_ms=0, notes=_note)
+            continue
         except Exception as e:
             log.warning("could not build %s: %s", s_name, e)
             continue
@@ -140,7 +155,20 @@ def run_bench(
                 tag_map.get(s_name),
             )
             continue
+        timeout_sec = float(getattr(cfg.bench, "per_query_timeout_sec", 20))
+        breaker_limit = int(getattr(cfg.bench, "circuit_break_after_consecutive_fails", 3))
+        consecutive_fails = 0
         for q in scoped:
+            if consecutive_fails >= breaker_limit:
+                outcomes.append(BenchOutcome(
+                    scraper=s_name, query=q.title, success=False, duration_ms=0,
+                    candidates=0, matched_isbn=False,
+                    note=f"circuit-broken: skipped after {breaker_limit} consecutive failures",
+                ))
+                if repo:
+                    repo.record(scraper=s_name, query=q.title, success=False,
+                                duration_ms=0, notes="circuit-broken")
+                continue
             sq = SearchQuery(
                 title=q.title,
                 author=q.author,
@@ -154,7 +182,19 @@ def run_bench(
             matched = False
             note = ""
             try:
-                cands = scraper.search(sq)
+                ex = _cf.ThreadPoolExecutor(max_workers=1)
+                try:
+                    fut = ex.submit(scraper.search, sq)
+                    try:
+                        cands = fut.result(timeout=timeout_sec)
+                    except _cf.TimeoutError:
+                        # Hard cancellation requires async-native scrapers; thread runs
+                        # to its own network timeout. Don't wait for it.
+                        ex.shutdown(wait=False, cancel_futures=True)
+                        raise
+                    ex.shutdown(wait=True)
+                except _cf.TimeoutError:
+                    raise
                 n_cands = len(cands)
                 if cands:
                     # Match if any candidate's title/author roughly matches AND format ok.
@@ -166,10 +206,16 @@ def run_bench(
                             matched = True
                             break
                     success = matched
+            except _cf.TimeoutError:
+                note = f"timeout after {timeout_sec}s"
             except NotImplementedError as e:
                 note = f"stub: {e}"
             except Exception as e:
                 note = f"{type(e).__name__}: {e}"
+            if not success:
+                consecutive_fails += 1
+            else:
+                consecutive_fails = 0
             dur = int((time.monotonic() - t0) * 1000)
             outcomes.append(
                 BenchOutcome(

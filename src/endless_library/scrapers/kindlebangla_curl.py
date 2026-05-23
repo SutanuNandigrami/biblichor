@@ -28,10 +28,10 @@ import logging
 from typing import Any
 from urllib.parse import quote_plus, urljoin
 
-import httpx
+from endless_library.scrapers.http_client import make_client
 from bs4 import BeautifulSoup
 
-from endless_library.config import ScrapersCfg
+from endless_library.config import KindleBanglaCfg, ScrapersCfg
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.scrapers.drive_helpers import (
     find_in_folder,
@@ -49,11 +49,12 @@ USER_AGENT = "Mozilla/5.0 (compatible; biblichor/0.1; +kindlebangla scraper)"
 class KindleBanglaCurl:
     """Strategy entry: kindlebangla_curl."""
 
+    name = "kindlebangla_curl"
     provider = "kindlebangla"
 
     def __init__(
         self,
-        cfg: ScrapersCfg,
+        cfg: KindleBanglaCfg,
         *,
         http_get: Any | None = None,
         # http_redirect: callable(url) -> (status, headers, body) — used by
@@ -67,6 +68,20 @@ class KindleBanglaCurl:
     # ---------------- Public API ----------------
 
     def search(self, query: SearchQuery) -> list[Candidate]:
+        results = self._search_upstream(query)
+        excluded = set(getattr(self.cfg, "excluded_categories", None) or [])
+        if not excluded:
+            return results
+        filtered = []
+        for c in results:
+            # categories tuple from the card; also check edition_hints for compat
+            cats = set(c.categories) | ({c.edition_hints} if c.edition_hints else set())
+            if cats & excluded:
+                continue
+            filtered.append(c)
+        return filtered
+
+    def _search_upstream(self, query: SearchQuery) -> list[Candidate]:
         url = f"{BASE}/index.php?search={quote_plus(query.title)}"
         html = self._get_text(url)
         if not html:
@@ -158,6 +173,7 @@ class KindleBanglaCurl:
                     publisher=None,
                     edition_hints=category or "",
                     detail_url=urljoin(BASE, a.get("href", "")),
+                    categories=(category,) if category else (),
                     raw={"slug": slug, "cover_url": cover},
                 )
             )
@@ -188,10 +204,9 @@ class KindleBanglaCurl:
                 return None
             return body.decode("utf-8", errors="replace") if isinstance(body, bytes) else body
         try:
-            r = httpx.get(
+            r = make_client(timeout=20.0).get(
                 url,
-                timeout=20.0,
-                follow_redirects=True,
+                allow_redirects=True,
                 headers={"User-Agent": USER_AGENT},
             )
         except Exception as e:
@@ -208,10 +223,9 @@ class KindleBanglaCurl:
                 return headers.get("Location") or headers.get("location")
             return None
         try:
-            r = httpx.get(
+            r = make_client(timeout=15.0).get(
                 url,
-                timeout=15.0,
-                follow_redirects=False,
+                allow_redirects=False,
                 headers={"User-Agent": USER_AGENT},
             )
         except Exception as e:

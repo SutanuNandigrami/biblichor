@@ -16,6 +16,7 @@ from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.domain.scoring import _is_non_latin as _query_is_non_latin
 from endless_library.scrapers.base import ANNAS_CDN_REGEX, parse_filesize, url_has_book_ext
 from endless_library.scrapers.rate_limit import MirrorRotator, TokenBucket
+from endless_library.scrapers import annas_domains as _annas_domains
 
 log = logging.getLogger(__name__)
 
@@ -112,12 +113,15 @@ class AnnasArchiveCurl:
     # ----- Internals -----
 
     def _get(self, url: str) -> str | None:
+        from urllib.parse import urlparse as _urlparse
         sleep = self.bucket.acquire(url)
         if sleep > 0:
             log.debug("rate-limit sleep %.1fs for %s", sleep, url)
             time.sleep(sleep)
         else:
             time.sleep(self.cfg.request_delay_seconds + random.uniform(0.5, 2.0))
+        host = _urlparse(url).netloc
+        self._last_host = host
         if self._http_get is not None:
             status, text = self._http_get(url, headers=DEFAULT_HEADERS)
         else:
@@ -126,15 +130,28 @@ class AnnasArchiveCurl:
             try:
                 r = cf.get(url, headers=DEFAULT_HEADERS, impersonate="chrome120", timeout=30)
                 status, text = r.status_code, r.text
+                # Phase 6w.2: retry once on gateway errors with next mirror
+                if status in (502, 503, 504):
+                    _annas_domains.mark_cool(host)
+                    next_host = _annas_domains.next_mirror()
+                    retry_url = url.replace(host, next_host, 1)
+                    host = next_host
+                    self._last_host = next_host
+                    log.info("annas_curl: gateway %d, retrying with %s", status, next_host)
+                    r = cf.get(retry_url, headers=DEFAULT_HEADERS, impersonate="chrome120", timeout=30)
+                    status, text = r.status_code, r.text
             except Exception as e:
                 log.warning("curl_cffi failed for %s: %s", url, e)
+                _annas_domains.mark_cool(host)
                 self._last_status = None
                 return None
         self._last_status = status
         if status == 200:
+            _annas_domains.mark_success(host)
             return text
         log.warning("HTTP %d for %s", status, url)
-        if status in (403, 429, 503):
+        if status in (403, 429, 502, 503, 504):
+            _annas_domains.mark_cool(host)
             self.mirrors.next_after_failure()
         return None
 
@@ -401,3 +418,4 @@ async def _probe_slow_servers_async(urls: list[str], *, timeout: float = 15.0) -
                 if not t.done():
                     t.cancel()
     return None
+

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import os
@@ -160,6 +161,9 @@ def create_app(*, cfg: Config, deps: PipelineDeps, config_path: Path) -> FastAPI
     app.state.cfg = cfg
     app.state.deps = deps
     app.state.config_path = config_path
+    from endless_library.scrapers.open_slum import OpenSlumMonitor
+    app.state.open_slum_monitor = OpenSlumMonitor()
+    app.state.bookorbit_upgrade_lock = asyncio.Lock()
     api.register(app)
 
     dist = Path(__file__).resolve().parent.parent.parent / "webapp" / "dist"

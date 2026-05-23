@@ -103,6 +103,38 @@ class CalibreCfg(BaseModel):
     conversion_timeout_seconds: int = 300
 
 
+class BdebooksCfg(BaseModel):
+    excluded_categories: list[str] = Field(default_factory=lambda: [
+        "Islamic Books",
+        "ইসলামিক বই",
+        "Islamic",
+        "Islam",
+        "Religion",
+        "Religious",
+        "ধর্ম",
+        "ধর্মীয়",
+        "Hadith",
+        "হাদিস",
+        "Quran",
+        "কোরআন",
+        "Prophet",
+        "নবী",
+        "Islamic Studies",
+        "ইসলামিক স্টাডিজ",
+    ])
+
+
+class KindleBanglaCfg(BaseModel):
+    excluded_categories: list[str] = Field(default_factory=lambda: [
+        "Islamic",
+        "Religion",
+        "Religious",
+        "ধর্মীয়",
+        "Hadith",
+        "Quran",
+    ])
+
+
 class ScrapersCfg(BaseModel):
     order: list[str] = Field(default_factory=list)
     enabled: dict[str, bool] = Field(default_factory=dict)
@@ -123,6 +155,17 @@ class ScrapersCfg(BaseModel):
     # committed to config.yaml. Injected into both FlareSolverr and Playwright
     # so /fast_download/ works without the slow-download countdown.
     welib_auth_cookie: str | None = None
+    # Phase 6w.5: books published within this many years of today are
+    # considered "recent releases" and get mobilism_books promoted to
+    # the front of the scraper chain.
+    recent_release_window_years: int = 1
+    # Phase 6w.5: Mobilism forum credentials (stored via secrets store;
+    # these fields are populated from the encrypted DB at runtime by
+    # the scraper, not from config.yaml directly).
+    mobilism_username: str = ""
+    mobilism_password: str = ""
+    bdebooks: BdebooksCfg = Field(default_factory=BdebooksCfg)
+    kindlebangla: KindleBanglaCfg = Field(default_factory=KindleBanglaCfg)
 
 
 class ScoringCfg(BaseModel):
@@ -231,6 +274,13 @@ class StorageCfg(BaseModel):
     hybrid_mode: str = "mirror"  # "mirror" or "scheduled"
 
 
+
+
+class BenchCfg(BaseModel):
+    per_query_timeout_sec: int = 20
+    circuit_break_after_consecutive_fails: int = 3
+
+
 class Config(BaseModel):
     general: GeneralCfg = GeneralCfg()
     kindle: KindleCfg = KindleCfg()
@@ -242,6 +292,7 @@ class Config(BaseModel):
     security: SecurityCfg = SecurityCfg()
     storage: StorageCfg = StorageCfg()
     bookorbit: BookOrbitCfg = BookOrbitCfg()
+    bench: BenchCfg = BenchCfg()
 
     def public_view(self) -> dict:
         d = self.model_dump()

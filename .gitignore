@@ -20,3 +20,4 @@ config/.env
 # Phase 6 / cutover artifacts
 library/
 config/bookorbit.json
+*.py.bak

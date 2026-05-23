@@ -72,6 +72,32 @@ scrapers:
   - https://annas-archive.gl
   - https://annas-archive.pk
   - https://annas-archive.gd
+  bdebooks:
+    excluded_categories:
+      - "Islamic Books"
+      - "ইসলামিক বই"
+      - "Islamic"
+      - "Islam"
+      - "Religion"
+      - "Religious"
+      - "ধর্ম"
+      - "ধর্মীয়"
+      - "Hadith"
+      - "হাদিস"
+      - "Quran"
+      - "কোরআন"
+      - "Prophet"
+      - "নবী"
+      - "Islamic Studies"
+      - "ইসলামিক স্টাডিজ"
+  kindlebangla:
+    excluded_categories:
+      - "Islamic"
+      - "Religion"
+      - "Religious"
+      - "ধর্মীয়"
+      - "Hadith"
+      - "Quran"
 scoring:
   isbn_match: 35
   title_weight: 25

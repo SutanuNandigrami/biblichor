@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+from endless_library.db.bench_jobs import BenchJobsRepo
 
 from endless_library.bench import format_table, load_queries, run_bench
 from endless_library.config import save_config
@@ -51,6 +54,11 @@ class _BOChangePasswordPayload(BaseModel):
 
 class _ZlibCredsPayload(BaseModel):
     email: str
+    password: str
+
+
+class _MobilismCredsPayload(BaseModel):
+    username: str
     password: str
 
 
@@ -157,6 +165,30 @@ def _compute_bookorbit_urls(request: Request, cfg) -> dict[str, str]:
         # Used by biblichor's own startup-probe / SPA fallback logic
         "base": base,
     }
+
+
+# Phase 6w ultrareview C3: consolidated scraper→site mapping lives in registry.
+from endless_library.scrapers.registry import SCRAPER_TO_OPEN_SLUM_SITE as _SCRAPER_TO_SITE
+
+
+def _scraper_upstream_status(request) -> dict[str, dict]:
+    """Return per-scraper upstream status from OpenSlumMonitor, if available.
+
+    Only emits entries for scrapers that have a known site mapping AND for
+    which the monitor has data.  Scrapers without a mapping are omitted.
+    """
+    slum = getattr(request.app.state, "open_slum_monitor", None)
+    if slum is None:
+        return {}
+    result: dict[str, dict] = {}
+    seen_sites: dict[str, dict | None] = {}
+    for scraper_name, site_name in _SCRAPER_TO_SITE.items():
+        if site_name not in seen_sites:
+            seen_sites[site_name] = slum.get(site_name)
+        status = seen_sites[site_name]
+        if status is not None:
+            result[scraper_name] = status
+    return result
 
 
 def register(app: FastAPI) -> None:
@@ -338,7 +370,6 @@ def register(app: FastAPI) -> None:
                 ).rowcount
             conn.commit()
         return {"deleted": n, "hard": payload.hard}
-
     @router.post("/books/{book_id}/delete")
     def soft_delete(book_id: int, request: Request):
         deps = request.app.state.deps
@@ -624,6 +655,8 @@ def register(app: FastAPI) -> None:
             # Specialised corpus this scraper is benched against; empty
             # tuple = general-purpose (sees every query).
             "corpus_tags": {n: sorted(corpus_tags.get(n, frozenset())) for n in all_names},
+            # Phase 6w.9e: upstream status from OpenSlumMonitor (optional)
+            "upstream_status": _scraper_upstream_status(request),
         }
 
     @router.post("/scrapers/{name}/toggle")
@@ -642,6 +675,29 @@ def register(app: FastAPI) -> None:
         deps.cfg.scrapers.order = [str(x) for x in order]
         save_config(deps.cfg, request.app.state.config_path)
         return {"ok": True, "order": deps.cfg.scrapers.order}
+
+
+    @router.get("/scrapers/{name}/excluded-categories")
+    def get_excluded_categories(name: str, request: Request):
+        deps = request.app.state.deps
+        per_source = getattr(deps.cfg.scrapers, name, None)
+        if per_source is None:
+            raise HTTPException(404, f"no per-source config for: {name}")
+        cats = getattr(per_source, "excluded_categories", None) or []
+        return {"excluded_categories": cats}
+
+    @router.put("/scrapers/{name}/excluded-categories")
+    def put_excluded_categories(name: str, payload: dict, request: Request):
+        deps = request.app.state.deps
+        per_source = getattr(deps.cfg.scrapers, name, None)
+        if per_source is None:
+            raise HTTPException(404, f"no per-source config for: {name}")
+        cats = payload.get("excluded_categories")
+        if not isinstance(cats, list):
+            raise HTTPException(400, "excluded_categories must be a list")
+        per_source.excluded_categories = [str(c) for c in cats]
+        save_config(deps.cfg, request.app.state.config_path)
+        return {"ok": True, "excluded_categories": per_source.excluded_categories}
 
     @router.get("/bench/history")
     def bench_history(request: Request, limit: int = 7):
@@ -671,18 +727,116 @@ def register(app: FastAPI) -> None:
         }
         return {"history": out, "success_rates_30d": rates}
 
-    @router.post("/bench/run")
+    @router.post("/bench/run", status_code=202)
     async def run_bench_endpoint(request: Request, mode: str = "quick"):
         deps = request.app.state.deps
         qs, quick_idx = load_queries()
         if mode == "quick":
             qs = [qs[i] for i in quick_idx if i < len(qs)]
-        from functools import partial
+        from endless_library.bench import load_corpus_tags, queries_for_scraper
+        from endless_library.scrapers import registry
+        strats = registry.enabled_order(deps.cfg.scrapers)
+        # I5: load corpus_tags once -- not once per scraper inside the worker
+        # (each call to run_bench(corpus_tags=None) would reload from disk).
+        try:
+            corpus_tags = load_corpus_tags()
+        except Exception as _e:
+            log.warning("bench: could not load corpus_tags: %s", _e)
+            corpus_tags = {}
+        # I6: progress_total = actual query count per scraper (not len*len).
+        # Each scraper runs only against its corpus-filtered subset; using
+        # len(strats)*len(qs) overcounts and the progress bar never reaches 100%.
+        progress_total = sum(
+            len(queries_for_scraper(qs, s, corpus_tags)) for s in strats
+        )
+        job_id = deps.bench_jobs.create(mode=mode, progress_total=progress_total)
+        asyncio.create_task(_bench_worker(deps, job_id, qs, strats, corpus_tags))
+        return {"job_id": job_id}
 
-        outcomes = await asyncio.to_thread(partial(run_bench, deps.cfg, qs, repo=deps.bench))
+    async def _bench_worker(deps, job_id: int, qs, strats, corpus_tags: dict):
+        """Background worker: runs bench per-scraper, increments progress, checks cancel.
+
+        corpus_tags is pre-loaded once by the caller (ultrareview I5) so we avoid
+        one YAML file read per scraper -- run_bench(corpus_tags=None) re-reads the
+        file on every call.
+        """
+        from functools import partial
+        try:
+            outcomes_so_far: list = []
+            for s_name in strats:
+                if deps.bench_jobs.is_cancel_requested(job_id):
+                    deps.bench_jobs.finish(job_id, status="cancelled",
+                                           summary_json=json.dumps([asdict(o) for o in outcomes_so_far]))
+                    return
+                os_for_one = await asyncio.to_thread(
+                    partial(run_bench, deps.cfg, qs, repo=deps.bench, strategies=[s_name],
+                            corpus_tags=corpus_tags)
+                )
+                outcomes_so_far.extend(os_for_one)
+                for _ in os_for_one:
+                    deps.bench_jobs.increment_progress(job_id)
+            deps.bench_jobs.finish(
+                job_id, status="done",
+                summary_json=json.dumps([asdict(o) for o in outcomes_so_far]),
+            )
+        except Exception as e:
+            deps.bench_jobs.finish(job_id, status="failed",
+                                   summary_json=json.dumps({"error": f"{type(e).__name__}: {e}"}))
+
+    @router.get("/bench/jobs")
+    def list_bench_jobs(request: Request, limit: int = 20):
+        deps = request.app.state.deps
+        rows = deps.bench_jobs.list_recent(limit=limit)
+        return {"jobs": [_job_row_to_dict(r) for r in rows]}
+
+    @router.get("/bench/jobs/{job_id}")
+    def get_bench_job(job_id: int, request: Request):
+        deps = request.app.state.deps
+        row = deps.bench_jobs.get(job_id)
+        if row is None:
+            raise HTTPException(404, f"no bench job with id={job_id}")
+        return _job_row_to_dict(row)
+
+    @router.post("/bench/jobs/{job_id}/cancel")
+    def cancel_bench_job(job_id: int, request: Request):
+        deps = request.app.state.deps
+        row = deps.bench_jobs.get(job_id)
+        if row is None:
+            raise HTTPException(404, f"no bench job with id={job_id}")
+        deps.bench_jobs.request_cancel(job_id)
+        return {"ok": True}
+
+    @router.get("/bench/jobs/{job_id}/stream")
+    async def stream_bench_job(job_id: int, request: Request):
+        deps = request.app.state.deps
+        row = deps.bench_jobs.get(job_id)
+        if row is None:
+            raise HTTPException(404, f"no bench job with id={job_id}")
+
+        async def _events():
+            last_progress = -1
+            while True:
+                r = deps.bench_jobs.get(job_id)
+                if r is None:
+                    yield "event: gone\ndata: {}\n\n"
+                    return
+                if r.progress_done != last_progress:
+                    data = json.dumps({"done": r.progress_done, "total": r.progress_total})
+                    yield "event: progress\ndata: " + data + "\n\n"
+                    last_progress = r.progress_done
+                if r.status in ("done", "cancelled", "failed") and r.finished_at is not None:
+                    summary = r.summary_json or "{}"
+                    yield "event: " + r.status + "\ndata: " + summary + "\n\n"
+                    return
+                await asyncio.sleep(0.5)
+        return StreamingResponse(_events(), media_type="text/event-stream")
+
+    def _job_row_to_dict(r):
         return {
-            "outcomes": [asdict(o) for o in outcomes],
-            "table": format_table(outcomes),
+            "id": r.id, "started_at": r.started_at, "finished_at": r.finished_at,
+            "mode": r.mode, "status": r.status,
+            "progress_done": r.progress_done, "progress_total": r.progress_total,
+            "summary_json": r.summary_json,
         }
 
     @router.post("/scrapers/{name}/test_now")
@@ -728,6 +882,38 @@ def register(app: FastAPI) -> None:
                 500, f"{name} produced no outcome (could not build scraper instance?)"
             )
         return {"outcome": asdict(outcomes[0])}
+
+    @router.post("/scrapers/test_pd_chain")
+    async def test_pd_chain(request: Request):
+        """Phase 6w.9c: build a PD-chain for a classic query and bench it.
+
+        Uses "Pride and Prejudice" / Austen / is_pd=True as the probe query.
+        Returns the ordered chain plus live outcomes so the SPA (or any
+        caller) can verify that PD scrapers are promoted correctly.
+        """
+        from dataclasses import asdict as _asdict
+        from functools import partial as _partial
+
+        from endless_library.bench import BenchQuery as _BQ
+        from endless_library.bench import load_corpus_tags, run_bench as _run_bench
+        from endless_library.scrapers import registry
+
+        deps = request.app.state.deps
+        query = _BQ("Pride and Prejudice", "Austen", "", "en", tags=("en", "pd"))
+        chain = registry.pd_aware_order(
+            deps.cfg.scrapers, query_title=query.title, is_pd=True
+        )
+        corpus_tags = load_corpus_tags()
+        outcomes = await asyncio.to_thread(
+            _partial(
+                _run_bench,
+                deps.cfg,
+                [query],
+                strategies=chain,
+                corpus_tags=corpus_tags,
+            )
+        )
+        return {"chain": chain, "outcomes": [_asdict(o) for o in outcomes]}
 
     # ---------- settings ----------
 
@@ -966,7 +1152,18 @@ def register(app: FastAPI) -> None:
         except Exception as e:  # pragma: no cover
             components["smtp"] = f"unknown: {type(e).__name__}: {e}"
 
-        body = {"ok": ok, **components}
+        body: dict = {"ok": ok, **components}
+        # Phase 6w.9d: Open Slum upstream status
+        slum = getattr(request.app.state, "open_slum_monitor", None)
+        if slum is not None:
+            external: dict = {}
+            for _sn, _site in _SCRAPER_TO_SITE.items():
+                if _site not in external:
+                    st = slum.get(_site)
+                    if st is not None:
+                        external[_site] = st
+            if external:
+                body["external_sources"] = external
         if not ok:
             return JSONResponse(status_code=503, content=body)
         return body
@@ -1326,6 +1523,45 @@ def register(app: FastAPI) -> None:
         svc.clear_zlib_creds()
         return {"ok": True}
 
+    @router.post("/scrapers/mobilism/creds")
+    def mobilism_store_creds(payload: _MobilismCredsPayload, request: Request):
+        """Phase 6w.5d: store Mobilism forum credentials in the encrypted
+        secrets store. SPA Scrapers page card uses this."""
+        svc = _bookorbit_service(request)
+        svc.set_secret_value("mobilism.username", payload.username)
+        svc.set_secret_value("mobilism.password", payload.password)
+        return {"ok": True}
+
+    @router.delete("/scrapers/mobilism/creds")
+    def mobilism_clear_creds(request: Request):
+        """Phase 6w.5d: clear stored Mobilism credentials."""
+        svc = _bookorbit_service(request)
+        svc.delete_secret_value("mobilism.username")
+        svc.delete_secret_value("mobilism.password")
+        return {"ok": True}
+
+    @router.post("/scrapers/mobilism/test-creds")
+    def mobilism_test_creds(payload: _MobilismCredsPayload, request: Request):
+        """Phase 6w.5d: verify Mobilism credentials by attempting login.
+
+        Uses MobilismSession.try_login() which builds a throw-away client and
+        never touches the class-level singleton, so concurrent requests cannot
+        accidentally pick up a test-credential session (ultrareview I1).
+        """
+        from types import SimpleNamespace
+        from endless_library.scrapers.mobilism import MobilismSession
+        cfg_stub = SimpleNamespace(
+            mobilism_username=payload.username,
+            mobilism_password=payload.password,
+        )
+        ok, err = MobilismSession.try_login(cfg_stub)
+        if ok:
+            return {"ok": True, "message": "Login successful"}
+        # Decide HTTP status from the error text
+        if err and "not configured" in err.lower():
+            raise HTTPException(400, err)
+        raise HTTPException(401, err or "Login failed")
+
     @router.post("/scrapers/cookies")
     async def upload_cookies(request: Request):
         """Phase 6s.5: accept a Netscape-format cookies.txt upload.
@@ -1456,6 +1692,11 @@ def register(app: FastAPI) -> None:
         target = (payload or {}).get("target_version") or ""
         if not target:
             raise HTTPException(400, "missing target_version")
+        try:
+            from endless_library.bookorbit.upgrade import _validate_target_version
+            _validate_target_version(target)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
         deps = request.app.state.deps
         svc = _bookorbit_service(request)
@@ -1494,59 +1735,71 @@ def register(app: FastAPI) -> None:
         or rolls back; the SPA polls /status to refresh the version
         chip after.
         """
-        from functools import partial
+        # Serialize concurrent upgrade requests. Two simultaneous POSTs
+        # would both pass the expires_at check and both start docker
+        # compose ops — the lock prevents that.
+        lock = request.app.state.bookorbit_upgrade_lock
+        if lock.locked():
+            raise HTTPException(409, "another bookorbit upgrade is already in progress")
+        async with lock:
+            from functools import partial
 
-        from endless_library.bookorbit.upgrade import (
-            BOOKORBIT_CONTAINER,
-            apply_upgrade,
-        )
-
-        deps = request.app.state.deps
-        target = (payload or {}).get("target_version") or ""
-        submitted_token = (payload or {}).get("token") or ""
-        if not target or not submitted_token:
-            raise HTTPException(400, "missing target_version and/or token")
-
-        state = _upgrade_state(request.app)
-        expected_token = state.get("token", "")
-        expected_target = state.get("target_version", "")
-        if target != expected_target:
-            raise HTTPException(
-                400,
-                f"target {target} does not match the most recent preflight "
-                f"({expected_target or 'none'}) — run preflight first",
-            )
-
-        # Resolve compose + env file paths. The biblichor container
-        # bind-mounts /app/deploy from <repo>/deploy at build time.
-        compose_path = Path("/app/deploy/compose.yml")
-        env_file = Path("/app/.env")
-        if not compose_path.exists():
-            # Dev/host fallback — the SPA might be running outside the
-            # container in pytest.
-            from endless_library import __file__ as pkg_root
-            repo_root = Path(pkg_root).resolve().parent.parent.parent
-            compose_path = repo_root / "deploy" / "compose.yml"
-            env_file = repo_root / ".env"
-
-        result = await asyncio.to_thread(
-            partial(
+            from endless_library.bookorbit.upgrade import (
+                BOOKORBIT_CONTAINER,
                 apply_upgrade,
-                target,
-                submitted_token=submitted_token,
-                expected_token=expected_token,
-                preflight_expires_at=float(state.get("expires_at", 0)),
-                compose_path=compose_path,
-                env_file=env_file,
-                container=BOOKORBIT_CONTAINER,
-                bookorbit_url=deps.cfg.bookorbit.url or "http://bookorbit:3000",
             )
-        )
 
-        # On success the token is consumed (don't let it be reused).
-        if result.success or result.rolled_back:
-            state.clear()
-        return result.as_dict()
+            deps = request.app.state.deps
+            target = (payload or {}).get("target_version") or ""
+            submitted_token = (payload or {}).get("token") or ""
+            if not target or not submitted_token:
+                raise HTTPException(400, "missing target_version and/or token")
+            try:
+                from endless_library.bookorbit.upgrade import _validate_target_version
+                _validate_target_version(target)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+
+            state = _upgrade_state(request.app)
+            expected_token = state.get("token", "")
+            expected_target = state.get("target_version", "")
+            if target != expected_target:
+                raise HTTPException(
+                    400,
+                    f"target {target} does not match the most recent preflight "
+                    f"({expected_target or 'none'}) — run preflight first",
+                )
+
+            # Resolve compose + env file paths. The biblichor container
+            # bind-mounts /app/deploy from <repo>/deploy at build time.
+            compose_path = Path("/app/deploy/compose.yml")
+            env_file = Path("/app/.env")
+            if not compose_path.exists():
+                # Dev/host fallback — the SPA might be running outside the
+                # container in pytest.
+                from endless_library import __file__ as pkg_root
+                repo_root = Path(pkg_root).resolve().parent.parent.parent
+                compose_path = repo_root / "deploy" / "compose.yml"
+                env_file = repo_root / ".env"
+
+            result = await asyncio.to_thread(
+                partial(
+                    apply_upgrade,
+                    target,
+                    submitted_token=submitted_token,
+                    expected_token=expected_token,
+                    preflight_expires_at=float(state.get("expires_at", 0)),
+                    compose_path=compose_path,
+                    env_file=env_file,
+                    container=BOOKORBIT_CONTAINER,
+                    bookorbit_url=deps.cfg.bookorbit.url or "http://bookorbit:3000",
+                )
+            )
+
+            # On success the token is consumed (don't let it be reused).
+            if result.success or result.rolled_back:
+                state.clear()
+            return result.as_dict()
 
     @router.post("/bookorbit/setup-token")
     def bookorbit_generate_setup_token():
