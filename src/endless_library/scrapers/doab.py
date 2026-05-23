@@ -20,17 +20,20 @@ class Doab:
 
     def __init__(self, cfg, **kw):
         self._cfg = cfg
-        self.client = make_client(timeout=20)
 
     def search(self, query: SearchQuery) -> list[Candidate]:
         q = query.title or ""
         if query.language:
             q += f" AND language:{query.language}"
+        client = make_client(timeout=20)
         try:
-            r = self.client.get(_API, params={"expand": "metadata", "query": q})
+            r = client.get(_API, params={"expand": "metadata", "query": q})
         except Exception as e:
             log.warning("doab: request failed: %s", e)
             return []
+        finally:
+            if hasattr(client, "close"):
+                client.close()
         if r.status_code != 200:
             return []
         try:
