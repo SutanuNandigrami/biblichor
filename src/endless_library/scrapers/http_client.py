@@ -46,6 +46,10 @@ _ANUBIS_COOKIE_CACHE: dict[str, tuple[str, float]] = {}  # host -> (jwt, expires
 _ANUBIS_TTL_SEC = 50 * 60
 _ANUBIS_LOCK = threading.Lock()
 
+# I-NEW-5: Depth guard — prevents infinite recursion if the Anubis submit
+# endpoint itself returns an Anubis challenge page.
+_ANUBIS_DEPTH_LIMIT = 2
+
 
 # M15: project-default User-Agent for scrapers that do NOT impersonate
 # a specific browser. Scrapers using make_client(impersonate="chrome")
@@ -82,9 +86,15 @@ def _is_anubis_response(resp: Any) -> bool:
     return any(p.search(text) for p in _ANUBIS_SIGNATURES)
 
 
-def _solve_and_get_cookie(html: str, request_url: str, session: Any) -> str | None:
+def _solve_and_get_cookie(
+    html: str, request_url: str, *, raw_post: Any
+) -> str | None:
     """Parse challenge + difficulty + action from HTML, solve the PoW,
-    POST nonce+challenge, return the JWT cookie value (or None)."""
+    POST nonce+challenge using raw_post (the ORIGINAL session.post, not the
+    wrapped version — prevents recursive Anubis interception on the submit
+    endpoint itself, I-NEW-5).
+    Returns the JWT cookie value or None.
+    """
     cm = _ANUBIS_CHALLENGE_RE.search(html)
     dm = _ANUBIS_DIFFICULTY_RE.search(html)
     am = _ANUBIS_ACTION_RE.search(html)
@@ -95,8 +105,9 @@ def _solve_and_get_cookie(html: str, request_url: str, session: Any) -> str | No
     action = am.group(1) if am else "/.within.website/x/cmd/anubis/api/pass-challenge"
     nonce = solve_anubis(challenge, difficulty)
     submit_url = urljoin(request_url, action)
-    resp = session.post(submit_url,
-                        data={"challenge": challenge, "nonce": str(nonce), "redir": request_url})
+    # Use the raw (pre-wrap) post so we don't recurse into the wrapper
+    resp = raw_post(submit_url,
+                    data={"challenge": challenge, "nonce": str(nonce), "redir": request_url})
     if getattr(resp, "status_code", 0) not in (200, 302):
         return None
     for k, v in (getattr(resp, "cookies", {}) or {}).items():
@@ -105,12 +116,16 @@ def _solve_and_get_cookie(html: str, request_url: str, session: Any) -> str | No
     return None
 
 
-def _make_anubis_wrapper(session: Any, orig_fn: Any):
+def _make_anubis_wrapper(session: Any, orig_fn: Any, raw_post_for_solve: Any):
     """Return a wrapped version of orig_fn that handles Anubis PoW challenges.
 
     Factored out so the same logic applies uniformly to get/post/head/put/delete
-    (ultrareview I2).
+    (ultrareview I2). raw_post_for_solve is the ORIGINAL session.post captured
+    before wrapping — used by _solve_and_get_cookie so the submit request does
+    not recurse back through the Anubis wrapper (I-NEW-5).
     """
+    _depth = [0]  # belt-and-suspenders recursion counter per wrapper instance
+
     def wrapper(url: str, **kw):
         host = urlparse(url).netloc
         # Read cached cookie outside the lock — dict.get is GIL-safe for reads
@@ -119,8 +134,12 @@ def _make_anubis_wrapper(session: Any, orig_fn: Any):
             kw.setdefault("cookies", {})
             kw["cookies"].setdefault("techaro-anubis-auth", cached[0])
         r = orig_fn(url, **kw)
-        if _is_anubis_response(r):
-            cookie = _solve_and_get_cookie(r.text, url, session)
+        if _is_anubis_response(r) and _depth[0] < _ANUBIS_DEPTH_LIMIT:
+            _depth[0] += 1
+            try:
+                cookie = _solve_and_get_cookie(r.text, url, raw_post=raw_post_for_solve)
+            finally:
+                _depth[0] -= 1
             if cookie:
                 # Lock the write so concurrent threads do not tear the tuple
                 with _ANUBIS_LOCK:
@@ -134,7 +153,14 @@ def _make_anubis_wrapper(session: Any, orig_fn: Any):
 
 def _install_anubis_middleware(session: Any) -> None:
     """Wrap get/post/head/put/delete so that on an Anubis-flavored response,
-    we solve the PoW, store the cookie, and retry (ultrareview I2)."""
+    we solve the PoW, store the cookie, and retry (ultrareview I2).
+
+    I-NEW-5: capture raw session.post BEFORE wrapping so _solve_and_get_cookie
+    uses the original post and does not recurse into the Anubis wrapper.
+    """
+    raw_post = session.post  # capture before wrapping
     for method in ("get", "post", "head", "put", "delete"):
-        orig = getattr(session, method)
-        setattr(session, method, _make_anubis_wrapper(session, orig))
+        orig = getattr(session, method, None)
+        if orig is None:
+            continue
+        setattr(session, method, _make_anubis_wrapper(session, orig, raw_post))
