@@ -92,3 +92,60 @@ def test_anubis_middleware_solves_and_retries(monkeypatch):
     assert cookie == "JWT"
     assert posted["url"].endswith("/anubis/pass")
     assert "nonce" in posted["data"] and "challenge" in posted["data"]
+
+
+# --- Ultrareview A: thread-safe Anubis cookie cache ---
+
+
+
+# --- Ultrareview A: thread-safe Anubis cookie cache ---
+
+def test_anubis_cache_thread_safe():
+    """N threads racing to write the same host must leave exactly one entry."""
+    import threading
+    from unittest.mock import patch
+    from endless_library.scrapers import http_client as hc
+
+    N = 20
+    host = "threadtest.example"
+    hc._ANUBIS_COOKIE_CACHE.pop(host, None)
+
+    anubis_html = (
+        '<html><head>'
+        '<meta name="anubis-challenge" content="ch">'
+        '<meta name="anubis-difficulty" content="4">'
+        '<meta name="anubis-action" content="/pass">'
+        '</head></html>'
+    )
+
+    errors = []
+
+    def run():
+        try:
+            with patch.object(hc, "_solve_and_get_cookie", return_value="JWT-TOKEN"):
+                wrapped = hc._make_anubis_wrapper(
+                    object(),
+                    lambda url, **kw: type(
+                        "R",
+                        (),
+                        {
+                            "status_code": 200,
+                            "text": anubis_html,
+                            "headers": {"content-type": "text/html"},
+                        },
+                    )(),
+                )
+                wrapped("https://" + host + "/page")
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=run) for _ in range(N)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], "Thread errors: " + str(errors)
+    assert host in hc._ANUBIS_COOKIE_CACHE
+    assert len([k for k in hc._ANUBIS_COOKIE_CACHE if k == host]) == 1
+    hc._ANUBIS_COOKIE_CACHE.pop(host, None)

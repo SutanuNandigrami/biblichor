@@ -23,6 +23,7 @@ from TLS fingerprint impersonation and their respx-based tests would break.
 from __future__ import annotations
 
 import re
+import threading
 import time
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -43,6 +44,7 @@ _ANUBIS_ACTION_RE = re.compile(r'<meta\s+name="anubis-action"\s+content="([^"]+)
 
 _ANUBIS_COOKIE_CACHE: dict[str, tuple[str, float]] = {}  # host -> (jwt, expires_at)
 _ANUBIS_TTL_SEC = 50 * 60
+_ANUBIS_LOCK = threading.Lock()
 
 
 def make_client(
@@ -105,6 +107,7 @@ def _make_anubis_wrapper(session: Any, orig_fn: Any):
     """
     def wrapper(url: str, **kw):
         host = urlparse(url).netloc
+        # Read cached cookie outside the lock — dict.get is GIL-safe for reads
         cached = _ANUBIS_COOKIE_CACHE.get(host)
         if cached and cached[1] > time.time():
             kw.setdefault("cookies", {})
@@ -113,7 +116,9 @@ def _make_anubis_wrapper(session: Any, orig_fn: Any):
         if _is_anubis_response(r):
             cookie = _solve_and_get_cookie(r.text, url, session)
             if cookie:
-                _ANUBIS_COOKIE_CACHE[host] = (cookie, time.time() + _ANUBIS_TTL_SEC)
+                # Lock the write so concurrent threads do not tear the tuple
+                with _ANUBIS_LOCK:
+                    _ANUBIS_COOKIE_CACHE[host] = (cookie, time.time() + _ANUBIS_TTL_SEC)
                 kw.setdefault("cookies", {})
                 kw["cookies"]["techaro-anubis-auth"] = cookie
                 r = orig_fn(url, **kw)
