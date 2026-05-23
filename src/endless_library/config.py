@@ -281,6 +281,15 @@ class BenchCfg(BaseModel):
     circuit_break_after_consecutive_fails: int = 3
 
 
+class StkCfg(BaseModel):
+    """Send-to-Kindle delivery configuration."""
+    daily_cap: int = 500
+    max_attempts: int = 3
+    backoff_initial_sec: float = 5.0
+    backoff_factor: float = 3.0
+    client_id: str | None = None  # None = use vendored stkclient's hardcoded value
+
+
 class Config(BaseModel):
     general: GeneralCfg = GeneralCfg()
     kindle: KindleCfg = KindleCfg()
@@ -293,6 +302,7 @@ class Config(BaseModel):
     storage: StorageCfg = StorageCfg()
     bookorbit: BookOrbitCfg = BookOrbitCfg()
     bench: BenchCfg = BenchCfg()
+    stk: StkCfg = StkCfg()
 
     def public_view(self) -> dict:
         d = self.model_dump()

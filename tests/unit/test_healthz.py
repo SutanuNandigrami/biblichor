@@ -156,3 +156,109 @@ def test_healthz_scrapers_count_matches_registry(healthy_db: Path):
     app = _build_app(db_path=healthy_db, scheduler_running=True)
     body = TestClient(app).get("/healthz").json()
     assert body["scrapers"] == expected
+
+
+def test_healthz_stk_block_says_unconfigured_when_no_setup(tmp_path):
+    """When STK is not configured, /healthz returns {'stk': {'configured': false}}
+    with no quota fields."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from types import SimpleNamespace
+    from pathlib import Path
+    from endless_library.db.schema import init_db
+    from endless_library.web import api as api_mod
+
+    db = tmp_path / "test.db"
+    init_db(db)
+    app = FastAPI()
+
+    class _Svc:
+        def get_secret_value(self, k):
+            return None
+
+        def set_secret_value(self, *a):
+            pass
+
+        def set_secret_values(self, *a):
+            pass
+
+        def delete_secret_value(self, *a):
+            pass
+
+    deps = SimpleNamespace(
+        db_path=db,
+        cfg=SimpleNamespace(
+            stk=SimpleNamespace(daily_cap=500),
+            smtp=SimpleNamespace(daily_cap=80),
+        ),
+        bookorbit_service=_Svc(),
+        books=SimpleNamespace(pending=lambda **kw: []),
+    )
+    app.state.deps = deps
+    app.state.scheduler = SimpleNamespace(running=True)
+    api_mod.register(app)
+    r = TestClient(app).get("/healthz")
+    assert r.status_code == 200
+    body = r.json()
+    assert "stk" in body
+    assert body["stk"]["configured"] is False
+    assert "sent_24h" not in body["stk"]
+
+
+def test_healthz_stk_block_returns_quota_when_configured(tmp_path):
+    """When STK is configured, /healthz reports sent_24h, cap, remaining, exhausted."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from types import SimpleNamespace
+    from pathlib import Path
+    from endless_library.db.schema import init_db, connect
+    from endless_library.web import api as api_mod
+
+    db = tmp_path / "test.db"
+    init_db(db)
+    # Pre-record 3 send-stk events
+    with connect(db) as conn:
+        for _ in range(3):
+            conn.execute(
+                "INSERT INTO events (kind, message, meta_json) VALUES ('send-stk', 'test', '{}')"
+            )
+    app = FastAPI()
+
+    class _Svc:
+        def __init__(self):
+            self._s = {
+                "kindle_stk.device_cert.pem": "PEM",
+                "kindle_stk.adp_token": "ADP",
+            }
+
+        def get_secret_value(self, k):
+            return self._s.get(k)
+
+        def set_secret_value(self, k, v):
+            self._s[k] = v
+
+        def set_secret_values(self, kv):
+            self._s.update(kv)
+
+        def delete_secret_value(self, k):
+            self._s.pop(k, None)
+
+    deps = SimpleNamespace(
+        db_path=db,
+        cfg=SimpleNamespace(
+            stk=SimpleNamespace(daily_cap=500),
+            smtp=SimpleNamespace(daily_cap=80),
+        ),
+        bookorbit_service=_Svc(),
+        books=SimpleNamespace(pending=lambda **kw: []),
+    )
+    app.state.deps = deps
+    app.state.scheduler = SimpleNamespace(running=True)
+    api_mod.register(app)
+    r = TestClient(app).get("/healthz")
+    body = r.json()
+    assert body["stk"]["configured"] is True
+    assert body["stk"]["sent_24h"] == 3
+    assert body["stk"]["cap"] == 500
+    assert body["stk"]["remaining"] == 497
+    assert body["stk"]["exhausted"] is False

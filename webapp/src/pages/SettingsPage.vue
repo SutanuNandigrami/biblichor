@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Save, Mail, Bell, AlertTriangle, ExternalLink, Cookie, Sliders, ChevronDown, Palette, ArrowUpCircle, ShieldCheck, RotateCw } from 'lucide-vue-next'
+import { Save, Mail, Bell, AlertTriangle, ExternalLink, Cookie, Sliders, ChevronDown, Palette, ArrowUpCircle, ShieldCheck, RotateCw, Smartphone, X } from 'lucide-vue-next'
 import { useMediaQuery } from '@vueuse/core'
 import Button from '@/components/ui/Button.vue'
 import Input from '@/components/ui/Input.vue'
@@ -208,6 +208,7 @@ onMounted(() => {
   load()
   tintH.value = readSavedTint()
   loadUpgradeStatus()
+  loadStkStatus()
 })
 
 async function save() {
@@ -386,6 +387,129 @@ async function testPushover() {
     pushoverResult.value = { ok: false, msg: String(e?.message ?? e) }
   } finally { testingPushover.value = false }
 }
+// Phase STK 11: Kindle Browser Upload state ---------------------------------
+const stkStatus = ref<{
+  configured: boolean
+  customer_id?: string
+  registered_at?: string
+  default_destination?: string
+  default_destination_sn?: string
+}>({ configured: false })
+
+const stkQuota = ref<{
+  configured: boolean
+  sent_24h?: number
+  cap?: number
+  remaining?: number
+  exhausted?: boolean
+}>({ configured: false })
+
+const showStkModal = ref(false)
+const stkModalStep = ref<'authorize' | 'paste' | 'devices' | 'done'>('authorize')
+const stkAuthorizeUrl = ref<string>('')
+const stkRedirectUrl = ref<string>('')
+const stkDevices = ref<Array<{ device_serial_number: string; device_type?: string; device_name: string }>>([])
+const stkSelectedSn = ref<string>('')
+const stkLoading = ref<boolean>(false)
+const stkError = ref<string>('')
+
+async function loadStkStatus(): Promise<void> {
+  try {
+    const r1 = await api<any>('/api/kindle-stk/status')
+    stkStatus.value = r1
+    try {
+      const r2 = await api<any>('/healthz')
+      if (r2.stk) stkQuota.value = r2.stk
+    } catch { /* healthz stk block optional */ }
+  } catch (e) {
+    console.warn('stk status load failed', e)
+  }
+}
+
+async function openStkSetup(): Promise<void> {
+  stkLoading.value = true
+  stkError.value = ''
+  showStkModal.value = true
+  stkModalStep.value = 'authorize'
+  try {
+    const r = await api<{ authorize_url: string }>('/api/kindle-stk/oauth/start', { method: 'POST' })
+    stkAuthorizeUrl.value = r.authorize_url
+    stkModalStep.value = 'paste'
+  } catch (e: any) {
+    stkError.value = e?.message || String(e)
+  } finally {
+    stkLoading.value = false
+  }
+}
+
+async function completeStkOauth(): Promise<void> {
+  stkLoading.value = true
+  stkError.value = ''
+  try {
+    const r = await api<any>('/api/kindle-stk/oauth/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ redirect_url: stkRedirectUrl.value.trim() }),
+    })
+    if (r && r.detail) {
+      stkError.value = r.detail
+      stkLoading.value = false
+      return
+    }
+    const devs = await api<{ devices: Array<{ device_serial_number: string; device_type?: string; device_name: string }> }>('/api/kindle-stk/devices')
+    stkDevices.value = devs.devices || []
+    // Pre-select Kindle for Web by name (primary), then by device_type if present
+    const webDev = stkDevices.value.find(
+      d => d.device_name.toLowerCase().includes('web') || (d.device_type && d.device_type === 'FionaWebApp')
+    )
+    stkSelectedSn.value = webDev?.device_serial_number || stkDevices.value[0]?.device_serial_number || ''
+    stkModalStep.value = 'devices'
+  } catch (e: any) {
+    stkError.value = e?.message || String(e)
+  } finally {
+    stkLoading.value = false
+  }
+}
+
+async function saveStkDestination(): Promise<void> {
+  stkLoading.value = true
+  stkError.value = ''
+  try {
+    await api<any>('/api/kindle-stk/default-destination', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_sn: stkSelectedSn.value }),
+    })
+    showStkModal.value = false
+    await loadStkStatus()
+    toast.success('Kindle Browser Upload configured')
+  } catch (e: any) {
+    stkError.value = e?.message || String(e)
+  } finally {
+    stkLoading.value = false
+  }
+}
+
+async function disconnectStk(): Promise<void> {
+  if (!confirm('Disconnect Amazon and wipe stored credentials?')) return
+  try {
+    await api<any>('/api/kindle-stk/connection', { method: 'DELETE' })
+    await loadStkStatus()
+    toast.success('Kindle Browser Upload disconnected')
+  } catch (e: any) {
+    toast.error('Disconnect failed: ' + (e?.message ?? e))
+  }
+}
+
+async function sendStkTest(): Promise<void> {
+  try {
+    await api<any>('/api/kindle-stk/test-send', { method: 'POST' })
+    toast.success('Test send queued — check your Kindle library in a minute.')
+  } catch (e: any) {
+    toast.error('Test failed: ' + (e?.message ?? e))
+  }
+}
+
 </script>
 
 <template>
@@ -642,6 +766,126 @@ async function testPushover() {
         </div>
       </div>
     </details>
+
+    <!-- Phase STK 11: Kindle Browser Upload Card -->
+    <details :open="isDesktop" class="settings-section group bg-card border border-border rounded-lg overflow-hidden">
+      <summary class="cursor-pointer md:cursor-default select-none px-5 py-3 font-semibold flex items-center gap-2 text-sm">
+        <Smartphone class="w-4 h-4 text-primary" />
+        Kindle Browser Upload
+        <Badge v-if="stkStatus.configured" variant="success" class="ml-1">connected</Badge>
+        <span class="ml-1 text-[11px] text-emerald-600 font-normal">(recommended — bypasses SMTP cap)</span>
+        <ChevronDown class="w-4 h-4 ml-auto md:hidden transition-transform group-open:rotate-180" />
+      </summary>
+      <div class="p-5 pt-0 space-y-4">
+        <!-- Not yet configured -->
+        <div v-if="!stkStatus.configured" class="space-y-3">
+          <p class="text-sm text-muted-foreground">
+            Send via Amazon’s web upload — bypasses SMTP’s ~80/day cap,
+            supports files up to 200 MB, no Gmail dependency.
+          </p>
+          <Button @click="openStkSetup" :loading="stkLoading">
+            <Smartphone class="w-4 h-4" /> Set up Amazon
+          </Button>
+        </div>
+        <!-- Configured -->
+        <div v-else class="space-y-3">
+          <p class="text-sm">
+            Connected as <strong>{{ stkStatus.customer_id }}</strong>
+            <span v-if="stkStatus.registered_at" class="text-muted-foreground"> · since {{ stkStatus.registered_at.slice(0, 10) }}</span>
+          </p>
+          <p class="text-sm">
+            Default destination: <strong>{{ stkStatus.default_destination || 'none' }}</strong>
+          </p>
+          <p v-if="stkQuota.configured" class="text-sm"
+             :class="stkQuota.exhausted ? 'text-red-500' : 'text-muted-foreground'">
+            Sent today: {{ stkQuota.sent_24h }} / {{ stkQuota.cap }}
+            <span v-if="stkQuota.exhausted"> — daily cap reached, biblichor will fall back to SMTP</span>
+          </p>
+          <div class="flex gap-2 flex-wrap">
+            <Button variant="outline" @click="openStkSetup">Change device</Button>
+            <Button variant="outline" @click="sendStkTest">Send test</Button>
+            <Button variant="destructive" @click="disconnectStk">Disconnect</Button>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <!-- Phase STK 11: setup modal -->
+    <div v-if="showStkModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div class="bg-card rounded-lg border border-border shadow-xl max-w-lg w-full p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-semibold">Connect to Amazon</h3>
+          <button class="text-muted-foreground hover:text-foreground" @click="showStkModal = false">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+
+        <div v-if="stkError" class="rounded bg-destructive/10 border border-destructive/30 text-destructive p-3 text-sm">
+          {{ stkError }}
+        </div>
+
+        <!-- Step: authorize + paste URL -->
+        <div v-if="stkModalStep === 'authorize' || stkModalStep === 'paste'" class="space-y-5">
+          <div>
+            <p class="text-sm mb-3">
+              <strong>Step 1:</strong> Click below to open Amazon’s authorize page.
+              Sign in and click "Allow".
+            </p>
+            <a :href="stkAuthorizeUrl" target="_blank" rel="noopener"
+               class="inline-flex items-center gap-2 h-9 px-4 text-sm rounded-md font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
+              <ExternalLink class="w-4 h-4" /> Open Amazon authorize page
+            </a>
+          </div>
+          <div class="space-y-2">
+            <p class="text-sm">
+              <strong>Step 2:</strong> After clicking Allow, copy the full URL from your
+              address bar and paste here:
+            </p>
+            <Input
+              v-model="stkRedirectUrl"
+              placeholder="https://www.amazon.com/ap/maplanding?openid..."
+            />
+            <div class="flex gap-2 mt-3">
+              <Button :disabled="!stkRedirectUrl || stkLoading" :loading="stkLoading" @click="completeStkOauth">
+                Connect
+              </Button>
+              <Button variant="outline" @click="showStkModal = false">Cancel</Button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step: device picker -->
+        <div v-else-if="stkModalStep === 'devices'" class="space-y-4">
+          <Badge variant="success">✓ Connected to Amazon</Badge>
+          <p class="text-sm">Pick the default delivery target:</p>
+          <div class="space-y-2">
+            <label
+              v-for="d in stkDevices"
+              :key="d.device_serial_number"
+              class="flex items-center gap-2 text-sm cursor-pointer"
+            >
+              <input type="radio" :value="d.device_serial_number" v-model="stkSelectedSn" class="accent-primary" />
+              <span>{{ d.device_name }}</span>
+              <Badge
+                v-if="d.device_name.toLowerCase().includes('web') || (d.device_type && d.device_type === 'FionaWebApp')"
+                variant="success"
+                class="text-[10px]"
+              >recommended</Badge>
+            </label>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Every book lands in your Personal Documents library regardless of device.
+            Per-device auto-download is managed at amazon.com/mycontent.
+          </p>
+          <div class="flex gap-2">
+            <Button :disabled="!stkSelectedSn || stkLoading" :loading="stkLoading" @click="saveStkDestination">
+              Save
+            </Button>
+            <Button variant="outline" @click="showStkModal = false">Cancel</Button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <details :open="isDesktop" class="settings-section group bg-card border border-border rounded-lg overflow-hidden">
       <summary class="cursor-pointer md:cursor-default select-none px-5 py-3 font-semibold flex items-center gap-2 text-sm">

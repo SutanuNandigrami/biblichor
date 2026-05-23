@@ -113,7 +113,8 @@ def test_pipeline_source_does_not_use_lazy_bookorbit_import():
         for i, ln in enumerate(lines)
         if "from endless_library.bookorbit" in ln and not ln.lstrip().startswith("#")
     ]
-    assert len(bookorbit_imports) == 1, f"expected 1 import, got {bookorbit_imports}"
-    # And it's near the top (within first 40 lines of the file = module imports area)
-    line_no, _ = bookorbit_imports[0]
-    assert line_no < 40, f"bookorbit import lives at line {line_no}, not at module top"
+    assert len(bookorbit_imports) >= 1, f"expected at least 1 import, got {bookorbit_imports}"
+    # All must be near the top (within first 40 lines = module imports area).
+    # STK integration (Phase 12) adds BookOrbitService as a second top-level import.
+    for line_no, _ in bookorbit_imports:
+        assert line_no < 40, f"bookorbit import lives at line {line_no}, not at module top"

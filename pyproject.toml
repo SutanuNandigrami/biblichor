@@ -23,6 +23,8 @@ dependencies = [
   "pydantic-settings>=2.2",
   "structlog>=24.1",
   "cryptography>=42",
+  "requests>=2.31",
+  "rsa>=4.9",
   "rarfile>=4.2",
 ]
 

@@ -3,13 +3,15 @@ from __future__ import annotations
 import datetime
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from endless_library.bookorbit.drop import (
     BookOrbitDropError,
     drop_into_library,
 )
+from endless_library.bookorbit.service import BookOrbitService
 from endless_library.config import Config
 from endless_library.convert import ConvertError, convert_to_epub
 from endless_library.db.bench import BenchRunRepo
@@ -25,8 +27,7 @@ from endless_library.domain.models import Candidate, ScoreBreakdown, SearchQuery
 from endless_library.domain.scoring import score_candidate
 from endless_library.domain.state_machine import decide_auto_pick
 from endless_library.download import DownloadError, download
-from endless_library.kindle import KindleRateLimited, KindleSendError, send_to_kindle
-from endless_library.smtp_rate import quota_status
+from endless_library.kindle_router import deliver as _kindle_deliver
 from endless_library.notifier import Notifier
 from endless_library.scrapers import registry as scrapers_registry
 from endless_library.security.archive_safety import SafetyLimits
@@ -69,12 +70,19 @@ class PipelineDeps:
     bench: BenchRunRepo
     bench_jobs: BenchJobsRepo
     mirrors: MirrorRepo
+    bookorbit_service: Any = field(default=None)
 
     @classmethod
     def build(cls, *, cfg: Config, db_path: Path) -> PipelineDeps:
         init_db(db_path)
         mirrors = MirrorRepo(db_path)
         mirrors.seed_curated()  # idempotent
+        secrets_dir = Path(cfg.general.books_dir).parent / "secrets"
+        bookorbit_service = BookOrbitService(
+            cfg=cfg,
+            db_path=db_path,
+            restore_key_path=secrets_dir / "restore.key",
+        )
         return cls(
             cfg=cfg,
             db_path=db_path,
@@ -86,6 +94,7 @@ class PipelineDeps:
             bench=BenchRunRepo(db_path),
             bench_jobs=BenchJobsRepo(db_path),
             mirrors=mirrors,
+            bookorbit_service=bookorbit_service,
         )
 
 
@@ -820,40 +829,24 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
                     message=f"bookorbit drop failed (non-fatal): {e}",
                 )
 
-    # Phase 6u: pre-flight SMTP rate-limit check. Counts kind='send'
-    # events in the last 24h and defers the send if we're at/over the
-    # configured Gmail-safe cap. Deferred books keep their picked
-    # state (file_path already set) and the next pipeline cycle retries
-    # — self-paces the queue into the daily budget. BookOrbit already
-    # ingested above so the user's library still grows.
-    quota = quota_status(deps.db_path, daily_cap=deps.cfg.smtp.daily_cap)
-    if quota.exhausted:
-        msg = (
-            f"smtp daily cap reached ({quota.sent_24h}/{quota.cap} in last 24h); "
-            f"deferring send to next cycle"
-        )
-        deps.events.append(book_id=book.id, kind="send_deferred", message=msg)
-        return "deferred"
-
-    try:
-        send_to_kindle(
-            attachment=file_path,
-            kindle=deps.cfg.kindle,
-            smtp=deps.cfg.smtp,
-            title=book.title,
-            author=book.author,
-        )
-    except KindleRateLimited as e:
-        msg = f"smtp throttled by server; deferring: {e}"
-        deps.events.append(book_id=book.id, kind="send_deferred", message=msg)
-        return "deferred"
-    except KindleSendError as e:
-        deps.books.set_failed(book.id, error=f"kindle send failed: {e}")
+    # Phase STK 12: unified delivery via kindle_router (STK-primary, SMTP-fallback).
+    # The router handles retry, backoff, rate-gate, and audit-event recording.
+    # If both STK and SMTP are exhausted, result.ok is False and we mark failed.
+    result = _kindle_deliver(
+        file_path=file_path,
+        book=book,
+        cfg=deps.cfg,
+        db_path=deps.db_path,
+        svc=deps.bookorbit_service,
+    )
+    if result.ok:
+        deps.books.mark_kindled(book.id, method=result.method.value)
+        deps.events.append(book_id=book.id, kind="send", message=f"sent via {result.method.value}")
+        deps.notifier.book_sent(book.title, book.author, file_path.suffix.lstrip("."))
+        return "sent"
+    else:
+        deps.books.set_failed(book.id, error=f"kindle send failed: {result.error}")
         return "failed"
-    deps.books.set_status(book.id, "sent")
-    deps.events.append(book_id=book.id, kind="send", message="sent to kindle")
-    deps.notifier.book_sent(book.title, book.author, file_path.suffix.lstrip("."))
-    return "sent"
 
 
 def process_queue(deps: PipelineDeps) -> dict[str, int]:

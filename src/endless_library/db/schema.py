@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS books (
   sent_at         TEXT,
   series          TEXT,
   tags            TEXT,
+  sent_method     TEXT,
   UNIQUE(source, goodreads_id),
   UNIQUE(source, hardcover_id)
 );
@@ -184,6 +185,7 @@ def _migrate(conn) -> None:
         # Phase 6s.1: PD pre-chain hook columns
         ("pub_year", "ALTER TABLE books ADD COLUMN pub_year INTEGER"),
         ("is_public_domain", "ALTER TABLE books ADD COLUMN is_public_domain INTEGER"),
+        ("sent_method", "ALTER TABLE books ADD COLUMN sent_method TEXT"),
     ):
         if new_col not in cols:
             conn.execute(ddl)
