@@ -67,7 +67,7 @@ def test_complete_oauth_extracts_code_and_persists_cert(fake_bookorbit_svc, monk
     returns a cert + ADP token, KindleStkService persists everything and
     deletes the ephemeral verifier."""
     fake_client = FakeVendoredClient()
-    fake_client.register_device = lambda code, verifier: {
+    fake_client.register_device = lambda code, verifier, domain="amazon.com": {
         "device_private_key": "PEM_KEY",
         "adp_token": "ADP_TOK",
         "adp_did": "DID-1",
@@ -222,3 +222,27 @@ def test_deregister_wipes_all_secrets(fake_bookorbit_svc, monkeypatch):
     svc.deregister()
     for k in keys:
         assert fake_bookorbit_svc.get_secret_value(k) is None
+
+
+def test_start_oauth_uses_configured_domain(fake_bookorbit_svc, monkeypatch):
+    """When kindle_stk.amazon_domain is set to amazon.in, the authorize URL must
+    start with https://www.amazon.in/ not https://www.amazon.com/."""
+    from tests._stkclient_stub import FakeOAuth2
+    monkeypatch.setattr("endless_library.kindle_stk._vendored.OAuth2", FakeOAuth2)
+    fake_bookorbit_svc.set_secret_value("kindle_stk.amazon_domain", "amazon.in")
+    from endless_library.kindle_stk.service import KindleStkService
+    svc = KindleStkService(fake_bookorbit_svc)
+    url, verifier = svc.start_oauth()
+    assert "amazon.in" in url, f"Expected amazon.in in URL but got: {url}"
+    assert "amazon.com" not in url.split("?")[0], f"Expected no amazon.com in base URL: {url}"
+
+
+def test_start_oauth_defaults_to_amazon_com_when_no_region_set(fake_bookorbit_svc, monkeypatch):
+    """When no kindle_stk.amazon_domain secret is stored, defaults to amazon.com."""
+    from tests._stkclient_stub import FakeOAuth2
+    monkeypatch.setattr("endless_library.kindle_stk._vendored.OAuth2", FakeOAuth2)
+    # No amazon_domain set in secrets
+    from endless_library.kindle_stk.service import KindleStkService
+    svc = KindleStkService(fake_bookorbit_svc)
+    url, verifier = svc.start_oauth()
+    assert "amazon.com" in url, f"Expected amazon.com in URL but got: {url}"

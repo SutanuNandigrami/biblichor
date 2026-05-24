@@ -288,6 +288,7 @@ class StkCfg(BaseModel):
     backoff_initial_sec: float = 5.0
     backoff_factor: float = 3.0
     client_id: str | None = None  # None = use vendored stkclient's hardcoded value
+    amazon_domain: str = "amazon.com"  # Override for regional TLDs (.in, .co.uk, etc.)
 
 
 class Config(BaseModel):

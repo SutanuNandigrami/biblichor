@@ -1867,12 +1867,23 @@ def register(app: FastAPI) -> None:
 
     # Kindle Send-to-Kindle (Phase STK 9) --------------------------------
 
+    _KNOWN_AMAZON_DOMAINS = {
+        "amazon.com", "amazon.in", "amazon.co.uk", "amazon.de", "amazon.fr",
+        "amazon.it", "amazon.es", "amazon.co.jp", "amazon.com.au", "amazon.ca",
+        "amazon.com.br", "amazon.com.mx",
+    }
+
     @router.get("/kindle-stk/status")
     def kindle_stk_status(request: Request) -> dict:
         deps = request.app.state.deps
         svc = KindleStkService(deps.bookorbit_service)
+        amazon_domain = (
+            deps.bookorbit_service.get_secret_value("kindle_stk.amazon_domain")
+            or getattr(deps.cfg.stk, "amazon_domain", "amazon.com")
+            or "amazon.com"
+        )
         if not svc.is_configured():
-            return {"configured": False}
+            return {"configured": False, "amazon_domain": amazon_domain}
         return {
             "configured": True,
             "customer_id": deps.bookorbit_service.get_secret_value(
@@ -1887,7 +1898,22 @@ def register(app: FastAPI) -> None:
             "default_destination_sn": deps.bookorbit_service.get_secret_value(
                 "kindle_stk.default_destination_sn"
             ),
+            "amazon_domain": amazon_domain,
         }
+
+    @router.put("/kindle-stk/region")
+    def kindle_stk_set_region(payload: dict, request: Request) -> dict:
+        """Persist the user's Amazon regional domain before OAuth setup.
+
+        Must be called before POST /kindle-stk/oauth/start so the sign-in
+        URL and token exchange use the correct regional endpoint.
+        """
+        domain = (payload or {}).get("amazon_domain", "").strip()
+        if domain not in _KNOWN_AMAZON_DOMAINS:
+            raise HTTPException(400, f"unsupported Amazon domain: {domain!r}")
+        deps = request.app.state.deps
+        deps.bookorbit_service.set_secret_value("kindle_stk.amazon_domain", domain)
+        return {"ok": True, "amazon_domain": domain}
 
     @router.post("/kindle-stk/oauth/start")
     def kindle_stk_oauth_start(request: Request) -> dict:

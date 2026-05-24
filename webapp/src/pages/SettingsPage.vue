@@ -394,7 +394,25 @@ const stkStatus = ref<{
   registered_at?: string
   default_destination?: string
   default_destination_sn?: string
+  amazon_domain?: string
 }>({ configured: false })
+
+const AMAZON_DOMAINS: Array<{ value: string; label: string }> = [
+  { value: 'amazon.com',    label: 'United States (amazon.com)' },
+  { value: 'amazon.in',     label: 'India (amazon.in)' },
+  { value: 'amazon.co.uk',  label: 'United Kingdom (amazon.co.uk)' },
+  { value: 'amazon.de',     label: 'Germany (amazon.de)' },
+  { value: 'amazon.fr',     label: 'France (amazon.fr)' },
+  { value: 'amazon.it',     label: 'Italy (amazon.it)' },
+  { value: 'amazon.es',     label: 'Spain (amazon.es)' },
+  { value: 'amazon.co.jp',  label: 'Japan (amazon.co.jp)' },
+  { value: 'amazon.com.au', label: 'Australia (amazon.com.au)' },
+  { value: 'amazon.ca',     label: 'Canada (amazon.ca)' },
+  { value: 'amazon.com.br', label: 'Brazil (amazon.com.br)' },
+  { value: 'amazon.com.mx', label: 'Mexico (amazon.com.mx)' },
+]
+
+const stkAmazonDomain = ref<string>('amazon.com')
 
 const stkQuota = ref<{
   configured: boolean
@@ -417,12 +435,26 @@ async function loadStkStatus(): Promise<void> {
   try {
     const r1 = await api<any>('/api/kindle-stk/status')
     stkStatus.value = r1
+    if (r1.amazon_domain) stkAmazonDomain.value = r1.amazon_domain
     try {
       const r2 = await api<any>('/healthz')
       if (r2.stk) stkQuota.value = r2.stk
     } catch { /* healthz stk block optional */ }
   } catch (e) {
     console.warn('stk status load failed', e)
+  }
+}
+
+async function setAmazonDomain(domain: string): Promise<void> {
+  stkAmazonDomain.value = domain
+  try {
+    await api<any>('/api/kindle-stk/region', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amazon_domain: domain }),
+    })
+  } catch (e: any) {
+    console.warn('stk region set failed', e)
   }
 }
 
@@ -783,6 +815,16 @@ async function sendStkTest(): Promise<void> {
             Send via Amazon’s web upload — bypasses SMTP’s ~80/day cap,
             supports files up to 200 MB, no Gmail dependency.
           </p>
+          <div class="flex items-center gap-2">
+            <label class="text-sm font-medium whitespace-nowrap">Amazon region:</label>
+            <select
+              :value="stkAmazonDomain"
+              @change="setAmazonDomain(($event.target as HTMLSelectElement).value)"
+              class="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option v-for="d in AMAZON_DOMAINS" :key="d.value" :value="d.value">{{ d.label }}</option>
+            </select>
+          </div>
           <Button @click="openStkSetup" :loading="stkLoading">
             <Smartphone class="w-4 h-4" /> Set up Amazon
           </Button>
@@ -792,6 +834,7 @@ async function sendStkTest(): Promise<void> {
           <p class="text-sm">
             Connected as <strong>{{ stkStatus.customer_id }}</strong>
             <span v-if="stkStatus.registered_at" class="text-muted-foreground"> · since {{ stkStatus.registered_at.slice(0, 10) }}</span>
+            <span v-if="stkStatus.amazon_domain && stkStatus.amazon_domain !== 'amazon.com'" class="text-muted-foreground"> · {{ stkStatus.amazon_domain }}</span>
           </p>
           <p class="text-sm">
             Default destination: <strong>{{ stkStatus.default_destination || 'none' }}</strong>

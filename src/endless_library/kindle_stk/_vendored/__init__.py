@@ -35,16 +35,43 @@ class OAuth2:
     """
 
     @staticmethod
-    def create_oauth_url() -> tuple[str, str]:
+    def create_oauth_url(domain: str = "amazon.com") -> tuple[str, str]:
         """Return (authorize_url, code_verifier).
 
-        Instantiates a fresh upstream OAuth2 internally (it generates the
-        verifier in __init__), then calls get_signin_url() and exposes the
-        verifier as the second element of the tuple.
+        Builds the OAuth2 authorize URL for the specified Amazon regional
+        domain. ``domain`` defaults to ``amazon.com`` (US) but can be set to
+        e.g. ``amazon.in`` for India or ``amazon.co.uk`` for the UK.
         """
-        o = _UpstreamOAuth2()
-        url = o.get_signin_url()
-        verifier = o._verifier
+        import base64
+        import hashlib
+        import os
+        import urllib.parse
+
+        verifier = base64.b64encode(os.urandom(32), b"-_").rstrip(b"=").decode("utf8")
+        challenge = base64.b64encode(
+            hashlib.sha256(verifier.encode("utf-8")).digest(), b"-_"
+        ).rstrip(b"=").decode("utf8")
+
+        q = {
+            "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
+            "openid.ns.oa2": "http://www.amazon.com/ap/ext/oauth/2",
+            "openid.ns": "http://specs.openid.net/auth/2.0",
+            "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
+            "openid.oa2.client_id": "device:658490dfb190e494030082836775981fa23be0c2425441860352ba0f55915b43002d",
+            "openid.mode": "checkid_setup",
+            "openid.oa2.scope": "device_auth_access",
+            "openid.oa2.response_type": "code",
+            "openid.oa2.code_challenge": challenge,
+            "openid.oa2.code_challenge_method": "S256",
+            "openid.return_to": f"https://www.{domain}/gp/sendtokindle",
+            "openid.ns.pape": "http://specs.openid.net/extensions/pape/1.0",
+            "openid.pape.max_auth_age": "0",
+            "accountStatusPolicy": "P1",
+            "openid.assoc_handle": "amzn_device_na",
+            "pageId": "amzn_device_common_dark",
+            "disableLoginPrepopulate": "1",
+        }
+        url = f"https://www.{domain}/ap/signin?" + urllib.parse.urlencode(q)
         return url, verifier
 
     @staticmethod
@@ -61,6 +88,52 @@ class OAuth2:
             ) from e
 
 
+def _token_exchange_with_domain(authorization_code: str, code_verifier: str, domain: str = "amazon.com") -> str:
+    """Re-implementation of _api.token_exchange with a regional auth-domain header.
+
+    For non-US Amazon regions the x-amzn-identity-auth-domain header must use
+    the regional API hostname (e.g. api.amazon.in). The upstream _api.token_exchange
+    hardcodes api.amazon.com so we reimplement it here.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    auth_api_host = f"api.{domain}"
+    body = {
+        "app_name": "Unknown",
+        "client_domain": "DeviceLegacy",
+        "client_id": "658490dfb190e494030082836775981fa23be0c2425441860352ba0f55915b43002d",
+        "code_algorithm": "SHA-256",
+        "code_verifier": code_verifier,
+        "requested_token_type": "access_token",
+        "source_token": authorization_code,
+        "source_token_type": "authorization_code",
+    }
+    req = urllib.request.Request(
+        url=f"https://{auth_api_host}/auth/token",
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Accept-Language": "en-US",
+            "x-amzn-identity-auth-domain": auth_api_host,
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req) as r:  # noqa S310
+            res = json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            body_bytes = e.read()
+        except AttributeError:
+            body_bytes = None
+        raise _apimod.APIError(str(e), body_bytes) from e
+    access_token: str = res["access_token"]
+    return access_token
+
+
 class Client:
     """Biblichor wrapper over upstream stkclient.Client.
 
@@ -74,7 +147,7 @@ class Client:
 
     # ---------- OAuth registration ----------
 
-    def register_device(self, code: str, verifier: str) -> dict[str, Any]:
+    def register_device(self, code: str, verifier: str, domain: str = "amazon.com") -> dict[str, Any]:
         """Exchange authorization code + verifier for a registered device.
 
         Returns a dict with keys:
@@ -83,8 +156,12 @@ class Client:
 
         Also stores the resulting upstream Client so the same instance can
         be used for subsequent calls.
+
+        ``domain`` selects the regional Amazon auth endpoint, e.g. "amazon.in"
+        for India. The x-amzn-identity-auth-domain header in the token exchange
+        must match the domain used for the OAuth sign-in URL.
         """
-        access_token = _apimod.token_exchange(code, verifier)
+        access_token = _token_exchange_with_domain(code, verifier, domain)
         device_info: DeviceInfo = _apimod.register_device_with_token(access_token)
         self._upstream = _UpstreamClient(device_info)
         return {
