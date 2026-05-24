@@ -283,7 +283,7 @@ class BenchCfg(BaseModel):
 
 class StkCfg(BaseModel):
     """Send-to-Kindle delivery configuration."""
-    daily_cap: int = 500
+    daily_cap: int | None = None
     max_attempts: int = 3
     backoff_initial_sec: float = 5.0
     backoff_factor: float = 3.0
@@ -293,7 +293,7 @@ class StkCfg(BaseModel):
     # Prevents hitting Amazon anti-abuse threshold (~420 rapid sends/hour
     # revoked our device cert). Default 5.0 s => at most 720 sends/hour,
     # well below the observed revocation threshold.
-    min_send_interval_sec: float = 5.0
+    min_send_interval_sec: float = 10.0
 
 
 class Config(BaseModel):
