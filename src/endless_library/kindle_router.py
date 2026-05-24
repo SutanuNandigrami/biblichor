@@ -108,6 +108,12 @@ def deliver(
 
     attempt = 1
     for attempt in range(1, max_attempts + 1):
+        # Phase STK-recovery: throttle to cfg.stk.min_send_interval_sec between
+        # calls to avoid Amazon anti-abuse threshold that revoked our device cert
+        # after ~420 rapid sends in one hour.
+        min_interval = float(getattr(cfg.stk, 'min_send_interval_sec', 5.0))
+        if min_interval > 0:
+            time.sleep(min_interval)
         try:
             stk_svc.send_file(file_path, format=fmt, title=title, author=author)
             _record_event(

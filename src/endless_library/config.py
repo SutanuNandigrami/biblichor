@@ -289,6 +289,11 @@ class StkCfg(BaseModel):
     backoff_factor: float = 3.0
     client_id: str | None = None  # None = use vendored stkclient's hardcoded value
     amazon_domain: str = "amazon.com"  # Override for regional TLDs (.in, .co.uk, etc.)
+    # Phase STK-recovery: minimum gap between consecutive STK sends (seconds).
+    # Prevents hitting Amazon anti-abuse threshold (~420 rapid sends/hour
+    # revoked our device cert). Default 5.0 s => at most 720 sends/hour,
+    # well below the observed revocation threshold.
+    min_send_interval_sec: float = 5.0
 
 
 class Config(BaseModel):
