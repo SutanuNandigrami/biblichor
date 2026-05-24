@@ -71,7 +71,7 @@ def test_oauth_start_returns_authorize_url(tmp_path, monkeypatch):
 
 def test_oauth_complete_with_valid_url_persists_cert(tmp_path, monkeypatch):
     fake_client = FakeVendoredClient()
-    fake_client.register_device = lambda c, v: {
+    fake_client.register_device = lambda c, v, domain="amazon.com": {
         "device_private_key": "PEM_K", "adp_token": "ADP_T", "adp_did": "DID-1",
         "customer_id": "amzn1.account.y", "customer_name": "Test",
     }
@@ -181,3 +181,37 @@ def test_test_send_returns_4xx_on_send_failure(tmp_path, monkeypatch):
     svc.set_secret_value("kindle_stk.default_destination_name", "Kindle for Web")
     r = TestClient(app).post("/api/kindle-stk/test-send")
     assert r.status_code in (400, 502)
+
+
+def test_set_region_validates_against_known_list(tmp_path):
+    """PUT /api/kindle-stk/region with amazon.fake should return 400."""
+    app, svc = _build_app(tmp_path)
+    r = TestClient(app).put(
+        "/api/kindle-stk/region",
+        json={"amazon_domain": "amazon.fake"},
+    )
+    assert r.status_code == 400
+    assert "unsupported" in r.json().get("detail", "").lower()
+
+
+def test_set_region_persists_to_secrets(tmp_path):
+    """PUT /api/kindle-stk/region with amazon.in should store the secret and return ok."""
+    app, svc = _build_app(tmp_path)
+    r = TestClient(app).put(
+        "/api/kindle-stk/region",
+        json={"amazon_domain": "amazon.in"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["amazon_domain"] == "amazon.in"
+    assert svc.get_secret_value("kindle_stk.amazon_domain") == "amazon.in"
+
+
+def test_status_includes_amazon_domain(tmp_path):
+    """GET /api/kindle-stk/status should include amazon_domain field."""
+    app, svc = _build_app(tmp_path)
+    svc.set_secret_value("kindle_stk.amazon_domain", "amazon.co.uk")
+    r = TestClient(app).get("/api/kindle-stk/status")
+    assert r.status_code == 200
+    assert r.json().get("amazon_domain") == "amazon.co.uk"
