@@ -10,6 +10,7 @@ from .exceptions import (
     KindleStkAuthExpired,
     KindleStkRateLimited,
     KindleStkUploadFailed,
+    KindleStkBatchOverflow,
 )
 from .service import KindleStkService
 
@@ -20,4 +21,5 @@ __all__ = [
     "KindleStkAuthExpired",
     "KindleStkRateLimited",
     "KindleStkUploadFailed",
+    "KindleStkBatchOverflow",
 ]

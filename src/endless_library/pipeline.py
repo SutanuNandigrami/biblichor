@@ -27,7 +27,11 @@ from endless_library.domain.models import Candidate, ScoreBreakdown, SearchQuery
 from endless_library.domain.scoring import score_candidate
 from endless_library.domain.state_machine import decide_auto_pick
 from endless_library.download import DownloadError, download
-from endless_library.kindle_router import deliver as _kindle_deliver
+from endless_library.kindle_router import (
+    deliver as _kindle_deliver,
+    deliver_batch as _kindle_deliver_batch,
+    BookFile as _BookFile,
+)
 from endless_library.notifier import Notifier
 from endless_library.scrapers import registry as scrapers_registry
 from endless_library.security.archive_safety import SafetyLimits
@@ -829,6 +833,12 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
                     message=f"bookorbit drop failed (non-fatal): {e}",
                 )
 
+    # STK batching: if process_queue set _batch_delivery_mode=True on deps,
+    # return a pending-delivery sentinel instead of delivering immediately.
+    # process_queue will collect these and batch-deliver them all at once.
+    if getattr(deps, "_batch_delivery_mode", False):
+        return ("needs_delivery", file_path)
+
     # Phase STK 12: unified delivery via kindle_router (STK-primary, SMTP-fallback).
     # The router handles retry, backoff, rate-gate, and audit-event recording.
     # If both STK and SMTP are exhausted, result.ok is False and we mark failed.
@@ -854,15 +864,86 @@ def process_queue(deps: PipelineDeps) -> dict[str, int]:
 
     Phase 6u.5: "in_flight" is the sentinel process_one returns when
     another worker beat us to the claim. We don't count it as a
-    terminal outcome and we don't mark the book failed."""
+    terminal outcome and we don't mark the book failed.
+
+    STK batching: when STK is configured, we run all books through
+    process_one with _batch_delivery_mode=True on deps so that
+    _process_from_downloaded returns a (needs_delivery, file_path) tuple
+    instead of delivering immediately. We then batch-deliver all ready
+    books in one deliver_batch() call (one signed session per chunk,
+    one inter-batch throttle sleep per chunk of up to
+    cfg.stk.max_batch_files / 200 MB). This is ~25x faster throughput
+    than 1 book per 10s throttle interval.
+    """
+    from endless_library.kindle_stk import KindleStkService
+
     deps.books.reset_zombies(stale_minutes=deps.cfg.general.zombie_stale_minutes)
-    tally = {"sent": 0, "failed": 0, "needs_review": 0, "skipped": 0, "deferred": 0, "in_flight": 0}
-    for b in deps.books.pending(max_attempts=deps.cfg.general.max_attempts):
-        try:
-            st = process_one(deps, b)
-        except Exception as e:
-            log.exception("pipeline crashed on book %s", b.id)
-            deps.books.set_failed(b.id, error=f"pipeline crash: {e}")
-            st = "failed"
-        tally[st] = tally.get(st, 0) + 1
+    tally: dict[str, int] = {
+        "sent": 0, "failed": 0, "needs_review": 0,
+        "skipped": 0, "deferred": 0, "in_flight": 0,
+    }
+
+    # Determine whether to use STK batch mode.
+    stk_svc = KindleStkService(deps.bookorbit_service)
+    use_batch = stk_svc.is_configured()
+
+    if use_batch:
+        # Phase 1: process all books (search/download/convert/pre-flight)
+        # but defer the actual STK send.
+        deps._batch_delivery_mode = True  # type: ignore[attr-defined]
+        pending_delivery: list[tuple] = []  # (book, file_path)
+        for b in deps.books.pending(max_attempts=deps.cfg.general.max_attempts):
+            try:
+                st = process_one(deps, b)
+            except Exception as e:
+                log.exception("pipeline crashed on book %s", b.id)
+                deps.books.set_failed(b.id, error=f"pipeline crash: {e}")
+                st = "failed"
+            if isinstance(st, tuple) and st[0] == "needs_delivery":
+                _, ready_path = st
+                pending_delivery.append((b, ready_path))
+            else:
+                tally[st] = tally.get(st, 0) + 1
+        deps._batch_delivery_mode = False  # type: ignore[attr-defined]
+
+        if pending_delivery:
+            # Phase 2: batch-deliver all ready books.
+            book_files = [
+                _BookFile(
+                    book_id=b.id,
+                    file_path=fp,
+                    title=(b.title or "").strip() or fp.stem or "Unknown title",
+                    author=(b.author or "").strip() or "Unknown",
+                )
+                for b, fp in pending_delivery
+            ]
+            results = _kindle_deliver_batch(
+                files=book_files,
+                cfg=deps.cfg,
+                db_path=deps.db_path,
+                svc=deps.bookorbit_service,
+            )
+            for (b, fp), result in zip(pending_delivery, results):
+                if result.ok:
+                    deps.books.mark_kindled(b.id, method=result.method.value)
+                    deps.events.append(
+                        book_id=b.id, kind="send",
+                        message=f"sent via {result.method.value}",
+                    )
+                    deps.notifier.book_sent(b.title, b.author, fp.suffix.lstrip("."))
+                    tally["sent"] = tally.get("sent", 0) + 1
+                else:
+                    deps.books.set_failed(b.id, error=f"kindle send failed: {result.error}")
+                    tally["failed"] = tally.get("failed", 0) + 1
+    else:
+        # Non-STK path: single-file delivery per book (original behaviour).
+        for b in deps.books.pending(max_attempts=deps.cfg.general.max_attempts):
+            try:
+                st = process_one(deps, b)
+            except Exception as e:
+                log.exception("pipeline crashed on book %s", b.id)
+                deps.books.set_failed(b.id, error=f"pipeline crash: {e}")
+                st = "failed"
+            tally[st] = tally.get(st, 0) + 1
+
     return tally
