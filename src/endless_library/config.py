@@ -294,6 +294,14 @@ class StkCfg(BaseModel):
     # revoked our device cert). Default 5.0 s => at most 720 sends/hour,
     # well below the observed revocation threshold.
     min_send_interval_sec: float = 10.0
+    # STK multi-file batching: max number of files to pack into one STK
+    # session (one GetUploadUrl + upload + SendToKindle cycle per file,
+    # but all within the same signed session and one inter-batch sleep).
+    # Hard budget is 200 MB total per batch. This is a defensive upper
+    # bound so 500 tiny books don't collapse into a single giant call.
+    max_batch_files: int = 25
+    # Total byte budget for a single STK batch (Amazon 200 MB cap).
+    max_batch_bytes: int = 200 * 1024 * 1024
 
 
 class Config(BaseModel):

@@ -1,8 +1,8 @@
-"""Single delivery entry-point used by the pipeline.
+"""Single and batch delivery entry-points used by the pipeline.
 
 STK-primary + SMTP-fallback decision tree. Handles retry + backoff,
-rate-gate, and event-log recording. The pipeline calls deliver(...);
-it does not need to know about STK vs SMTP.
+rate-gate, and event-log recording. The pipeline calls deliver(...) for
+single-book paths or deliver_batch(...) for queued batches.
 
 Signature adaptation notes:
 - send_to_kindle() takes keyword-only args: attachment, kindle, smtp,
@@ -24,14 +24,18 @@ from .db.schema import connect
 from .kindle import send_to_kindle as _send_smtp
 from .kindle_stk import (
     KindleStkAuthExpired,
+    KindleStkBatchOverflow,
     KindleStkNotConfigured,
     KindleStkRateLimited,
     KindleStkService,
     KindleStkUploadFailed,
 )
+from .kindle_stk.service import FileEntry
 from .stk_rate import quota_status as _stk_quota_status
 
 log = logging.getLogger(__name__)
+
+STK_HARD_BUDGET_BYTES = 200 * 1024 * 1024  # Amazon 200 MB per-call cap
 
 
 class DeliveryMethod(str, Enum):
@@ -47,6 +51,10 @@ class DeliveryResult:
     attempts: int
     duration_ms: int
 
+
+# ---------------------------------------------------------------------------
+# Single-file delivery (original path, unchanged contract)
+# ---------------------------------------------------------------------------
 
 def deliver(
     *,
@@ -97,12 +105,6 @@ def deliver(
     auth_expired = False
 
     fmt = _infer_format(file_path)
-    # Amazon STK's documentMetadata fields are validated as non-empty
-    # strings (Member must have length >= 1). Books with NULL/empty
-    # author or title cause a 400 Bad Request, which the router then
-    # records as "Unexpected stkclient failure" + falls back to SMTP
-    # — exactly what we don't want when STK is the configured primary.
-    # Coerce to a placeholder so STK accepts.
     raw_title = getattr(book, "title", "") or ""
     raw_author = getattr(book, "author", "") or ""
     title = raw_title.strip() or file_path.stem or "Unknown title"
@@ -113,7 +115,7 @@ def deliver(
         # Phase STK-recovery: throttle to cfg.stk.min_send_interval_sec between
         # calls to avoid Amazon anti-abuse threshold that revoked our device cert
         # after ~420 rapid sends in one hour.
-        min_interval = float(getattr(cfg.stk, 'min_send_interval_sec', 5.0))
+        min_interval = float(getattr(cfg.stk, "min_send_interval_sec", 5.0))
         if min_interval > 0:
             time.sleep(min_interval)
         try:
@@ -160,6 +162,232 @@ def deliver(
     )
 
 
+# ---------------------------------------------------------------------------
+# BookFile -- thin descriptor used by deliver_batch callers
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BookFile:
+    """Descriptor for one book ready for delivery."""
+    book_id: int
+    file_path: Path
+    title: str
+    author: str
+
+
+# ---------------------------------------------------------------------------
+# Greedy bin-packer
+# ---------------------------------------------------------------------------
+
+def _pack_batches(
+    book_files: list[BookFile],
+    *,
+    max_bytes: int,
+    max_files: int,
+) -> tuple[list[list[BookFile]], list[BookFile]]:
+    """Greedy bin-pack book_files into batches.
+
+    Returns (batches, oversized) where:
+      - batches: list of lists, each <= max_bytes total and <= max_files items.
+      - oversized: list of BookFile where a single file exceeds max_bytes
+        (these cannot be batched and must be handled separately).
+    """
+    batches: list[list[BookFile]] = []
+    oversized: list[BookFile] = []
+    current: list[BookFile] = []
+    current_bytes = 0
+
+    for bf in book_files:
+        sz = bf.file_path.stat().st_size
+        if sz > max_bytes:
+            oversized.append(bf)
+            continue
+        # Would adding this file overflow the current batch?
+        if current and (current_bytes + sz > max_bytes or len(current) >= max_files):
+            batches.append(current)
+            current = []
+            current_bytes = 0
+        current.append(bf)
+        current_bytes += sz
+
+    if current:
+        batches.append(current)
+
+    return batches, oversized
+
+
+# ---------------------------------------------------------------------------
+# Batch delivery
+# ---------------------------------------------------------------------------
+
+def deliver_batch(
+    *,
+    files: list[BookFile],
+    cfg: Any,
+    db_path: Path,
+    svc: Any,
+) -> list[DeliveryResult]:
+    """Deliver a list of books via STK batching (one call per packed chunk).
+
+    Greedy bin-packs files into chunks <= 200 MB and <= cfg.stk.max_batch_files.
+    Each chunk is one KindleStkService.send_files() call (one signed session).
+    The inter-batch throttle sleep (cfg.stk.min_send_interval_sec) fires ONCE
+    per batch, not once per book -- this is the main throughput win.
+
+    For each book:
+      - Oversized (>200 MB single file) -> marked needs_review, event recorded.
+      - STK failure in mid-batch -> remaining books in the batch fall back to
+        individual SMTP delivery so no book is silently dropped.
+      - One 'send-stk' event is written per book (audit log integrity).
+      - One 'send-stk-batch' event is written per batch (for stats).
+
+    Falls back to single-file SMTP if STK is not configured.
+
+    Returns a list of DeliveryResult, one per input BookFile, in order.
+    """
+    start_all = time.monotonic()
+    stk_svc = KindleStkService(svc)
+    results: list[DeliveryResult] = []
+
+    # --- Quota pre-check (same as single-file path) ---
+    stk_available = stk_svc.is_configured()
+    if stk_available and cfg.stk.daily_cap is not None:
+        status = _stk_quota_status(db_path, daily_cap=cfg.stk.daily_cap)
+        if status.exhausted:
+            stk_available = False
+            log.info("kindle_router.deliver_batch: STK cap exhausted, using SMTP for all")
+
+    if not stk_available:
+        # Fall back all books to SMTP
+        for bf in files:
+            start = time.monotonic()
+
+            class _FakeBook:
+                id = bf.book_id
+                title = bf.title
+                author = bf.author
+
+            ok, err = _smtp_deliver(bf.file_path, _FakeBook(), cfg, db_path=db_path)
+            results.append(DeliveryResult(
+                ok=ok, method=DeliveryMethod.SMTP, error=err,
+                attempts=1, duration_ms=int((time.monotonic() - start) * 1000),
+            ))
+        return results
+
+    max_batch_bytes = int(getattr(cfg.stk, "max_batch_bytes", STK_HARD_BUDGET_BYTES))
+    max_batch_files = int(getattr(cfg.stk, "max_batch_files", 25))
+    min_interval = float(getattr(cfg.stk, "min_send_interval_sec", 10.0))
+
+    batches, oversized = _pack_batches(
+        files, max_bytes=max_batch_bytes, max_files=max_batch_files
+    )
+
+    # --- Handle oversized files immediately ---
+    oversized_results: dict[int, DeliveryResult] = {}
+    for bf in oversized:
+        sz = bf.file_path.stat().st_size
+        msg = f"file-too-large-for-stk ({sz // 1_048_576} MB > 200 MB)"
+        _record_event(
+            db_path, "send-stk-failed", bf.book_id,
+            message=msg,
+            meta={"reason": "file-too-large-for-stk", "size_bytes": sz},
+        )
+        oversized_results[bf.book_id] = DeliveryResult(
+            ok=False, method=DeliveryMethod.STK, error=msg,
+            attempts=0, duration_ms=0,
+        )
+
+    # Map book_id -> result for final ordering
+    result_map: dict[int, DeliveryResult] = dict(oversized_results)
+
+    # --- Send each batch ---
+    for batch in batches:
+        batch_start = time.monotonic()
+        if min_interval > 0:
+            time.sleep(min_interval)
+
+        entries = [
+            FileEntry(
+                path=bf.file_path,
+                title=(bf.title or "").strip() or bf.file_path.stem or "Unknown title",
+                author=(bf.author or "").strip() or "Unknown",
+                format=_infer_format(bf.file_path),
+            )
+            for bf in batch
+        ]
+
+        batch_ok = True
+        batch_error: str | None = None
+        try:
+            stk_svc.send_files(entries, max_batch_bytes=max_batch_bytes)
+        except (KindleStkAuthExpired, KindleStkRateLimited,
+                KindleStkUploadFailed, KindleStkNotConfigured,
+                KindleStkBatchOverflow) as e:
+            batch_ok = False
+            batch_error = str(e)
+            log.warning("kindle_router.deliver_batch: batch failed (%s), falling back per-book: %s",
+                        type(e).__name__, e)
+        except Exception as e:
+            batch_ok = False
+            batch_error = str(e)
+            log.exception("kindle_router.deliver_batch: unexpected batch failure")
+
+        batch_dur = int((time.monotonic() - batch_start) * 1000)
+        total_sz = sum(bf.file_path.stat().st_size for bf in batch)
+
+        if batch_ok:
+            # Record batch-level event
+            _record_event(
+                db_path, "send-stk-batch", None,
+                message=f"stk-batch-ok: {len(batch)} files, {total_sz // 1024} KB",
+                meta={
+                    "file_count": len(batch),
+                    "total_bytes": total_sz,
+                    "book_ids": [bf.book_id for bf in batch],
+                    "duration_ms": batch_dur,
+                },
+            )
+            for bf in batch:
+                _record_event(
+                    db_path, "send-stk", bf.book_id,
+                    message="send-stk-ok",
+                    meta={"batch": True, "duration_ms": batch_dur},
+                )
+                result_map[bf.book_id] = DeliveryResult(
+                    ok=True, method=DeliveryMethod.STK, error=None,
+                    attempts=1, duration_ms=batch_dur,
+                )
+        else:
+            # Batch failed -> fall back each book individually to SMTP
+            for bf in batch:
+
+                class _FakeBook:
+                    id = bf.book_id
+                    title = bf.title
+                    author = bf.author
+
+                _record_event(
+                    db_path, "send-stk-failed", bf.book_id,
+                    message=batch_error or "stk-batch-failed",
+                    meta={"batch": True, "fell_back_to": "smtp"},
+                )
+                ok, err = _smtp_deliver(bf.file_path, _FakeBook(), cfg, db_path=db_path)
+                result_map[bf.book_id] = DeliveryResult(
+                    ok=ok, method=DeliveryMethod.SMTP, error=err,
+                    attempts=2, duration_ms=int((time.monotonic() - batch_start) * 1000),
+                )
+
+    # Return results in original input order
+    for bf in files:
+        results.append(result_map[bf.book_id])
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
 def _smtp_deliver(
     file_path: Path,
     book: Any,
@@ -175,10 +403,7 @@ def _smtp_deliver(
 
     SMTP quota gate: if db_path is supplied AND cfg.smtp.daily_cap is set,
     bail out *before* the SMTP attempt when the rolling 24h count is at
-    or above the cap. Prevents the router from blasting past the user's
-    configured SMTP cap when STK is failing on every book and the SMTP
-    fallback would otherwise hit the upstream's hard limit (and flood
-    the user's Kindle inbox via the legacy email path).
+    or above the cap.
     """
     if db_path is not None:
         try:

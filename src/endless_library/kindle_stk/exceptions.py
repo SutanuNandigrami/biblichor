@@ -28,3 +28,16 @@ class KindleStkRateLimited(KindleStkError):
 
 class KindleStkUploadFailed(KindleStkError):
     """Transient or unknown failure during the 4-step send flow."""
+
+
+class KindleStkBatchOverflow(KindleStkError):
+    """A single file in the batch exceeds the 200 MB STK per-call budget.
+
+    The offending file cannot be sent via STK at all. Caller should mark
+    the book needs_review with last_error='file-too-large-for-stk'.
+    """
+
+    def __init__(self, message: str = '', *, file_path: str = '', size_bytes: int = 0) -> None:
+        super().__init__(message)
+        self.file_path = file_path
+        self.size_bytes = size_bytes

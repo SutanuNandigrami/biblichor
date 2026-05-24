@@ -29,6 +29,7 @@ Ephemeral OAuth state
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 import time
@@ -42,6 +43,7 @@ import requests
 from . import _vendored
 from .exceptions import (
     KindleStkAuthExpired,
+    KindleStkBatchOverflow,
     KindleStkNotConfigured,
     KindleStkRateLimited,
     KindleStkUploadFailed,
@@ -50,6 +52,17 @@ from .exceptions import (
 log = logging.getLogger(__name__)
 
 DEVICES_CACHE_TTL_SEC = 300
+STK_MAX_BATCH_BYTES = 200 * 1024 * 1024  # Amazon 200 MB per-call hard cap
+
+
+@dataclasses.dataclass
+class FileEntry:
+    """One file to be delivered in a multi-file STK batch."""
+
+    path: Path
+    title: str
+    author: str
+    format: str
 
 
 class KindleStkService:
@@ -196,7 +209,7 @@ class KindleStkService:
             }
         )
 
-    # ---- Send ----
+    # ---- Send (single file) ----
 
     def send_file(
         self,
@@ -244,6 +257,93 @@ class KindleStkService:
             self._raise_typed_from_urllib_error(e)
         except Exception as e:
             raise KindleStkUploadFailed(f"Unexpected stkclient failure: {e}") from e
+
+    # ---- Send (multi-file batch) ----
+
+    def send_files(
+        self,
+        files: list[FileEntry],
+        *,
+        max_batch_bytes: int = STK_MAX_BATCH_BYTES,
+    ) -> list[dict[str, Any]]:
+        """Send multiple files to the default destination in one signed session.
+
+        Each file is a FileEntry(path, title, author, format). Files are sent
+        sequentially within a single signed session (one _build_client call,
+        shared Signer), which avoids N separate cert challenge + throttle sleeps.
+
+        Pre-flight validation:
+          - Any single file > max_batch_bytes -> raises KindleStkBatchOverflow.
+          - Total batch > max_batch_bytes -> raises KindleStkBatchOverflow.
+            (kindle_router.deliver_batch is responsible for splitting; this is
+            a safety net.)
+
+        Returns a list of dicts, one per file: {sku, file_path}.
+
+        Raises:
+            KindleStkBatchOverflow: single file or total batch exceeds 200 MB.
+            KindleStkNotConfigured: no cert or no default device.
+            KindleStkAuthExpired, KindleStkRateLimited, KindleStkUploadFailed.
+        """
+        self._require_configured()
+        dest_sn = self._svc.get_secret_value("kindle_stk.default_destination_sn")
+        if not dest_sn:
+            raise KindleStkNotConfigured(
+                "No default destination device. Complete setup wizard first."
+            )
+
+        devices = self.list_devices()
+        dest = next(
+            (d for d in devices if d.device_serial_number == dest_sn), None
+        )
+        if not dest:
+            raise KindleStkNotConfigured(
+                f"Default device {dest_sn!r} is no longer registered. Re-pick a device."
+            )
+
+        # --- Pre-flight size checks ---
+        total = 0
+        for fe in files:
+            sz = fe.path.stat().st_size
+            if sz > max_batch_bytes:
+                raise KindleStkBatchOverflow(
+                    f"File {fe.path.name!r} ({sz // 1_048_576} MB) exceeds "
+                    f"200 MB STK hard limit",
+                    file_path=str(fe.path),
+                    size_bytes=sz,
+                )
+            total += sz
+        if total > max_batch_bytes:
+            raise KindleStkBatchOverflow(
+                f"Batch total {total // 1_048_576} MB exceeds 200 MB STK limit "
+                f"({len(files)} files); caller should split into smaller chunks",
+                size_bytes=total,
+            )
+
+        # Build one client (one signed session) for the whole batch.
+        client = self._build_client()
+        results: list[dict[str, Any]] = []
+        for fe in files:
+            try:
+                ret = client.send_file(
+                    fe.path,
+                    destinations=[dest],
+                    format=fe.format,
+                    title=fe.title,
+                    author=fe.author,
+                )
+                results.append({"sku": ret.get("sku", ""), "file_path": str(fe.path)})
+            except requests.HTTPError as e:
+                self._raise_typed_from_http_error(e)
+            except _vendored._api.APIError as e:
+                self._raise_typed_from_api_error(e)
+            except urllib.error.HTTPError as e:
+                self._raise_typed_from_urllib_error(e)
+            except Exception as e:
+                raise KindleStkUploadFailed(
+                    f"Unexpected stkclient failure on {fe.path.name!r}: {e}"
+                ) from e
+        return results
 
     # ---- Exception translation helpers ----
 
