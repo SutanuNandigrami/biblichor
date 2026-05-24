@@ -67,7 +67,7 @@ def deliver(
 
     # Branch 1: STK not configured -> SMTP only.
     if not stk_svc.is_configured():
-        ok, err = _smtp_deliver(file_path, book, cfg)
+        ok, err = _smtp_deliver(file_path, book, cfg, db_path=db_path)
         return DeliveryResult(
             ok=ok, method=DeliveryMethod.SMTP, error=err,
             attempts=1, duration_ms=int((time.monotonic() - start) * 1000),
@@ -81,7 +81,7 @@ def deliver(
             message="stk-cap-reached",
             meta={"reason": "stk-cap-reached", "sent_24h": status.sent_24h, "cap": status.cap},
         )
-        ok, err = _smtp_deliver(file_path, book, cfg)
+        ok, err = _smtp_deliver(file_path, book, cfg, db_path=db_path)
         return DeliveryResult(
             ok=ok, method=DeliveryMethod.SMTP, error=err, attempts=1,
             duration_ms=int((time.monotonic() - start) * 1000),
@@ -95,8 +95,16 @@ def deliver(
     auth_expired = False
 
     fmt = _infer_format(file_path)
-    title = getattr(book, "title", file_path.stem)
-    author = getattr(book, "author", "") or ""
+    # Amazon STK's documentMetadata fields are validated as non-empty
+    # strings (Member must have length >= 1). Books with NULL/empty
+    # author or title cause a 400 Bad Request, which the router then
+    # records as "Unexpected stkclient failure" + falls back to SMTP
+    # — exactly what we don't want when STK is the configured primary.
+    # Coerce to a placeholder so STK accepts.
+    raw_title = getattr(book, "title", "") or ""
+    raw_author = getattr(book, "author", "") or ""
+    title = raw_title.strip() or file_path.stem or "Unknown title"
+    author = raw_author.strip() or "Unknown"
 
     attempt = 1
     for attempt in range(1, max_attempts + 1):
@@ -136,7 +144,7 @@ def deliver(
         },
     )
 
-    ok, err = _smtp_deliver(file_path, book, cfg)
+    ok, err = _smtp_deliver(file_path, book, cfg, db_path=db_path)
     return DeliveryResult(
         ok=ok, method=DeliveryMethod.SMTP, error=err,
         attempts=attempt + 1,
@@ -144,14 +152,40 @@ def deliver(
     )
 
 
-def _smtp_deliver(file_path: Path, book: Any, cfg: Any) -> tuple[bool, str | None]:
+def _smtp_deliver(
+    file_path: Path,
+    book: Any,
+    cfg: Any,
+    db_path: Path | None = None,
+) -> tuple[bool, str | None]:
     """Wrap send_to_kindle() with its real keyword-only signature.
 
     send_to_kindle(*, attachment, kindle, smtp, title, author, max_mb_override=None)
     extracts kindle/smtp cfg blocks; if they are absent (e.g. in tests
     that monkeypatch _send_smtp entirely), the monkeypatch fires before
     this code runs so the missing attrs never matter.
+
+    SMTP quota gate: if db_path is supplied AND cfg.smtp.daily_cap is set,
+    bail out *before* the SMTP attempt when the rolling 24h count is at
+    or above the cap. Prevents the router from blasting past the user's
+    configured SMTP cap when STK is failing on every book and the SMTP
+    fallback would otherwise hit the upstream's hard limit (and flood
+    the user's Kindle inbox via the legacy email path).
     """
+    if db_path is not None:
+        try:
+            from .smtp_rate import quota_status as _smtp_qs
+            smtp_cap = int(getattr(getattr(cfg, "smtp", None), "daily_cap", 0) or 0)
+            if smtp_cap > 0:
+                qs = _smtp_qs(db_path, daily_cap=smtp_cap)
+                if qs.exhausted:
+                    log.warning(
+                        "kindle_router: SMTP cap exhausted (%d/%d), skipping fallback",
+                        qs.sent_24h, qs.cap,
+                    )
+                    return False, f"smtp-cap-reached ({qs.sent_24h}/{qs.cap})"
+        except Exception as e:
+            log.debug("kindle_router: smtp quota check failed (continuing): %s", e)
     try:
         kindle_cfg = getattr(cfg, "kindle", None)
         smtp_cfg = getattr(cfg, "smtp", None)
