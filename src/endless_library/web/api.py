@@ -1936,6 +1936,27 @@ def register(app: FastAPI) -> None:
         except KindleStkUploadFailed as e:
             raise HTTPException(502, str(e)) from e
 
+    def _derive_device_type(caps) -> str:
+        """Real OwnedDevice has no device_type field — only a capabilities
+        mapping. Derive a friendly type-like string for the SPA's
+        Kindle-for-Web pre-selection logic. Capability key names vary
+        across device families; we check several known markers and fall
+        back to 'kindle'."""
+        if not caps:
+            return "kindle"
+        c = {str(k).lower(): bool(v) for k, v in dict(caps).items() if v}
+        for marker, label in (
+            ("supports_web_send", "FionaWebApp"),
+            ("web_app", "FionaWebApp"),
+            ("cloudreader", "FionaWebApp"),
+            ("kindle_reader", "FionaWebApp"),
+            ("supports_iphone_send", "iOS"),
+            ("supports_android_send", "Android"),
+        ):
+            if marker in c:
+                return label
+        return "kindle"
+
     @router.get("/kindle-stk/devices")
     def kindle_stk_devices(request: Request) -> dict:
         deps = request.app.state.deps
@@ -1948,8 +1969,11 @@ def register(app: FastAPI) -> None:
             "devices": [
                 {
                     "device_serial_number": d.device_serial_number,
-                    "device_type": d.device_type,
+                    "device_type": getattr(d, "device_type", "") or _derive_device_type(getattr(d, "device_capabilities", {})),
                     "device_name": d.device_name,
+                    # Expose raw capabilities so the SPA can do its own
+                    # Kindle-for-Web detection without trusting our heuristic.
+                    "device_capabilities": dict(getattr(d, "device_capabilities", {})),
                 }
                 for d in devs
             ]
