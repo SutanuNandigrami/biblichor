@@ -20,7 +20,15 @@ def db(tmp_path):
 @pytest.fixture
 def cfg():
     return SimpleNamespace(
-        stk=SimpleNamespace(daily_cap=500, max_attempts=3, backoff_initial_sec=0.0, backoff_factor=1.0),
+        stk=SimpleNamespace(
+            daily_cap=500,
+            max_attempts=3,
+            backoff_initial_sec=0.0,
+            backoff_factor=1.0,
+            # Phase STK-recovery: set to 0 in tests so throttle sleep does
+            # not interfere with assertions on sleep_calls.
+            min_send_interval_sec=0.0,
+        ),
         smtp=SimpleNamespace(daily_cap=80),
     )
 

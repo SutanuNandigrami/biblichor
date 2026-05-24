@@ -30,7 +30,9 @@ Ephemeral OAuth state
 from __future__ import annotations
 
 import logging
+import re
 import time
+import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -162,7 +164,12 @@ class KindleStkService:
             if time.time() - ts < DEVICES_CACHE_TTL_SEC:
                 return devices
         client = self._build_client()
-        devices = client.get_owned_devices()
+        try:
+            devices = client.get_owned_devices()
+        except _vendored._api.APIError as e:
+            self._raise_typed_from_api_error(e)
+        except urllib.error.HTTPError as e:
+            self._raise_typed_from_urllib_error(e)
         self._devices_cache = (devices, time.time())
         return devices
 
@@ -231,8 +238,14 @@ class KindleStkService:
             )
         except requests.HTTPError as e:
             self._raise_typed_from_http_error(e)
+        except _vendored._api.APIError as e:
+            self._raise_typed_from_api_error(e)
+        except urllib.error.HTTPError as e:
+            self._raise_typed_from_urllib_error(e)
         except Exception as e:
             raise KindleStkUploadFailed(f"Unexpected stkclient failure: {e}") from e
+
+    # ---- Exception translation helpers ----
 
     def _raise_typed_from_http_error(self, exc: requests.HTTPError) -> None:
         """Map a raw requests.HTTPError to biblichor's typed exception."""
@@ -255,6 +268,47 @@ class KindleStkService:
                 retry_after_sec=retry_after,
             ) from exc
         raise KindleStkUploadFailed(f"HTTP {status}: {exc}") from exc
+
+    def _raise_typed_from_urllib_error(self, exc: urllib.error.HTTPError) -> None:
+        """Map a raw urllib.error.HTTPError to biblichor's typed exception."""
+        status = getattr(exc, "code", None)
+        if status in (401, 403):
+            raise KindleStkAuthExpired(
+                f"Amazon rejected the device cert (HTTP {status}). Re-OAuth required."
+            ) from exc
+        if status == 429:
+            raise KindleStkRateLimited(
+                "Rate-limited by Amazon (HTTP 429)",
+                retry_after_sec=5,
+            ) from exc
+        raise KindleStkUploadFailed(f"HTTP {status}: {exc}") from exc
+
+    def _raise_typed_from_api_error(self, exc) -> None:
+        """Map a vendored APIError to biblichor's typed exception.
+
+        The APIError message may contain the raw JSON body, e.g.:
+            'HTTP Error 403: Forbidden {"Message": "Failed to validate DeviceInfoToken."}'
+        Parse the HTTP status from the str representation first; fall back to
+        the 'DeviceInfoToken' text pattern as an auth-expired signal.
+        """
+        msg = str(exc)
+
+        # Try to extract status code from "HTTP Error NNN:" prefix
+        status: int | None = None
+        m = re.search(r"HTTP Error (\d+)", msg)
+        if m:
+            status = int(m.group(1))
+
+        if status in (401, 403) or "DeviceInfoToken" in msg:
+            raise KindleStkAuthExpired(
+                f"Amazon rejected the device cert (APIError). Re-OAuth required. detail={msg!r}"
+            ) from exc
+        if status == 429:
+            raise KindleStkRateLimited(
+                "Rate-limited by Amazon (APIError 429)",
+                retry_after_sec=5,
+            ) from exc
+        raise KindleStkUploadFailed(f"APIError: {msg}") from exc
 
     # ---- Deregister ----
 
