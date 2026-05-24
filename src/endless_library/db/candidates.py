@@ -103,6 +103,14 @@ class CandidateRepo:
             ).fetchall()
         return [CandidateRow.from_row(r) for r in rows]
 
+
+    def get_by_id(self, candidate_id: int) -> CandidateRow | None:
+        with connect(self.db_path) as conn:
+            r = conn.execute(
+                "SELECT * FROM candidates WHERE id = ?", (candidate_id,)
+            ).fetchone()
+            return CandidateRow.from_row(r) if r else None
+
     def clear_for_book(self, book_id: int) -> None:
         with connect(self.db_path) as conn:
             conn.execute("DELETE FROM candidates WHERE book_id = ?", (book_id,))
