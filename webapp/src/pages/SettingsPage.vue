@@ -815,15 +815,18 @@ async function sendStkTest(): Promise<void> {
             Send via Amazon’s web upload — bypasses SMTP’s ~80/day cap,
             supports files up to 200 MB, no Gmail dependency.
           </p>
-          <div class="flex items-center gap-2">
-            <label class="text-sm font-medium whitespace-nowrap">Amazon region:</label>
-            <select
-              :value="stkAmazonDomain"
-              @change="setAmazonDomain(($event.target as HTMLSelectElement).value)"
-              class="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option v-for="d in AMAZON_DOMAINS" :key="d.value" :value="d.value">{{ d.label }}</option>
-            </select>
+          <div class="flex flex-col gap-1">
+            <div class="flex items-center gap-2">
+              <label class="text-sm font-medium whitespace-nowrap">Amazon region:</label>
+              <select
+                :value="stkAmazonDomain"
+                @change="setAmazonDomain(($event.target as HTMLSelectElement).value)"
+                class="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option v-for="d in AMAZON_DOMAINS" :key="d.value" :value="d.value">{{ d.label }}</option>
+              </select>
+            </div>
+            <p class="text-xs text-muted-foreground">Used for account region; auth flow always uses amazon.com</p>
           </div>
           <Button @click="openStkSetup" :loading="stkLoading">
             <Smartphone class="w-4 h-4" /> Set up Amazon

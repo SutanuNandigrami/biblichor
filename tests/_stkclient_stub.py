@@ -76,10 +76,12 @@ class FakeOAuth2:
         """Returns (authorize_url, code_verifier).
 
         Mirrors the real OAuth2.create_oauth_url(domain=...) signature.
+        The domain parameter is accepted but the URL is always amazon.com,
+        matching the corrected real implementation.
         """
         return (
-            f'https://www.{domain}/ap/oa?client_id=stk&scope=&response_type=code&'
-            f'redirect_uri=https%3A%2F%2Fwww.{domain}%2Fap%2Fmaplanding&'
+            'https://www.amazon.com/ap/oa?client_id=stk&scope=&response_type=code&'
+            'redirect_uri=https%3A%2F%2Fwww.amazon.com%2Fap%2Fmaplanding&'
             'code_challenge=fake_challenge&code_challenge_method=S256',
             'fake_code_verifier_FAKEFAKE',
         )

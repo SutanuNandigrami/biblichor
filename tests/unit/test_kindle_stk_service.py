@@ -224,17 +224,18 @@ def test_deregister_wipes_all_secrets(fake_bookorbit_svc, monkeypatch):
         assert fake_bookorbit_svc.get_secret_value(k) is None
 
 
-def test_start_oauth_uses_configured_domain(fake_bookorbit_svc, monkeypatch):
-    """When kindle_stk.amazon_domain is set to amazon.in, the authorize URL must
-    start with https://www.amazon.in/ not https://www.amazon.com/."""
+def test_start_oauth_always_uses_amazon_com_url_even_for_india(fake_bookorbit_svc, monkeypatch):
+    """Even when kindle_stk.amazon_domain is set to amazon.in, the authorize URL
+    must use www.amazon.com — Amazon's OAuth/STK paths are centralised on .com.
+    The domain only affects the token-exchange x-amzn-identity-auth-domain header."""
     from tests._stkclient_stub import FakeOAuth2
     monkeypatch.setattr("endless_library.kindle_stk._vendored.OAuth2", FakeOAuth2)
     fake_bookorbit_svc.set_secret_value("kindle_stk.amazon_domain", "amazon.in")
     from endless_library.kindle_stk.service import KindleStkService
     svc = KindleStkService(fake_bookorbit_svc)
     url, verifier = svc.start_oauth()
-    assert "amazon.in" in url, f"Expected amazon.in in URL but got: {url}"
-    assert "amazon.com" not in url.split("?")[0], f"Expected no amazon.com in base URL: {url}"
+    assert "amazon.com" in url, f"Expected amazon.com in URL but got: {url}"
+    assert "amazon.in" not in url.split("?")[0], f"URL base must NOT be amazon.in: {url}"
 
 
 def test_start_oauth_defaults_to_amazon_com_when_no_region_set(fake_bookorbit_svc, monkeypatch):
@@ -246,3 +247,29 @@ def test_start_oauth_defaults_to_amazon_com_when_no_region_set(fake_bookorbit_sv
     svc = KindleStkService(fake_bookorbit_svc)
     url, verifier = svc.start_oauth()
     assert "amazon.com" in url, f"Expected amazon.com in URL but got: {url}"
+
+def test_create_oauth_url_always_returns_amazon_com_for_india():
+    """BiblichorOAuth2.create_oauth_url(domain='amazon.in') must return a URL
+    with www.amazon.com/ap/signin — NOT amazon.in."""
+    from endless_library.kindle_stk._vendored import OAuth2
+    url, verifier = OAuth2.create_oauth_url(domain="amazon.in")
+    assert "www.amazon.com/ap/signin" in url, (
+        f"URL base must be www.amazon.com/ap/signin, got: {url}"
+    )
+    assert "amazon.in" not in url.split("?")[0], (
+        f"URL base must NOT contain amazon.in: {url}"
+    )
+    # return_to must also be amazon.com
+    assert "openid.return_to=https%3A%2F%2Fwww.amazon.com" in url, (
+        f"openid.return_to must be www.amazon.com: {url}"
+    )
+
+
+def test_create_oauth_url_always_returns_amazon_com_for_uk():
+    """BiblichorOAuth2.create_oauth_url(domain='amazon.co.uk') must return
+    www.amazon.com/ap/signin."""
+    from endless_library.kindle_stk._vendored import OAuth2
+    url, verifier = OAuth2.create_oauth_url(domain="amazon.co.uk")
+    assert "www.amazon.com/ap/signin" in url, (
+        f"URL base must be www.amazon.com/ap/signin, got: {url}"
+    )

@@ -38,9 +38,12 @@ class OAuth2:
     def create_oauth_url(domain: str = "amazon.com") -> tuple[str, str]:
         """Return (authorize_url, code_verifier).
 
-        Builds the OAuth2 authorize URL for the specified Amazon regional
-        domain. ``domain`` defaults to ``amazon.com`` (US) but can be set to
-        e.g. ``amazon.in`` for India or ``amazon.co.uk`` for the UK.
+        The ``domain`` parameter is accepted for API compatibility but the
+        user-facing OAuth URL is ALWAYS hardcoded to www.amazon.com.
+        Amazon's OAuth and Send-to-Kindle paths are centralised on amazon.com
+        regardless of the user's account region (amazon.in, amazon.co.uk, etc.).
+        The domain is only used for the x-amzn-identity-auth-domain header in
+        the token-exchange step (see _token_exchange_with_domain).
         """
         import base64
         import hashlib
@@ -63,7 +66,7 @@ class OAuth2:
             "openid.oa2.response_type": "code",
             "openid.oa2.code_challenge": challenge,
             "openid.oa2.code_challenge_method": "S256",
-            "openid.return_to": f"https://www.{domain}/gp/sendtokindle",
+            "openid.return_to": "https://www.amazon.com/gp/sendtokindle",
             "openid.ns.pape": "http://specs.openid.net/extensions/pape/1.0",
             "openid.pape.max_auth_age": "0",
             "accountStatusPolicy": "P1",
@@ -71,7 +74,7 @@ class OAuth2:
             "pageId": "amzn_device_common_dark",
             "disableLoginPrepopulate": "1",
         }
-        url = f"https://www.{domain}/ap/signin?" + urllib.parse.urlencode(q)
+        url = "https://www.amazon.com/ap/signin?" + urllib.parse.urlencode(q)
         return url, verifier
 
     @staticmethod
