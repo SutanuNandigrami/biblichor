@@ -852,7 +852,7 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
     )
     if result.ok:
         deps.books.mark_kindled(book.id, method=result.method.value)
-        deps.events.append(book_id=book.id, kind="send", message=f"sent via {result.method.value}")
+        deps.events.append(book_id=book.id, kind=f"send-{result.method.value}", message=f"sent via {result.method.value}")
         deps.notifier.book_sent(book.title, book.author, file_path.suffix.lstrip("."))
         return "sent"
     else:
@@ -928,7 +928,7 @@ def process_queue(deps: PipelineDeps) -> dict[str, int]:
                 if result.ok:
                     deps.books.mark_kindled(b.id, method=result.method.value)
                     deps.events.append(
-                        book_id=b.id, kind="send",
+                        book_id=b.id, kind=f"send-{result.method.value}",
                         message=f"sent via {result.method.value}",
                     )
                     deps.notifier.book_sent(b.title, b.author, fp.suffix.lstrip("."))
