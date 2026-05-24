@@ -17,7 +17,7 @@ from endless_library.convert import ConvertError, convert_to_epub
 from endless_library.db.bench import BenchRunRepo
 from endless_library.db.bench_jobs import BenchJobsRepo
 from endless_library.db.books import BookRepo, BookRow
-from endless_library.db.candidates import CandidateRepo
+from endless_library.db.candidates import CandidateRepo, CandidateRow
 from endless_library.db.events import EventRepo
 from endless_library.db.mirrors import MirrorRepo
 from endless_library.db.schema import init_db
@@ -548,6 +548,50 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
             book_id=book.id,
             kind="state_change",
             message="resume: downloaded file missing on disk; restarting from search",
+        )
+
+    # Manual-pick honor: if the user clicked Pick in the SPA's needs_review
+    # queue, books.picked_candidate_id is set. Without this block, the
+    # next process cycle would re-search from scratch and ignore the pick
+    # (auto-pick may route the same low-score candidates back to
+    # needs_review forever).
+    if book.picked_candidate_id:
+        picked_cand_row = deps.cands.get_by_id(book.picked_candidate_id)
+        if picked_cand_row:
+            # _resolve_and_download expects a Candidate (domain model),
+            # not a CandidateRow (DB model). Reconstruct from stored fields.
+            picked_cand = Candidate(
+                provider=picked_cand_row.provider,  # type: ignore[arg-type]
+                md5=picked_cand_row.md5,
+                title=picked_cand_row.title,
+                author=picked_cand_row.author,
+                language=picked_cand_row.language,
+                format=picked_cand_row.format,
+                filesize_bytes=picked_cand_row.filesize_bytes,
+                year=picked_cand_row.year,
+                publisher=picked_cand_row.publisher,
+                edition_hints=picked_cand_row.edition_hints or "",
+                detail_url=picked_cand_row.detail_url,
+                raw=json.loads(picked_cand_row.raw_json or "{}"),
+            )
+            deps.events.append(
+                book_id=book.id,
+                kind="state_change",
+                message=f"resume: honoring manual pick of candidate {book.picked_candidate_id}",
+            )
+            file_path, dl_err = _resolve_and_download(deps, book, picked_cand)
+            if not file_path:
+                return _search_fail_or_skip(
+                    deps, book,
+                    dl_err or f"manual pick (cand {book.picked_candidate_id}) failed to download",
+                )
+            return _process_from_downloaded(deps, book, file_path)
+        # If the picked candidate id no longer exists in DB (e.g. candidates
+        # were pruned), fall through to a fresh search — better than crashing.
+        deps.events.append(
+            book_id=book.id,
+            kind="state_change",
+            message=f"manual pick candidate {book.picked_candidate_id} not found; re-searching",
         )
 
     deps.events.append(book_id=book.id, kind="state_change", message="-> searching")
