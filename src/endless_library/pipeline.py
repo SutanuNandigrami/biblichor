@@ -75,6 +75,7 @@ class PipelineDeps:
     bench_jobs: BenchJobsRepo
     mirrors: MirrorRepo
     bookorbit_service: Any = field(default=None)
+    _batch_delivery_mode: bool = field(default=False)
 
     @classmethod
     def build(cls, *, cfg: Config, db_path: Path) -> PipelineDeps:
