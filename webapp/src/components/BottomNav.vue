@@ -12,10 +12,12 @@ import {
   Clock,
   Settings as SettingsIcon,
   FileText,
+  BarChart3,
   Library,
 } from "lucide-vue-next"
 
 const items = [
+  { to: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { to: "/queue",    label: "Queue",    icon: Inbox },
   { to: "/library",  label: "Library",  icon: Library },
   { to: "/sources",  label: "Sources",  icon: Database },

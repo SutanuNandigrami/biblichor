@@ -2097,3 +2097,160 @@ def register(app: FastAPI) -> None:
             log.warning("ws loop error: %s", e)
             with contextlib.suppress(Exception):
                 await socket.close()
+
+
+    _register_dashboard(app)
+
+
+
+# Dashboard aggregation (Phase dashboard-live)
+# =========================================================
+
+DASHBOARD_INTERVAL_SEC: float = 3.0
+"""Module-level so tests can monkeypatch:
+   monkeypatch.setattr('endless_library.web.api.DASHBOARD_INTERVAL_SEC', 0.05)
+"""
+
+
+def compute_dashboard_snapshot(db_path) -> dict:
+    """Pure aggregation - no FastAPI deps, testable standalone."""
+    from datetime import datetime, timedelta, timezone
+
+    now_utc = datetime.now(timezone.utc)
+    cutoff_str = (now_utc - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+
+    with connect(db_path) as conn:
+        # 1. Status counts
+        rows = conn.execute("SELECT status, COUNT(*) AS n FROM books GROUP BY status").fetchall()
+        status_counts: dict = {}
+        for r in rows:
+            status_counts[str(r["status"])] = int(r["n"])
+
+        # 2. Throughput bucketed to 5-min windows over last 24h
+        tp_rows = conn.execute(
+            """
+            SELECT strftime('%Y-%m-%dT%H:%M:00Z', ts) AS minute, kind, COUNT(*) AS n
+            FROM events
+            WHERE kind IN ('send-stk', 'send') AND ts >= ?
+            GROUP BY 1, 2
+            """,
+            (cutoff_str,),
+        ).fetchall()
+
+        bucket_minutes = 5
+        num_buckets = (24 * 60) // bucket_minutes
+
+        def _bucket_label(dt):
+            floored = dt.replace(
+                minute=(dt.minute // bucket_minutes) * bucket_minutes,
+                second=0,
+                microsecond=0,
+            )
+            return floored.strftime("%Y-%m-%dT%H:%M:00Z")
+
+        oldest_bucket = (now_utc - timedelta(hours=24)).replace(second=0, microsecond=0)
+        oldest_bucket = oldest_bucket.replace(
+            minute=(oldest_bucket.minute // bucket_minutes) * bucket_minutes
+        )
+        labels = [
+            (oldest_bucket + timedelta(minutes=i * bucket_minutes)).strftime("%Y-%m-%dT%H:%M:00Z")
+            for i in range(num_buckets + 1)
+        ]
+
+        stk_map: dict = {lbl: 0 for lbl in labels}
+        smtp_map: dict = {lbl: 0 for lbl in labels}
+
+        for r in tp_rows:
+            try:
+                from datetime import datetime as _dt2, timezone as _tz2
+                dt = _dt2.strptime(str(r["minute"]), "%Y-%m-%dT%H:%M:00Z").replace(tzinfo=_tz2.utc)
+                bucket = _bucket_label(dt)
+            except Exception:
+                continue
+            if r["kind"] == "send-stk":
+                stk_map[bucket] = stk_map.get(bucket, 0) + int(r["n"])
+            else:
+                smtp_map[bucket] = smtp_map.get(bucket, 0) + int(r["n"])
+
+        throughput_24h = {
+            "bucket_minutes": bucket_minutes,
+            "series": [
+                {"name": "stk", "points": [{"t": lbl, "v": stk_map.get(lbl, 0)} for lbl in labels]},
+                {"name": "smtp", "points": [{"t": lbl, "v": smtp_map.get(lbl, 0)} for lbl in labels]},
+            ],
+        }
+
+        # 3. Method breakdown: kindled books in last 24h by sent_method
+        mb_rows = conn.execute(
+            """
+            SELECT sent_method, COUNT(*) AS n
+            FROM books
+            WHERE status = 'kindled' AND sent_method IS NOT NULL AND sent_at >= ?
+            GROUP BY sent_method
+            """,
+            (cutoff_str,),
+        ).fetchall()
+        raw_mb: dict = {str(r["sent_method"]): int(r["n"]) for r in mb_rows}
+        method_breakdown_24h = {
+            "stk": raw_mb.get("stk", raw_mb.get("send-stk", 0)),
+            "smtp": raw_mb.get("smtp", raw_mb.get("send", 0)),
+        }
+
+        # 4. Source funnel
+        sf_rows = conn.execute(
+            """
+            SELECT source,
+                COUNT(*) AS discovered,
+                SUM(CASE WHEN file_path IS NOT NULL THEN 1 ELSE 0 END) AS downloaded,
+                SUM(CASE WHEN status IN ('sent', 'kindled') THEN 1 ELSE 0 END) AS sent
+            FROM books
+            GROUP BY source
+            ORDER BY discovered DESC
+            """,
+        ).fetchall()
+        source_funnel = [
+            {
+                "source": str(r["source"]),
+                "discovered": int(r["discovered"]),
+                "downloaded": int(r["downloaded"]),
+                "sent": int(r["sent"]),
+            }
+            for r in sf_rows
+        ]
+
+    return {
+        "ts": now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "status_counts": status_counts,
+        "throughput_24h": throughput_24h,
+        "method_breakdown_24h": method_breakdown_24h,
+        "source_funnel": source_funnel,
+    }
+
+
+def _register_dashboard(app) -> None:
+    """Register /api/dashboard/* endpoints on an already-built app."""
+    _router = APIRouter(prefix="/api")
+
+    @_router.get("/dashboard/snapshot")
+    def dashboard_snapshot(request: Request):
+        deps = request.app.state.deps
+        return compute_dashboard_snapshot(deps.db_path)
+
+    @_router.get("/dashboard/stream")
+    async def dashboard_stream(request: Request):
+        deps = request.app.state.deps
+
+        async def _gen():
+            try:
+                while True:
+                    snapshot = compute_dashboard_snapshot(deps.db_path)
+                    yield "data: " + json.dumps(snapshot) + chr(10) + chr(10)
+                    await asyncio.sleep(DASHBOARD_INTERVAL_SEC)
+                    if await request.is_disconnected():
+                        return
+            except asyncio.CancelledError:
+                return
+
+        return StreamingResponse(_gen(), media_type="text/event-stream")
+
+    app.include_router(_router)
