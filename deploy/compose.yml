@@ -159,7 +159,7 @@ services:
     # Pinned to a specific tag, not :latest. Bumping requires a
     # deliberate decision + a quick re-run of `biblichor bookorbit-setup`
     # to confirm the API shape hasn't drifted. See review M-7.
-    image: ghcr.io/bookorbit/bookorbit:1.3.0
+    image: ghcr.io/bookorbit/bookorbit:1.4.0
     container_name: biblichor-bookorbit
     restart: unless-stopped
     ports:
