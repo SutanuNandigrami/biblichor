@@ -84,8 +84,12 @@ class KindleStkService:
 
         The verifier is also persisted to secrets so complete_oauth can
         pick it up after the user pastes the redirect URL back.
+
+        The Amazon domain is read from the ``kindle_stk.amazon_domain`` secret
+        (set via PUT /api/kindle-stk/region). Defaults to ``amazon.com``.
         """
-        url, verifier = _vendored.OAuth2.create_oauth_url()
+        domain = self._svc.get_secret_value("kindle_stk.amazon_domain") or "amazon.com"
+        url, verifier = _vendored.OAuth2.create_oauth_url(domain=domain)
         self._svc.set_secret_value("kindle_stk.oauth_state.code_verifier", verifier)
         return url, verifier
 
@@ -114,9 +118,10 @@ class KindleStkService:
                 "No code_verifier in session. start_oauth must run before complete_oauth."
             )
 
+        domain = self._svc.get_secret_value("kindle_stk.amazon_domain") or "amazon.com"
         client = _vendored.Client()
         try:
-            result = client.register_device(code, verifier)
+            result = client.register_device(code, verifier, domain=domain)
         except requests.HTTPError as e:
             raise KindleStkUploadFailed(f"register_device failed: {e}") from e
 
