@@ -216,18 +216,18 @@ def test_cf_bypass_retries_once_on_http_error(caplog, monkeypatch):
 
     call_count = 0
 
-    def _mock_post(url, *, json, timeout):
+    def _mock_get(url, *, params, timeout):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             raise httpx.ConnectError("simulated connection error")
         resp = MagicMock()
         resp.raise_for_status = lambda: None
-        resp.json.return_value = {"html": "<html>ok</html>"}
+        resp.text = "<html>ok</html>"
         return resp
 
     monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.time.sleep", lambda s: None)
-    monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.httpx.post", _mock_post)
+    monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.httpx.get", _mock_get)
     monkeypatch.setattr(
         "endless_library.scrapers.cf_bypass_client.assert_safe_url", lambda url: None
     )

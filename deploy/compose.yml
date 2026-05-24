@@ -125,7 +125,7 @@ services:
     container_name: biblichor-cf-bypass
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/openapi.json"]
       interval: 30s
       timeout: 10s
       retries: 5

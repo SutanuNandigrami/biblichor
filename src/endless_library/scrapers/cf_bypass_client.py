@@ -1,8 +1,8 @@
 """Thin HTTP wrapper around the sarperavci CloudflareBypassForScraping
-sidecar (compose service `cf-bypass`). POST a URL, get resolved HTML
-back. Sidecar internally drives DrissionPage / patched Chromium and
-handles Cloudflare interactive challenges that defeat curl-cffi and
-FlareSolverr alike.
+sidecar (compose service ). GET a URL via the sidecar's /html
+endpoint, get resolved HTML back. Sidecar internally drives DrissionPage /
+patched Chromium and handles Cloudflare interactive challenges that defeat
+curl-cffi and FlareSolverr alike.
 
 Phase 6w.2: uses plain httpx (NOT curl-cffi) — we don't need TLS
 fingerprint tricks to talk to our own sidecar on the biblichor network.
@@ -42,7 +42,7 @@ _BLOCKED_NETLOCS = frozenset({
 
 
 def resolve(url: str, *, timeout: float = 90.0) -> str:
-    """POST `url` to the sidecar; return its resolved HTML.
+    """GET `url` via the sidecar's /html endpoint; return its resolved HTML.
     Raises ValueError on unsafe URLs.
     Raises httpx.HTTPError on transport failure / non-2xx.
     """
@@ -59,13 +59,13 @@ def resolve(url: str, *, timeout: float = 90.0) -> str:
     # M13: single retry with 4-6s jittered backoff on transport errors.
     for attempt in range(2):
         try:
-            r = httpx.post(
-                f"{base.rstrip('/')}/cf-clearance-scraper",
-                json={"url": url},
+            r = httpx.get(
+                f"{base.rstrip('/')}/html",
+                params={"url": url},
                 timeout=timeout,
             )
             r.raise_for_status()
-            return r.json()["html"]
+            return r.text
         except httpx.HTTPError as e:
             if attempt == 0:
                 log.info("cf_bypass: retrying %s after %s", url, e)

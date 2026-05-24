@@ -71,12 +71,11 @@ def test_cf_bypass_allows_legitimate_url(monkeypatch):
 
     class _R:
         status_code = 200
-        def json(self):
-            return {"html": "<html>ok</html>"}
+        text = "<html>ok</html>"
         def raise_for_status(self):
             pass
 
-    monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.httpx.post",
+    monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.httpx.get",
                         lambda *a, **kw: _R())
     monkeypatch.setenv("CF_BYPASS_URL", "http://test-bypass:8000")
     html = cf_bypass_client.resolve("https://annas-archive.gl/md5/abc123")
