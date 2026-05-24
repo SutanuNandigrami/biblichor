@@ -462,8 +462,26 @@ async function openStkSetup(): Promise<void> {
   stkLoading.value = true
   stkError.value = ''
   showStkModal.value = true
-  stkModalStep.value = 'authorize'
+  stkRedirectUrl.value = ''   // never carry over a stale paste between opens
   try {
+    // If we're already configured, jump straight to the device-picker
+    // step instead of starting a fresh OAuth dance (which would
+    // overwrite the stored code_verifier and break a later complete
+    // call from a separately-issued authorize URL). This is the
+    // "Change device" flow.
+    const status = await api<{ configured: boolean }>('/api/kindle-stk/status')
+    if (status.configured) {
+      const devs = await api<{ devices: any[] }>('/api/kindle-stk/devices')
+      stkDevices.value = devs.devices || []
+      // Preserve the user's current default so the radio is pre-selected.
+      stkSelectedSn.value = (status as any).default_destination_sn
+        || _pickRecommendedDevice(stkDevices.value)
+        || (stkDevices.value[0]?.device_serial_number ?? '')
+      stkModalStep.value = 'devices'
+      return
+    }
+    // Fresh setup: start a new OAuth flow.
+    stkModalStep.value = 'authorize'
     const r = await api<{ authorize_url: string }>('/api/kindle-stk/oauth/start', { method: 'POST' })
     stkAuthorizeUrl.value = r.authorize_url
     stkModalStep.value = 'paste'
@@ -472,6 +490,20 @@ async function openStkSetup(): Promise<void> {
   } finally {
     stkLoading.value = false
   }
+}
+
+
+function _pickRecommendedDevice(devices: Array<any>): string {
+  // Prefer Kindle for Web by name match (it's cloud-only, no auto-push).
+  // Then any device whose capabilities flag a web target. Fallback to
+  // first.
+  const byName = devices.find(d =>
+    typeof d.device_name === 'string'
+    && d.device_name.toLowerCase().includes('web'))
+  if (byName) return byName.device_serial_number
+  const byType = devices.find(d => d.device_type === 'FionaWebApp')
+  if (byType) return byType.device_serial_number
+  return devices[0]?.device_serial_number ?? ''
 }
 
 async function completeStkOauth(): Promise<void> {
