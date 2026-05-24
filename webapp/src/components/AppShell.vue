@@ -19,6 +19,7 @@ import {
   Sliders,
   Library as LibraryIcon,
   Clock,
+  BarChart3,
   Moon,
   Sun,
 } from "lucide-vue-next"
@@ -48,6 +49,7 @@ const cycle = useCycleStore()
 const triggering = ref(false)
 
 const nav = [
+  { to: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { to: "/queue",    label: "Queue",    icon: Inbox },
   { to: "/library",  label: "Library",  icon: LibraryIcon },
   { to: "/sources",  label: "Sources",  icon: Database },
