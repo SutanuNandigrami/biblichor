@@ -72,11 +72,14 @@ class FakeOAuth2:
     """Stand-in for endless_library.kindle_stk._vendored.OAuth2."""
 
     @staticmethod
-    def create_oauth_url() -> tuple[str, str]:
-        """Returns (authorize_url, code_verifier)."""
+    def create_oauth_url(domain: str = "amazon.com") -> tuple[str, str]:
+        """Returns (authorize_url, code_verifier).
+
+        Mirrors the real OAuth2.create_oauth_url(domain=...) signature.
+        """
         return (
-            'https://www.amazon.com/ap/oa?client_id=stk&scope=&response_type=code&'
-            'redirect_uri=https%3A%2F%2Fwww.amazon.com%2Fap%2Fmaplanding&'
+            f'https://www.{domain}/ap/oa?client_id=stk&scope=&response_type=code&'
+            f'redirect_uri=https%3A%2F%2Fwww.{domain}%2Fap%2Fmaplanding&'
             'code_challenge=fake_challenge&code_challenge_method=S256',
             'fake_code_verifier_FAKEFAKE',
         )
