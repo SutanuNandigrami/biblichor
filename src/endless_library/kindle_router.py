@@ -74,18 +74,20 @@ def deliver(
         )
 
     # Branch 2: STK configured but daily quota exhausted -> SMTP fallback.
-    status = _stk_quota_status(db_path, daily_cap=cfg.stk.daily_cap)
-    if status.exhausted:
-        _record_event(
-            db_path, "send-stk-failed", book.id,
-            message="stk-cap-reached",
-            meta={"reason": "stk-cap-reached", "sent_24h": status.sent_24h, "cap": status.cap},
-        )
-        ok, err = _smtp_deliver(file_path, book, cfg, db_path=db_path)
-        return DeliveryResult(
-            ok=ok, method=DeliveryMethod.SMTP, error=err, attempts=1,
-            duration_ms=int((time.monotonic() - start) * 1000),
-        )
+    # Skip quota gate entirely when daily_cap is None (unlimited).
+    if cfg.stk.daily_cap is not None:
+        status = _stk_quota_status(db_path, daily_cap=cfg.stk.daily_cap)
+        if status.exhausted:
+            _record_event(
+                db_path, "send-stk-failed", book.id,
+                message="stk-cap-reached",
+                meta={"reason": "stk-cap-reached", "sent_24h": status.sent_24h, "cap": status.cap},
+            )
+            ok, err = _smtp_deliver(file_path, book, cfg, db_path=db_path)
+            return DeliveryResult(
+                ok=ok, method=DeliveryMethod.SMTP, error=err, attempts=1,
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
 
     # Branch 3: try STK up to max_attempts with retry/backoff; SMTP on exhaustion.
     max_attempts = int(cfg.stk.max_attempts)

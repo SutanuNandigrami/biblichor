@@ -1196,16 +1196,23 @@ def register(app: FastAPI) -> None:
         try:
             stk_svc = KindleStkService(deps.bookorbit_service)
             if stk_svc.is_configured():
-                from endless_library.stk_rate import quota_status as _stk_qs
+                if deps.cfg.stk.daily_cap is not None:
+                    from endless_library.stk_rate import quota_status as _stk_qs
 
-                qs = _stk_qs(deps.db_path, daily_cap=deps.cfg.stk.daily_cap)
-                body["stk"] = {
-                    "configured": True,
-                    "sent_24h": qs.sent_24h,
-                    "cap": qs.cap,
-                    "remaining": qs.remaining,
-                    "exhausted": qs.exhausted,
-                }
+                    qs = _stk_qs(deps.db_path, daily_cap=deps.cfg.stk.daily_cap)
+                    body["stk"] = {
+                        "configured": True,
+                        "sent_24h": qs.sent_24h,
+                        "cap": qs.cap,
+                        "remaining": qs.remaining,
+                        "exhausted": qs.exhausted,
+                    }
+                else:
+                    body["stk"] = {
+                        "configured": True,
+                        "cap": None,
+                        "exhausted": False,
+                    }
             else:
                 body["stk"] = {"configured": False}
         except Exception:  # pragma: no cover
