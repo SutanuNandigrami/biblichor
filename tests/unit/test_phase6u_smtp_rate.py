@@ -38,7 +38,7 @@ def _insert_send(db: Path, n: int, *, age_offset: str = "0 hours") -> None:
     for _ in range(n):
         conn.execute(
             "INSERT INTO events (book_id, kind, message, ts) VALUES (?,?,?, datetime('now', ?))",
-            (1, "send", "sent to kindle", f"-{age_offset}"),
+            (1, "send-smtp", "sent to kindle", f"-{age_offset}"),
         )
     conn.commit()
     conn.close()

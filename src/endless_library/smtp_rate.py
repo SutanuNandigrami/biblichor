@@ -26,7 +26,7 @@ from endless_library.db.schema import connect
 
 WINDOW_SQL = """
 SELECT COUNT(*) FROM events
- WHERE kind = 'send'
+ WHERE kind = 'send-smtp'
    AND ts >= datetime('now', '-1 day')
 """
 
