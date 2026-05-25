@@ -12,14 +12,16 @@ general:
   log_level: INFO
   daily_summary_hour_utc: 14
   timezone: Asia/Kolkata
-  auto_pick_threshold: 70
-  auto_pick_threshold_non_latin: 45
-  auto_pick_gap: 10
-  min_score_for_failure: 40
-  min_score_for_failure_non_latin: 25
+  auto_pick_threshold: 70.0
+  auto_pick_threshold_non_latin: 45.0
+  fallthrough_quality_floor: 60.0
+  # Stop searching and park book as "skipped" after this many failed search rounds
+  max_search_attempts_before_skip: 3
+  fallthrough_quality_floor_non_latin: 40.0
+  auto_pick_gap: 10.0
+  min_score_for_failure: 40.0
+  min_score_for_failure_non_latin: 25.0
   zombie_stale_minutes: 30
-  fallthrough_quality_floor: 60
-  fallthrough_quality_floor_non_latin: 40
 kindle:
   recipient: ''
   subject: '{title}'
@@ -28,9 +30,16 @@ smtp:
   host: smtp.gmail.com
   port: 587
   starttls: true
-  max_attachment_mb: 22
+  user: ''
+  password: ''
+  max_attachment_mb: 24
+  # Gmail free tier outbound limit ~100/day. Default 80 leaves headroom
+  # for non-Kindle mail. 0 disables the gate.
+  daily_cap: 80
 pushover:
   enabled: false
+  user_key: ''
+  app_token: ''
   events:
     book_sent: true
     book_needs_review: true
@@ -59,19 +68,36 @@ scrapers:
     libgen_curl: true
     archive_curl: true
     kindlebangla_curl: true
+    gutendex: true
+    standard_ebooks: true
+    oapen_doab: true
+    wikisource: true
+    zlib_singlelogin: true
   format_priority:
   - epub
   - azw3
   - mobi
   - pdf
   language: en
-  request_delay_seconds: 6
+  request_delay_seconds: 6.0
   slow_download_timeout_seconds: 180
   flaresolverr_url: http://flaresolverr:8191/v1
+  # Route Anna's onion fallback through the Tor sidecar. Enable via
+  # `docker compose --profile tor up -d` and flip tor_enabled to true.
+  tor_enabled: false
+  tor_proxy_url: socks5h://tor:9050
   annas_mirrors:
   - https://annas-archive.gl
   - https://annas-archive.pk
   - https://annas-archive.gd
+  # Paste the full Cookie: header from a logged-in welib.org browser session.
+  # Enables /fast_download/ path. Leave null when not using welib auth.
+  welib_auth_cookie: null
+  # Books published within this many years are treated as recent releases
+  # and get mobilism_books promoted to the front of the scraper chain.
+  recent_release_window_years: 1
+  mobilism_username: ''
+  mobilism_password: ''
   bdebooks:
     excluded_categories:
       - "Islamic Books"
@@ -112,6 +138,9 @@ scoring:
   filesize_max_bytes: 83886080
   scan_penalty: 10
   non_latin_title_multiplier: 2.0
+  # If set, candidates whose filesize_bytes exceeds this are hard-skipped.
+  # Leave null to let pipeline compute dynamically from smtp.max_attachment_mb.
+  deliverable_max_bytes: null
   audio_keywords:
   - audiobook
   - audible
@@ -122,3 +151,42 @@ security:
   max_archive_size_mb: 200
   max_extracted_size_mb: 500
   max_members: 50
+storage:
+  # backend: local | rclone | hybrid
+  # local   - files live under general.books_dir
+  # rclone  - all I/O goes to an rclone remote (gdrive / s3 / hetzner / ...)
+  # hybrid  - primary=local, backup=rclone mirror
+  backend: local
+  local_root: ''
+  rclone_remote: ''
+  rclone_bucket_path: ''
+  hybrid_mode: mirror
+bookorbit:
+  # Flip enabled after running `biblichor bookorbit-setup`
+  enabled: false
+  url: ''
+  library_root: ''
+  organization_mode: book_per_folder
+  library_id: ''
+bench:
+  per_query_timeout_sec: 45
+  circuit_break_after_consecutive_fails: 3
+stk:
+  # Send-to-Kindle (browser-upload) delivery. Needs OAuth setup via the
+  # Settings page before it can be used.
+  # daily_cap: null means unlimited; set an integer to gate on rolling 24h count.
+  daily_cap: null
+  max_attempts: 3
+  backoff_initial_sec: 5.0
+  backoff_factor: 3.0
+  client_id: null
+  amazon_domain: amazon.com
+  # Minimum gap between consecutive STK sends (seconds). Guards against
+  # Amazon anti-abuse threshold that can revoke the device cert.
+  min_send_interval_sec: 10.0
+  # Sleep between files within a single batch. Amazon's detection is
+  # rate-based, not session-based -- 8 files in 19s triggered revocation
+  # in practice. Default 10.0 s is the safe floor.
+  per_file_interval_sec: 10.0
+  max_batch_files: 25
+  max_batch_bytes: 209715200

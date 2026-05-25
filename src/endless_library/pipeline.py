@@ -896,7 +896,10 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
     )
     if result.ok:
         deps.books.mark_kindled(book.id, method=result.method.value)
-        deps.events.append(book_id=book.id, kind=f"send-{result.method.value}", message=f"sent via {result.method.value}")
+        # STK delivery: kindle_router.deliver() already recorded the send-stk event.
+        # SMTP delivery: kindle_router._smtp_deliver() does NOT record events, so we do it here.
+        if result.method.value != "stk":
+            deps.events.append(book_id=book.id, kind=f"send-{result.method.value}", message=f"sent via {result.method.value}")
         deps.notifier.book_sent(book.title, book.author, file_path.suffix.lstrip("."))
         return "sent"
     else:
@@ -971,10 +974,13 @@ def process_queue(deps: PipelineDeps) -> dict[str, int]:
             for (b, fp), result in zip(pending_delivery, results):
                 if result.ok:
                     deps.books.mark_kindled(b.id, method=result.method.value)
-                    deps.events.append(
-                        book_id=b.id, kind=f"send-{result.method.value}",
-                        message=f"sent via {result.method.value}",
-                    )
+                    # deliver_batch() already records send-stk events (batch path).
+                    # For SMTP fallback from a failed batch, record the event here.
+                    if result.method.value != "stk":
+                        deps.events.append(
+                            book_id=b.id, kind=f"send-{result.method.value}",
+                            message=f"sent via {result.method.value}",
+                        )
                     deps.notifier.book_sent(b.title, b.author, fp.suffix.lstrip("."))
                     tally["sent"] = tally.get("sent", 0) + 1
                 else:
