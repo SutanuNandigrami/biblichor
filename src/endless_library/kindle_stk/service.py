@@ -74,9 +74,10 @@ class KindleStkService:
     credential rotations.
     """
 
-    def __init__(self, bookorbit_svc) -> None:
+    def __init__(self, bookorbit_svc, *, per_file_interval_sec: float = 0.0) -> None:
         self._svc = bookorbit_svc
         self._devices_cache: tuple[list, float] | None = None
+        self._per_file_interval_sec = per_file_interval_sec
 
     # ---- Configuration state ----
 
@@ -323,7 +324,14 @@ class KindleStkService:
         # Build one client (one signed session) for the whole batch.
         client = self._build_client()
         results: list[dict[str, Any]] = []
-        for fe in files:
+        for i, fe in enumerate(files):
+            # Throttle between files inside a batch. Amazon anti-abuse sees
+            # absolute request rate, not session boundaries — 8 files in 19s
+            # (21:21:08-21:21:27) revoked the cert mid-session. Skip before
+            # the first file: the router-level min_send_interval_sec already
+            # enforces the inter-batch gap so we don't double-sleep there.
+            if i > 0 and self._per_file_interval_sec > 0:
+                time.sleep(self._per_file_interval_sec)
             try:
                 ret = client.send_file(
                     fe.path,

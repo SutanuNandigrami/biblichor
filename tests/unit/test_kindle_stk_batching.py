@@ -237,3 +237,44 @@ def test_send_files_raises_batch_overflow_for_oversized(tmp_path, configured_svc
     with pytest.raises(KindleStkBatchOverflow) as exc_info:
         stk_svc.send_files([entry])
     assert exc_info.value.size_bytes > 200 * 1024 * 1024
+
+
+# ---------------------------------------------------------------------------
+# Per-file throttle tests (Fix 1: STK batch path violates the throttle)
+# ---------------------------------------------------------------------------
+
+
+def test_send_files_sleeps_per_file_interval(tmp_path, configured_svc, monkeypatch):
+    """send_files() sleeps per_file_interval_sec between files (not before first,
+    not after last). A 3-file batch must call time.sleep exactly twice."""
+    from tests._stkclient_stub import FakeVendoredClient
+    from endless_library.kindle_stk.service import FileEntry, KindleStkService
+    import endless_library.kindle_stk.service as stk_svc_module
+
+    fake = FakeVendoredClient()
+    monkeypatch.setattr(
+        "endless_library.kindle_stk._vendored.Client",
+        lambda *a, **kw: fake,
+    )
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(stk_svc_module.time, "sleep", lambda s: sleep_calls.append(s))
+
+    stk_svc = KindleStkService(configured_svc, per_file_interval_sec=7.0)
+    files = [
+        FileEntry(
+            path=_make_epub(tmp_path, f"book{i}.epub", 1024),
+            title=f"Book {i}",
+            author="Author",
+            format="EPUB",
+        )
+        for i in range(3)
+    ]
+
+    stk_svc.send_files(files)
+
+    # Exactly 2 sleeps: between file 0-1 and 1-2 (NOT before 0, NOT after 2).
+    assert sleep_calls == [7.0, 7.0], (
+        f"Expected [7.0, 7.0], got {sleep_calls!r}"
+    )
+    assert len(fake.send_calls) == 3

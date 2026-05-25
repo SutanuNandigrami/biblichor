@@ -243,3 +243,29 @@ def test_annas_domains_thread_safe():
         for v in ad._state.values():
             assert isinstance(v, float), f"Non-float cool-until: {v!r}"
     ad._reset_state_for_tests()
+
+
+def test_fetch_wiki_uses_correct_user_agent(monkeypatch):
+    """fetch_wiki_domains() sends the Wikipedia-policy-compliant UA (no http_get injection)."""
+    import httpx
+    from endless_library.scrapers.annas_domains import fetch_wiki_domains, WIKIPEDIA_URL
+
+    captured: dict = {}
+
+    def fake_httpx_get(url, *, timeout, follow_redirects, headers):
+        captured["url"] = url
+        captured["ua"] = headers.get("User-Agent", "")
+        # Return a minimal 200 response so fetch_wiki_domains doesn't short-circuit
+        class _Resp:
+            status_code = 200
+            content = b"<html><body></body></html>"
+        return _Resp()
+
+    monkeypatch.setattr("endless_library.scrapers.annas_domains.httpx.get", fake_httpx_get)
+
+    fetch_wiki_domains()
+
+    assert captured["url"] == WIKIPEDIA_URL
+    assert captured["ua"] == "biblichor/1.0 (+https://github.com/SutanuNandigrami/biblichor)", (
+        f"Bad UA: {captured['ua']!r}"
+    )

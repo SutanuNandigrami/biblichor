@@ -246,7 +246,8 @@ def deliver_batch(
     Returns a list of DeliveryResult, one per input BookFile, in order.
     """
     start_all = time.monotonic()
-    stk_svc = KindleStkService(svc)
+    per_file_interval = float(getattr(cfg.stk, "per_file_interval_sec", 10.0))
+    stk_svc = KindleStkService(svc, per_file_interval_sec=per_file_interval)
     results: list[DeliveryResult] = []
 
     # --- Quota pre-check (same as single-file path) ---

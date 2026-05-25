@@ -294,6 +294,16 @@ class StkCfg(BaseModel):
     # revoked our device cert). Default 5.0 s => at most 720 sends/hour,
     # well below the observed revocation threshold.
     min_send_interval_sec: float = 10.0
+    # Per-file throttle WITHIN a batch. Amazon's anti-abuse detection
+    # operates on absolute request rate, not session boundaries — 8 files
+    # in 19 seconds (real evidence: 21:21:08-21:21:27) triggered cert
+    # revocation even inside a single session. This sleep fires between
+    # consecutive files in send_files(); it does NOT fire before the first
+    # file (the router-level min_send_interval_sec handles inter-batch
+    # spacing). With both defaults at 10.0 the effective floor is
+    # 10 s between every actual STK API call regardless of grouping.
+    # Lower to 5.0 if you trust Amazon's session boundary for headroom.
+    per_file_interval_sec: float = 10.0
     # STK multi-file batching: max number of files to pack into one STK
     # session (one GetUploadUrl + upload + SendToKindle cycle per file,
     # but all within the same signed session and one inter-batch sleep).
