@@ -1,4 +1,4 @@
-"""annas_cloakbrowser — Phase 6w.2 rewrite.
+"""annas_cloakbrowser -- Phase 6w.2 rewrite.
 
 Now talks to the `cf-bypass` sidecar (sarperavci/CloudflareBypassForScraping).
 Sidecar runs DrissionPage + patched Chromium inside the biblichor compose
@@ -7,6 +7,11 @@ slot + name as before (so cfg.scrapers.order doesn't churn), but the
 internals are replaced.
 
 provider stays "annas" to satisfy the Candidate.provider Literal constraint.
+
+Parser: delegates to endless_library.scrapers.annas_parsing.parse_search_results
+(shared with annas_curl) so fixes to extraction logic happen in one place.
+See also: annas_parsing.py (canonical), annas_curl.py (_parse_search_results
+now wraps the shared function).
 """
 from __future__ import annotations
 
@@ -17,6 +22,7 @@ from bs4 import BeautifulSoup
 
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.scrapers import annas_domains, cf_bypass_client
+from endless_library.scrapers.annas_parsing import parse_search_results
 
 log = logging.getLogger(__name__)
 
@@ -54,22 +60,10 @@ class AnnasArchiveCloakBrowser:
 
 
 def _parse_search_results(html: str, host: str) -> list[Candidate]:
-    soup = BeautifulSoup(html, "lxml")
-    out: list[Candidate] = []
-    for a in soup.select("a[href^='/md5/']"):
-        md5_url = f"https://{host}{a['href']}"
-        title = a.get_text(" ", strip=True)[:200]
-        out.append(Candidate(
-            title=title,
-            provider="annas",
-            md5=None,
-            author=None,
-            language=None,
-            format="epub",
-            filesize_bytes=None,
-            year=None,
-            publisher=None,
-            edition_hints="",
-            detail_url=md5_url,
-        ))
-    return out
+    """Parse Anna's Archive search HTML into Candidates.
+
+    Delegates to annas_parsing.parse_search_results (shared with annas_curl).
+    Extracts: title, detail_url, md5, author, isbn13, year, filesize_bytes,
+    format, language, publisher.
+    """
+    return parse_search_results(html, host)

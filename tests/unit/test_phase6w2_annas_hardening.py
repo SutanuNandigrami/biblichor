@@ -83,7 +83,17 @@ def test_annas_cloakbrowser_routes_through_sidecar(monkeypatch):
     seen_url = []
     def _fake_resolve(url, **kw):
         seen_url.append(url)
-        return '<html><body><a href="/md5/abc">Sapiens</a></body></html>'
+        return (
+            '<html><body>'
+            '<div class="flex pt-3 pb-3 border-b border-gray-100">'
+            '<div class="max-w-full overflow-hidden flex flex-col">'
+            '<a class="js-vim-focus custom-a" href="/md5/abcdef1234567890abcdef1234567890">'
+            'Sapiens'
+            '</a>'
+            '<div class="text-xs">English [en], epub, 1.0 MB, 2021</div>'
+            '</div></div>'
+            '</body></html>'
+        )
     monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.resolve", _fake_resolve)
     cl = AnnasArchiveCloakBrowser(cfg=None)
     cands = cl.search(SearchQuery(title="Sapiens", author="Harari", isbn13="",

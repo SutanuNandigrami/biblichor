@@ -59,7 +59,17 @@ def test_cloakbrowser_uses_sidecar(monkeypatch):
 
     def _fake_resolve(url, **kw):
         called.append(url)
-        return '<html><body><a href="/md5/abcdef1234567890abcdef1234567890">Test Book</a></body></html>'
+        return (
+            '<html><body>'
+            '<div class="flex pt-3 pb-3 border-b border-gray-100">'
+            '<div class="max-w-full overflow-hidden flex flex-col">'
+            '<a class="js-vim-focus custom-a" href="/md5/abcdef1234567890abcdef1234567890">'
+            'Test Book'
+            '</a>'
+            '<div class="text-xs">English [en], epub, 1.0 MB, 2020</div>'
+            '</div></div>'
+            '</body></html>'
+        )
 
     monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.resolve", _fake_resolve)
     s = AnnasArchiveCloakBrowser(cfg=None)
