@@ -21,3 +21,8 @@ config/.env
 library/
 config/bookorbit.json
 *.py.bak
+
+# deploy/.env is a symlink to ../.env so docker compose finds secrets
+# next to the compose file. Track the symlink (not the target) so this
+# does NOT need to be recreated on a fresh clone.
+!deploy/.env

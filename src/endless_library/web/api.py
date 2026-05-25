@@ -1236,6 +1236,36 @@ def register(app: FastAPI) -> None:
         except Exception:  # pragma: no cover
             body["stk"] = {"configured": False}
 
+        # bookorbit reachability. BookOrbit is the library + upgrade
+        # surface; biblichor depends on it for `Add to library` drops,
+        # the in-app upgrade flow, and metadata enrichment. When BO
+        # is down, biblichor's healthz historically stayed green because
+        # this dep was never probed (see 2026-05-25 deploy/.env outage).
+        # Only check when bookorbit is enabled in config; tight timeout
+        # so a stalled BO can't slow healthz.
+        try:
+            _bo_cfg = getattr(deps.cfg, "bookorbit", None)
+            if _bo_cfg is not None and getattr(_bo_cfg, "enabled", False) and getattr(_bo_cfg, "url", ""):
+                import urllib.request as _urlreq
+                import urllib.error as _urlerr
+                _url = str(_bo_cfg.url).rstrip("/") + "/api/v1/health"
+                try:
+                    with _urlreq.urlopen(_url, timeout=2.0) as _resp:
+                        if 200 <= _resp.status < 300:
+                            body["bookorbit"] = {"reachable": True, "url": _url}
+                        else:
+                            body["bookorbit"] = {"reachable": False, "url": _url, "error": f"http {_resp.status}"}
+                            body["ok"] = False
+                            ok = False
+                except (_urlerr.URLError, TimeoutError, OSError) as _e:
+                    body["bookorbit"] = {"reachable": False, "url": _url, "error": f"{type(_e).__name__}: {_e}"}
+                    body["ok"] = False
+                    ok = False
+            else:
+                body["bookorbit"] = {"reachable": None, "reason": "not configured"}
+        except Exception as _e:  # pragma: no cover
+            body["bookorbit"] = {"reachable": None, "error": f"{type(_e).__name__}"}
+
         if not ok:
             return JSONResponse(status_code=503, content=body)
         return body
