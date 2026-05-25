@@ -820,14 +820,35 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
             )
 
     if inflated > cap_bytes:
-        msg = (
-            f"too large for SMTP: {raw_bytes // 1_048_576}MB raw "
-            f"-> ~{inflated // 1_048_576}MB after base64, cap "
-            f"{deps.cfg.smtp.max_attachment_mb}MB"
+        # Oversize for SMTP. STK has no SMTP-size constraint (200MB
+        # session budget), so if STK is configured let the router deliver
+        # via STK and only bounce to needs_review when SMTP is the only
+        # path. If STK later fails at delivery time, kindle_router falls
+        # back to SMTP and the book lands in failed (retriable) instead
+        # of needs_review (manual).
+        from endless_library.kindle_stk import KindleStkService
+
+        _stk_configured = False
+        try:
+            _stk_configured = KindleStkService(deps.bookorbit_service).is_configured()
+        except Exception:
+            _stk_configured = False
+
+        size_msg = (
+            f"{raw_bytes // 1_048_576}MB raw -> ~{inflated // 1_048_576}MB "
+            f"after base64, cap {deps.cfg.smtp.max_attachment_mb}MB"
         )
-        deps.books.set_status(book.id, "needs_review", error=msg)
-        deps.events.append(book_id=book.id, kind="error", message=msg)
-        return "needs_review"
+        if not _stk_configured:
+            msg = f"too large for SMTP: {size_msg}; STK not configured"
+            deps.books.set_status(book.id, "needs_review", error=msg)
+            deps.events.append(book_id=book.id, kind="error", message=msg)
+            return "needs_review"
+        # Fall through: kindle_router will deliver via STK
+        deps.events.append(
+            book_id=book.id,
+            kind="oversize-routed-stk",
+            message=f"oversize for SMTP ({size_msg}); routing to STK",
+        )
 
     # Phase 6u.4: hand the enriched file off to BookOrbit BEFORE the
     # SMTP gate. BookOrbit has no rate limit; the library should fill

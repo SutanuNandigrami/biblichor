@@ -189,6 +189,16 @@ def _migrate(conn) -> None:
     ):
         if new_col not in cols:
             conn.execute(ddl)
+
+    # Backfill: rows sent before STK went live (first send-stk event
+    # was 2026-05-24 07:30 UTC) carry sent_method=NULL. Set them to
+    # 'smtp' so analytics that group by method are correct over the
+    # full history. Idempotent: only NULL rows in already-sent status
+    # are touched; a fresh DB matches zero rows.
+    conn.execute(
+        "UPDATE books SET sent_method='smtp' "
+        "WHERE sent_method IS NULL AND status IN ('sent','kindled')"
+    )
     # Phase 6w ultrareview C2: cancel_requested flag column
     bj_cols = {row[1] for row in conn.execute("PRAGMA table_info(bench_jobs)")}
     if "cancel_requested" not in bj_cols:
