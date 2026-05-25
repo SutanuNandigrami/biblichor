@@ -81,7 +81,7 @@ class SmtpCfg(BaseModel):
     # cycle instead of marking the book failed — books self-pace into
     # the SMTP budget over multiple cycles instead of all dying
     # together when one big source backfill hits the wall.
-    daily_cap: int = 150
+    daily_cap: int = 80
 
 
 class PushoverEventsCfg(BaseModel):
