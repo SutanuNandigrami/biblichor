@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1163,6 +1164,23 @@ def register(app: FastAPI) -> None:
             components["db_size_bytes"] = Path(deps.db_path).stat().st_size
         except Exception:
             components["db_size_bytes"] = 0
+
+        # bookorbit-upgrade perms guard. /app/deploy/compose.yml is
+        # bind-mounted from the host and the in-app upgrade flow
+        # writes to it. Two prior outages were caused by the host
+        # file losing its group-write bit; flag it loud here so it
+        # can't happen silently a third time. Only checked when the
+        # file exists (i.e. on the container; pytest tmp dirs skip).
+        try:
+            _compose_path = Path("/app/deploy/compose.yml")
+            if _compose_path.exists():
+                if os.access(_compose_path, os.W_OK):
+                    components["deploy_compose_writable"] = True
+                else:
+                    components["deploy_compose_writable"] = False
+                    ok = False
+        except Exception as e:  # pragma: no cover
+            components["deploy_compose_writable"] = f"unknown: {type(e).__name__}"
 
         # Phase 6u: SMTP quota visibility. Counts kind='send' events in
         # the last 24h vs cfg.smtp.daily_cap so the dashboard can warn
