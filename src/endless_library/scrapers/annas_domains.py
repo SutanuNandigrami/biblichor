@@ -212,16 +212,18 @@ def effective_mirrors(configured: list[str], cached: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 # Phase 6w.2: Mirror rotation with cool-down
 # ---------------------------------------------------------------------------
-# The bench audit on 2026-05-22 hit a sustained 502 from annas-archive.gl
-# on Bengali queries. Rotate across the 2026 mirror list (.gl, .li, .pm, .in).
-# On 5xx / connection-refused, cool that mirror for 5 minutes; pin success
-# across calls when prefer_last_working is set.
+# Mirrors rotated across active Anna's Archive domains as of 2026-05-25.
+# Updated after annas-archive.in fell out of DNS and .org was confirmed
+# dead by the user. .pk and .gd added from the wiki cache (both resolving
+# from OCI Phoenix). On 5xx / connection-refused, cool that mirror for
+# 5 minutes; pin success across calls when prefer_last_working is set.
 
 _MIRRORS = (
     "annas-archive.gl",
     "annas-archive.li",
     "annas-archive.pm",
-    "annas-archive.in",
+    "annas-archive.pk",
+    "annas-archive.gd",
 )
 _COOL_DOWN_SEC = 5 * 60
 
