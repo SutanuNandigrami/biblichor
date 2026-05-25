@@ -113,7 +113,7 @@ def fetch_wiki_domains(
                 WIKIPEDIA_URL,
                 timeout=timeout,
                 follow_redirects=True,
-                headers={"User-Agent": "endless-library/0.1 (+wiki domain refresh)"},
+                headers={"User-Agent": "biblichor/1.0 (+https://github.com/SutanuNandigrami/biblichor)"},
             )
             status, body = r.status_code, r.content
     except Exception as e:
