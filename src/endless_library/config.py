@@ -277,7 +277,7 @@ class StorageCfg(BaseModel):
 
 
 class BenchCfg(BaseModel):
-    per_query_timeout_sec: int = 20
+    per_query_timeout_sec: int = 45
     circuit_break_after_consecutive_fails: int = 3
 
 

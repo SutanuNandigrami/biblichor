@@ -6,7 +6,7 @@ def test_next_mirror_returns_first_when_no_history():
     from endless_library.scrapers.annas_domains import next_mirror, _reset_state_for_tests
     _reset_state_for_tests()
     m = next_mirror()
-    assert m in {"annas-archive.gl", "annas-archive.li", "annas-archive.pm", "annas-archive.in"}
+    assert m in {"annas-archive.gl", "annas-archive.li", "annas-archive.pm", "annas-archive.pk", "annas-archive.gd"}
 
 
 def test_mark_cool_skips_mirror_for_5min():
