@@ -19,6 +19,7 @@ from endless_library.domain.scoring import _is_non_latin as _query_is_non_latin
 from endless_library.scrapers.base import ANNAS_CDN_REGEX, parse_filesize, url_has_book_ext
 from endless_library.scrapers.rate_limit import MirrorRotator, TokenBucket
 from endless_library.scrapers import annas_domains as _annas_domains
+from endless_library.scrapers import annas_parsing as _annas_parsing  # shared parser
 
 log = logging.getLogger(__name__)
 
@@ -158,72 +159,16 @@ class AnnasArchiveCurl:
         return None
 
     def _parse_search_results(self, html: str, fmt_hint: str) -> list[Candidate]:
-        soup = BeautifulSoup(html, "lxml")
-        out: list[Candidate] = []
-        seen: set[str] = set()
-        # `js-vim-focus` is Anna's per-result title anchor; one per row, no sidebar dupes.
-        for a in soup.select('a.js-vim-focus[href^="/md5/"]'):
-            href = a.get("href", "")
-            m = re.search(r"/md5/([a-f0-9]{32})", href)
-            if not m:
-                continue
-            md5 = m.group(1)
-            if md5 in seen:
-                continue
-            seen.add(md5)
-            title = a.get_text(" ", strip=True) or None
-            # The row container: nearest ancestor with class containing "border-b"
-            row = a
-            for _ in range(6):
-                row = row.parent
-                if row is None:
-                    break
-                if row.name == "div" and "border-b" in (row.get("class") or []):
-                    break
-            row_text = row.get_text(" ", strip=True) if row else ""
-            # Look for a filename-hint div above the title (contains "/<md5>.<ext>")
-            fmt = None
-            for sib in a.parent.children if a.parent else []:
-                sib_text = (
-                    getattr(sib, "get_text", lambda **_: "")(" ", strip=True)
-                    if hasattr(sib, "get_text")
-                    else ""
-                )
-                fm = re.search(
-                    r"\.(epub|pdf|mobi|azw3|djvu|fb2|cbz|cbr|doc|docx|rtf|txt|lit)\b",
-                    sib_text,
-                    re.I,
-                )
-                if fm:
-                    fmt = fm.group(1).lower()
-                    break
-            if not fmt:
-                fmt = self._parse_format(row_text) or fmt_hint
-            filesize = parse_filesize(row_text)
-            language = self._parse_language(row_text)
-            year = self._parse_year(row_text)
-            edition_hints = row_text.lower()[:400]
-            isbns = self._extract_isbns(row_text)
-            out.append(
-                Candidate(
-                    provider="annas",
-                    md5=md5,
-                    title=title,
-                    author=None,
-                    language=language,
-                    format=fmt,
-                    filesize_bytes=filesize,
-                    year=year,
-                    publisher=None,
-                    edition_hints=edition_hints,
-                    detail_url=urljoin(self.mirrors.current, href),
-                    raw={"row_text": row_text[:400], "isbns": isbns},
-                )
-            )
-            if len(out) >= 25:
-                break
-        return out
+        """Delegate to the shared annas_parsing module.
 
+        See annas_parsing.py for extraction logic (canonical).
+        annas_cloakbrowser.py also uses the same shared parser.
+        """
+        return _annas_parsing.parse_search_results(
+            html,
+            self.mirrors.current,
+            fmt_hint=fmt_hint,
+        )
     @staticmethod
     def _extract_isbns(text: str) -> list[str]:
         """Pull every plausible ISBN-13 (and ISBN-10, normalized to 13) from a string."""
