@@ -12,6 +12,7 @@ const router = createRouter({
   routes: [
     { path: "/",         redirect: "/queue" },
     { path: "/queue",    name: "queue",    component: () => import("./pages/QueuePage.vue") },
+    { path: "/search",   name: "search",   component: () => import("./pages/SearchPage.vue") },
     { path: "/book/:id", name: "book",     component: () => import("./pages/BookPage.vue") },
     { path: "/sources",  name: "sources",  component: () => import("./pages/SourcesPage.vue") },
     { path: "/scrapers", name: "scrapers", component: () => import("./pages/ScrapersPage.vue") },

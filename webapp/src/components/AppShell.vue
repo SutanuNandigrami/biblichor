@@ -8,6 +8,7 @@ import { RouterLink } from "vue-router"
 import {
   BookOpen,
   Inbox,
+  Search,
   Database,
   Cpu,
   Settings as SettingsIcon,
@@ -51,6 +52,7 @@ const triggering = ref(false)
 const nav = [
   { to: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { to: "/queue",    label: "Queue",    icon: Inbox },
+  { to: "/search",   label: "Search",   icon: Search },
   { to: "/library",  label: "Library",  icon: LibraryIcon },
   { to: "/sources",  label: "Sources",  icon: Database },
   { to: "/scrapers", label: "Scrapers", icon: Cpu },

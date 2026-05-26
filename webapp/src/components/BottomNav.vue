@@ -5,6 +5,7 @@
 import { RouterLink } from "vue-router"
 import {
   Inbox,
+  Search,
   Database,
   Cpu,
   Server,
@@ -19,6 +20,7 @@ import {
 const items = [
   { to: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { to: "/queue",    label: "Queue",    icon: Inbox },
+  { to: "/search",   label: "Search",   icon: Search },
   { to: "/library",  label: "Library",  icon: Library },
   { to: "/sources",  label: "Sources",  icon: Database },
   { to: "/scrapers", label: "Scrapers", icon: Cpu },
