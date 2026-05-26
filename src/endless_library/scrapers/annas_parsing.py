@@ -95,6 +95,21 @@ def parse_search_results(
         isbns = extract_isbns(row_text)
         isbn13 = isbns[0] if isbns else None
 
+        # Cover thumbnail. Anna's serves covers from z-lib's CDN via
+        # an <img> tag inside the row container. Not every result has
+        # one (esp. niche regional books). First image wins.
+        cover_url: str | None = None
+        if row is not None:
+            img = row.find("img")
+            if img is not None:
+                _src = (
+                    img.get("src")
+                    or img.get("data-src")
+                    or img.get("data-lazy-src")
+                )
+                if _src and _src.startswith("http"):
+                    cover_url = _src
+
         out.append(
             Candidate(
                 provider="annas",
@@ -109,7 +124,12 @@ def parse_search_results(
                 edition_hints=edition_hints,
                 detail_url=urljoin(origin, href),
                 # isbn13 is stored in raw["isbns"] (list); scoring reads it from there.
-                raw={"row_text": row_text[:400], "isbns": isbns, "isbn13": isbn13},
+                raw={
+                    "row_text": row_text[:400],
+                    "isbns": isbns,
+                    "isbn13": isbn13,
+                    "cover_url": cover_url,
+                },
             )
         )
         if len(out) >= max_results:

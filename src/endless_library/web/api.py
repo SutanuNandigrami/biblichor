@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -73,6 +73,20 @@ class _ZlibCredsPayload(BaseModel):
 class _MobilismCredsPayload(BaseModel):
     username: str
     password: str
+
+
+class _AddFromSearchPayload(BaseModel):
+    md5: str
+    title: str
+    author: str | None = None
+    isbn13: str | None = None
+    language: str | None = None
+    format: str | None = None
+    filesize_bytes: int | None = None
+    year: int | None = None
+    publisher: str | None = None
+    detail_url: str
+    provider: str = "annas"
 
 
 class AddSource(BaseModel):
@@ -2085,6 +2099,128 @@ def register(app: FastAPI) -> None:
         svc = KindleStkService(deps.bookorbit_service)
         svc.deregister()
         return {"ok": True}
+
+    # ---------- search ----------
+
+    @router.get("/search")
+    def search(request: Request, q: str, limit: int = 20):
+        """Search Anna's Archive and return candidates enriched with
+        an "already in library" hint per result.
+
+        v1 hits Anna's directly via annas_curl. Multi-scraper fan-out
+        and BookOrbit metadata enrichment are follow-ups."""
+        from endless_library.domain.models import SearchQuery
+        from endless_library.scrapers import registry as _reg
+
+        q_clean = (q or "").strip()
+        if not q_clean:
+            raise HTTPException(400, "query parameter 'q' is required")
+        if "annas_curl" not in _reg.available():
+            raise HTTPException(503, "annas_curl scraper not available")
+
+        deps = request.app.state.deps
+        sc = deps.cfg.scrapers
+        query = SearchQuery(
+            title=q_clean,
+            author=None,
+            isbn13=None,
+            format_priority=tuple(getattr(sc, "format_priority", None) or ["epub", "mobi", "pdf"]),
+            language=getattr(sc, "language", "en") or "en",
+        )
+        scraper = _reg.build("annas_curl", sc)
+        try:
+            candidates = scraper.search(query)
+        except Exception as e:
+            log.exception("/api/search failed")
+            raise HTTPException(500, f"search failed: {type(e).__name__}: {e}")
+        candidates = list(candidates)[: max(1, min(int(limit), 50))]
+
+        md5s = [c.md5 for c in candidates if c.md5]
+        in_lib: dict[str, dict] = {}
+        if md5s:
+            with connect(deps.db_path) as conn:
+                placeholders = ",".join(["?"] * len(md5s))
+                for r in conn.execute(
+                    f"SELECT md5, id, status FROM books WHERE md5 IN ({placeholders})",
+                    md5s,
+                ):
+                    in_lib[r["md5"]] = {"id": r["id"], "status": r["status"]}
+
+        results = []
+        for c in candidates:
+            raw = c.raw or {}
+            results.append(
+                {
+                    "md5": c.md5,
+                    "title": c.title,
+                    "author": c.author,
+                    "language": c.language,
+                    "format": c.format,
+                    "filesize_bytes": c.filesize_bytes,
+                    "year": c.year,
+                    "publisher": c.publisher,
+                    "isbn13": raw.get("isbn13"),
+                    "cover_url": raw.get("cover_url"),
+                    "detail_url": c.detail_url,
+                    "provider": c.provider,
+                    "in_library": in_lib.get(c.md5),
+                }
+            )
+        return {"query": q_clean, "count": len(results), "results": results}
+
+    @router.post("/books/from-search")
+    def add_from_search(payload: _AddFromSearchPayload, request: Request):
+        """Queue a book picked from a /api/search result.
+
+        Idempotent on md5: existing row -> {created: False, ...}."""
+        deps = request.app.state.deps
+        with connect(deps.db_path) as conn:
+            existing = conn.execute(
+                "SELECT id, status FROM books WHERE md5 = ?", (payload.md5,)
+            ).fetchone()
+            if existing:
+                return {
+                    "created": False,
+                    "book_id": existing["id"],
+                    "status": existing["status"],
+                    "message": "already tracked",
+                }
+
+        book_id = deps.books.upsert(
+            title=payload.title,
+            author=payload.author or "",
+            isbn13=payload.isbn13,
+            source="manual",
+            source_id=f"search:{payload.md5}",
+        )
+        cand_id = deps.cands.insert(
+            book_id=book_id,
+            provider=payload.provider,
+            md5=payload.md5,
+            title=payload.title,
+            author=payload.author,
+            language=payload.language,
+            format=payload.format,
+            filesize_bytes=payload.filesize_bytes,
+            year=payload.year,
+            publisher=payload.publisher,
+            edition_hints="",
+            score=100.0,
+            detail_url=payload.detail_url,
+            raw_json='{"manual_pick": true, "source": "api/search"}',
+        )
+        with connect(deps.db_path) as conn:
+            conn.execute(
+                "UPDATE books SET picked_candidate_id = ?, status = 'queued', md5 = ? WHERE id = ?",
+                (cand_id, payload.md5, book_id),
+            )
+            conn.commit()
+        return {
+            "created": True,
+            "book_id": book_id,
+            "candidate_id": cand_id,
+            "status": "queued",
+        }
 
     app.include_router(router)
 
