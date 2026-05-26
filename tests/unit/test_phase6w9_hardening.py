@@ -12,7 +12,12 @@ def test_welib_playwright_imports_from_patchright():
     import ast
     from pathlib import Path
 
-    src = Path("/home/ubuntu/endless-library/src/endless_library/scrapers/welib_playwright.py")
+    src = (
+        Path(__file__)
+        .resolve()
+        .parents[2]
+        .joinpath("src/endless_library/scrapers/welib_playwright.py")
+    )
     tree = ast.parse(src.read_text())
 
     # Collect all import-from module names in the file

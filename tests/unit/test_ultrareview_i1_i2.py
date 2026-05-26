@@ -207,7 +207,7 @@ def test_scraper_to_open_slum_site_not_duplicated():
     """SCRAPER_TO_OPEN_SLUM_SITE must be defined exactly once in registry.py."""
     from pathlib import Path
 
-    src = Path("/home/ubuntu/endless-library/src/endless_library/scrapers/registry.py")
+    src = Path(__file__).resolve().parents[2].joinpath("src/endless_library/scrapers/registry.py")
     count = src.read_text().count("SCRAPER_TO_OPEN_SLUM_SITE: dict")
     assert count == 1, (
         f"SCRAPER_TO_OPEN_SLUM_SITE is defined {count} times in registry.py (expected 1)"
