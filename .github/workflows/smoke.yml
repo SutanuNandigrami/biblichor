@@ -106,6 +106,18 @@ jobs:
             --wait-timeout 240
         timeout-minutes: 6
 
+      - name: Show biblichor logs on failure
+        if: failure()
+        run: |
+          echo "=== biblichor container status ==="
+          docker compose -f deploy/compose.yml --env-file .env ps biblichor || true
+          echo "=== biblichor logs (last 80 lines) ==="
+          docker compose -f deploy/compose.yml --env-file .env logs biblichor 2>&1 | tail -80 || true
+          echo "=== biblichor inspect ==="
+          docker inspect biblichor --format 'state: {{.State.Status}}  health: {{.State.Health.Status}}  exit: {{.State.ExitCode}}' || true
+          echo "=== /healthz attempt ==="
+          curl -v http://localhost:8090/healthz 2>&1 | head -30 || true
+
       - name: biblichor /healthz returns 200
         run: |
           for i in $(seq 1 30); do
