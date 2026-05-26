@@ -95,8 +95,9 @@ jobs:
           # Container biblichor user is uid 1000; runner is 1001. Use
           # world-writable for the smoke DB so the container can WAL-mode it.
           touch data/library.db
-          chmod 666 data/library.db
-          chmod -R 777 data
+          # Container biblichor user is uid 1000; runner is 1001. Open up
+          # all the bind-mounted dirs/files so the container can write.
+          chmod -R 777 data config library
           # biblichor healthz checks deploy/compose.yml is writable by the
           # container (bookorbit in-app upgrade writes to it). Runner uid
           # 1001 owns the file by default; chmod 666 so container uid 1000
