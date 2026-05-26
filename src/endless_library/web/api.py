@@ -2180,6 +2180,7 @@ def register(app: FastAPI) -> None:
         else:
             # SimpleNamespace test stub — mutate a copy via copy.copy()
             import copy as _copy
+
             sc = _copy.copy(deps.cfg.scrapers)
             sc.request_delay_seconds = 0.0
 
@@ -2212,7 +2213,12 @@ def register(app: FastAPI) -> None:
             title=q_clean,
             author=None,
             isbn13=None,
-            format_priority=tuple(getattr(sc, "format_priority", None) or ["epub", "mobi", "pdf"]),
+            # Interactive search hits Anna’s once. Pipeline-side scraper
+            # iterates the full format ladder (epub→azw3→mobi→pdf), each one
+            # an HTTP call — fine for batch download where you want any format,
+            # ruinous for keystroke latency. Limit to the user’s top choice;
+            # if no epub exists, the SPA can hint that explicitly later.
+            format_priority=((getattr(sc, "format_priority", None) or ["epub"])[0],),
             language=effective_lang,
         )
 
