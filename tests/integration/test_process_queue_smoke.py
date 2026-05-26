@@ -3,6 +3,7 @@
 Catches issues like slots=True on PipelineDeps where ad-hoc attribute
 assignment would crash production but not the mock-deps unit tests.
 """
+
 from pathlib import Path
 
 from endless_library.config import Config

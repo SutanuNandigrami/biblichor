@@ -5,6 +5,7 @@ FakeVendoredClient accepts send_file calls (one per book). We verify:
     send_file calls on the vendored client (batched in one signed session).
   - 5 'send-stk' events + 1 'send-stk-batch' event in the audit log.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -48,7 +49,6 @@ def test_pipeline_batch_smoke(db, svc, tmp_path, monkeypatch):
 
     fake = FakeVendoredClient()
     batch_call_count = [0]
-
 
     # Patch FakeVendoredClient into the vendored layer
     monkeypatch.setattr(
@@ -132,21 +132,18 @@ def test_pipeline_batch_smoke(db, svc, tmp_path, monkeypatch):
     deps.notifier = _FakeNotifier()
 
     from endless_library.pipeline import process_queue
+
     tally = process_queue(deps)
 
     assert tally["sent"] == 5, f"Expected 5 sent, got: {tally}"
     assert tally["failed"] == 0, f"Unexpected failures: {tally}"
 
     # Verify batch call happened (exactly 1, since all 5 fit in 1 batch of 25)
-    assert batch_call_count[0] == 1, (
-        f"Expected 1 deliver_batch call, got {batch_call_count[0]}"
-    )
+    assert batch_call_count[0] == 1, f"Expected 1 deliver_batch call, got {batch_call_count[0]}"
 
     # Verify audit log
     with connect(db) as conn:
-        event_kinds = [
-            row["kind"] for row in conn.execute("SELECT kind FROM events ORDER BY id")
-        ]
+        event_kinds = [row["kind"] for row in conn.execute("SELECT kind FROM events ORDER BY id")]
     assert event_kinds.count("send-stk") == 5
     assert event_kinds.count("send-stk-batch") == 1
 

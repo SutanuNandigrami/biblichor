@@ -1,4 +1,5 @@
 """Phase STK 9: FastAPI endpoints for setup wizard + status + test send."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,13 +17,24 @@ def _build_app(tmp_path: Path) -> tuple[FastAPI, SimpleNamespace]:
     db = tmp_path / "test.db"
     init_db(db)
     app = FastAPI()
+
     # In-memory BookOrbitService stand-in
     class _Svc:
-        def __init__(self): self._s: dict[str, str] = {}
-        def get_secret_value(self, k): return self._s.get(k)
-        def set_secret_value(self, k, v): self._s[k] = v
-        def set_secret_values(self, kv): self._s.update(kv)
-        def delete_secret_value(self, k): self._s.pop(k, None)
+        def __init__(self):
+            self._s: dict[str, str] = {}
+
+        def get_secret_value(self, k):
+            return self._s.get(k)
+
+        def set_secret_value(self, k, v):
+            self._s[k] = v
+
+        def set_secret_values(self, kv):
+            self._s.update(kv)
+
+        def delete_secret_value(self, k):
+            self._s.pop(k, None)
+
     svc = _Svc()
     deps = SimpleNamespace(
         db_path=db,
@@ -71,8 +83,11 @@ def test_oauth_start_returns_authorize_url(tmp_path, monkeypatch):
 def test_oauth_complete_with_valid_url_persists_cert(tmp_path, monkeypatch):
     fake_client = FakeVendoredClient()
     fake_client.register_device = lambda c, v, domain="amazon.com": {
-        "device_private_key": "PEM_K", "adp_token": "ADP_T", "adp_did": "DID-1",
-        "customer_id": "amzn1.account.y", "customer_name": "Test",
+        "device_private_key": "PEM_K",
+        "adp_token": "ADP_T",
+        "adp_did": "DID-1",
+        "customer_id": "amzn1.account.y",
+        "customer_name": "Test",
     }
     monkeypatch.setattr(
         "endless_library.kindle_stk._vendored.Client",
@@ -168,6 +183,7 @@ def test_delete_connection_wipes_secrets(tmp_path, monkeypatch):
 
 def test_test_send_returns_4xx_on_send_failure(tmp_path, monkeypatch):
     from endless_library.kindle_stk import KindleStkUploadFailed
+
     fake_client = FakeVendoredClient(send_raises=KindleStkUploadFailed("nope"))
     monkeypatch.setattr(
         "endless_library.kindle_stk._vendored.Client",

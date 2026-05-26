@@ -137,8 +137,9 @@ def pd_aware_order(cfg: ScrapersCfg, *, query_title: str, is_pd: bool) -> list[s
     return promoted + rest
 
 
-def chain_for_source(cfg, *, source: str | None, query_title: str,
-                     is_pd: bool, is_recent_release: bool = False) -> list[str]:
+def chain_for_source(
+    cfg, *, source: str | None, query_title: str, is_pd: bool, is_recent_release: bool = False
+) -> list[str]:
     """Source-aware chain. For sources where the Source adapter already
     knows the per-book download path (e.g. kindlebangla emits slugs that
     kindlebangla_curl resolves directly), short-circuit the chain to

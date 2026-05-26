@@ -6,6 +6,7 @@ Mediafire serves the real download link inside a JavaScript block:
 This module fetches the page and extracts that URL via regex, avoiding
 the need for a headless browser.
 """
+
 from __future__ import annotations
 
 import logging

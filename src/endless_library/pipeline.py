@@ -282,8 +282,11 @@ def _search_with_strategies(
         return [synth], "kindlebangla_curl"
 
     for s_name in scrapers_registry.chain_for_source(
-        deps.cfg.scrapers, source=_book_source, query_title=book.title or "",
-        is_pd=_is_pd, is_recent_release=_is_recent
+        deps.cfg.scrapers,
+        source=_book_source,
+        query_title=book.title or "",
+        is_pd=_is_pd,
+        is_recent_release=_is_recent,
     ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
@@ -402,8 +405,11 @@ def _resolve_and_download(
     last_error: str | None = None
     _is_pd, _is_recent, _book_source = _book_context(book, deps.cfg)
     for s_name in scrapers_registry.chain_for_source(
-        deps.cfg.scrapers, source=_book_source, query_title=book.title or "",
-        is_pd=_is_pd, is_recent_release=_is_recent
+        deps.cfg.scrapers,
+        source=_book_source,
+        query_title=book.title or "",
+        is_pd=_is_pd,
+        is_recent_release=_is_recent,
     ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
@@ -586,7 +592,8 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
             file_path, dl_err = _resolve_and_download(deps, book, picked_cand)
             if not file_path:
                 return _search_fail_or_skip(
-                    deps, book,
+                    deps,
+                    book,
                     dl_err or f"manual pick (cand {book.picked_candidate_id}) failed to download",
                 )
             return _process_from_downloaded(deps, book, file_path)
@@ -862,11 +869,7 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
     _bo_already_done = any(
         e.kind == "bookorbit" for e in deps.events.recent_for_book(book.id, limit=200)
     )
-    if (
-        not _bo_already_done
-        and deps.cfg.bookorbit.enabled
-        and deps.cfg.bookorbit.library_root
-    ):
+    if not _bo_already_done and deps.cfg.bookorbit.enabled and deps.cfg.bookorbit.library_root:
         library_root_path = Path(deps.cfg.bookorbit.library_root)
         if not library_root_path.exists():
             log.warning(
@@ -924,7 +927,11 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
         # STK delivery: kindle_router.deliver() already recorded the send-stk event.
         # SMTP delivery: kindle_router._smtp_deliver() does NOT record events, so we do it here.
         if result.method.value != "stk":
-            deps.events.append(book_id=book.id, kind=f"send-{result.method.value}", message=f"sent via {result.method.value}")
+            deps.events.append(
+                book_id=book.id,
+                kind=f"send-{result.method.value}",
+                message=f"sent via {result.method.value}",
+            )
         deps.notifier.book_sent(book.title, book.author, file_path.suffix.lstrip("."))
         return "sent"
     else:
@@ -952,8 +959,12 @@ def process_queue(deps: PipelineDeps) -> dict[str, int]:
 
     deps.books.reset_zombies(stale_minutes=deps.cfg.general.zombie_stale_minutes)
     tally: dict[str, int] = {
-        "sent": 0, "failed": 0, "needs_review": 0,
-        "skipped": 0, "deferred": 0, "in_flight": 0,
+        "sent": 0,
+        "failed": 0,
+        "needs_review": 0,
+        "skipped": 0,
+        "deferred": 0,
+        "in_flight": 0,
     }
 
     # Determine whether to use STK batch mode.
@@ -1003,7 +1014,8 @@ def process_queue(deps: PipelineDeps) -> dict[str, int]:
                     # For SMTP fallback from a failed batch, record the event here.
                     if result.method.value != "stk":
                         deps.events.append(
-                            book_id=b.id, kind=f"send-{result.method.value}",
+                            book_id=b.id,
+                            kind=f"send-{result.method.value}",
                             message=f"sent via {result.method.value}",
                         )
                     deps.notifier.book_sent(b.title, b.author, fp.suffix.lstrip("."))

@@ -82,9 +82,7 @@ class BenchJobsRepo:
 
     def get(self, job_id: int) -> BenchJobRow | None:
         with connect(self.db_path) as conn:
-            r = conn.execute(
-                "SELECT * FROM bench_jobs WHERE id = ?", (job_id,)
-            ).fetchone()
+            r = conn.execute("SELECT * FROM bench_jobs WHERE id = ?", (job_id,)).fetchone()
         return BenchJobRow.from_row(r) if r else None
 
     def list_recent(self, limit: int = 20) -> list[BenchJobRow]:

@@ -116,10 +116,12 @@ class BookOrbitService:
         return None
 
     def store_admin_creds(self, username: str, password: str) -> None:
-        self.set_secret_values({
-            SECRET_ADMIN_USER: username,
-            SECRET_ADMIN_PASSWORD: password,
-        })
+        self.set_secret_values(
+            {
+                SECRET_ADMIN_USER: username,
+                SECRET_ADMIN_PASSWORD: password,
+            }
+        )
 
     def clear_admin_creds(self) -> None:
         with connect(self._db_path) as conn:

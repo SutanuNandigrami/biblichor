@@ -1,4 +1,5 @@
 """Tests for ultrareview I4 (OpenSlumMonitor._refresh always updates _last_refresh)."""
+
 from __future__ import annotations
 
 
@@ -77,6 +78,7 @@ def test_open_slum_cache_preserved_on_non_dict_response():
 # ---------------------------------------------------------------------------
 # Ultrareview C: OpenSlumMonitor serialised under concurrent calls
 # ---------------------------------------------------------------------------
+
 
 def test_open_slum_get_serialised_under_concurrent_calls():
     """N threads calling get() concurrently after a stale interval must

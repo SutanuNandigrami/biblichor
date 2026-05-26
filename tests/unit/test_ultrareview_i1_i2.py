@@ -2,6 +2,7 @@
 and I2 (Anubis middleware wraps all HTTP methods).
 Ultrareview commit batch 1.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -186,8 +187,7 @@ def test_anubis_middleware_injects_cached_cookie():
     session = MagicMock()
     session.get = fake_get
     for m in ("post", "head", "put", "delete"):
-        setattr(session, m, MagicMock(return_value=MagicMock(
-            status_code=200, text="", headers={})))
+        setattr(session, m, MagicMock(return_value=MagicMock(status_code=200, text="", headers={})))
 
     _install_anubis_middleware(session)
     session.get(f"https://{host}/path")
@@ -206,6 +206,7 @@ def test_anubis_middleware_injects_cached_cookie():
 def test_scraper_to_open_slum_site_not_duplicated():
     """SCRAPER_TO_OPEN_SLUM_SITE must be defined exactly once in registry.py."""
     from pathlib import Path
+
     src = Path("/home/ubuntu/endless-library/src/endless_library/scrapers/registry.py")
     count = src.read_text().count("SCRAPER_TO_OPEN_SLUM_SITE: dict")
     assert count == 1, (

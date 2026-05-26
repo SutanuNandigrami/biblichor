@@ -4,6 +4,7 @@ bare asyncio.run.
 asyncio.run() raises RuntimeError when called from within a running event loop.
 send_to_kindle must work when invoked from an async context (e.g. via executor).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,6 +32,7 @@ def _make_smtp_cfg():
 def test_run_async_module_exists():
     """async_utils module must exist and export _run_async."""
     from endless_library.async_utils import _run_async
+
     assert callable(_run_async)
 
 
@@ -91,4 +93,5 @@ def test_kindle_send_safe_under_running_event_loop(tmp_path):
 def test_annas_curl_reexports_run_async():
     """annas_curl._run_async must still be importable (back-compat)."""
     from endless_library.scrapers.annas_curl import _run_async
+
     assert callable(_run_async)

@@ -136,13 +136,21 @@ def run_bench(
             _nc_scoped = queries_for_scraper(all_queries, s_name, tag_map)
             for _ncq in _nc_scoped:
                 _note = f"creds-missing: {e}"
-                outcomes.append(BenchOutcome(
-                    scraper=s_name, query=_ncq.title, success=False,
-                    duration_ms=0, candidates=0, matched_isbn=False, note=_note,
-                ))
+                outcomes.append(
+                    BenchOutcome(
+                        scraper=s_name,
+                        query=_ncq.title,
+                        success=False,
+                        duration_ms=0,
+                        candidates=0,
+                        matched_isbn=False,
+                        note=_note,
+                    )
+                )
                 if repo:
-                    repo.record(scraper=s_name, query=_ncq.title, success=False,
-                                duration_ms=0, notes=_note)
+                    repo.record(
+                        scraper=s_name, query=_ncq.title, success=False, duration_ms=0, notes=_note
+                    )
             continue
         except Exception as e:
             log.warning("could not build %s: %s", s_name, e)
@@ -160,14 +168,25 @@ def run_bench(
         consecutive_fails = 0
         for q in scoped:
             if consecutive_fails >= breaker_limit:
-                outcomes.append(BenchOutcome(
-                    scraper=s_name, query=q.title, success=False, duration_ms=0,
-                    candidates=0, matched_isbn=False,
-                    note=f"circuit-broken: skipped after {breaker_limit} consecutive failures",
-                ))
+                outcomes.append(
+                    BenchOutcome(
+                        scraper=s_name,
+                        query=q.title,
+                        success=False,
+                        duration_ms=0,
+                        candidates=0,
+                        matched_isbn=False,
+                        note=f"circuit-broken: skipped after {breaker_limit} consecutive failures",
+                    )
+                )
                 if repo:
-                    repo.record(scraper=s_name, query=q.title, success=False,
-                                duration_ms=0, notes="circuit-broken")
+                    repo.record(
+                        scraper=s_name,
+                        query=q.title,
+                        success=False,
+                        duration_ms=0,
+                        notes="circuit-broken",
+                    )
                 continue
             sq = SearchQuery(
                 title=q.title,

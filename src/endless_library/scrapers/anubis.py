@@ -8,6 +8,7 @@ client submits nonce; server returns a JWT cookie valid for ~50min.
 
 Pure Python; ~1-50ms typical at difficulty 8-16.
 """
+
 from __future__ import annotations
 
 import hashlib

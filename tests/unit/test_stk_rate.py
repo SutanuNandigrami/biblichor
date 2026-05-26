@@ -1,4 +1,5 @@
 """Phase STK 5: stk_rate.quota_status — STK delivery rate-limit gate."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -28,6 +29,7 @@ def _record_event(db: Path, kind: str, ts_offset_sec: int = 0) -> None:
 
 def test_quota_status_zero_when_no_events(db):
     from endless_library.stk_rate import quota_status
+
     s = quota_status(db, daily_cap=500)
     assert s.sent_24h == 0
     assert s.cap == 500
@@ -38,9 +40,10 @@ def test_quota_status_zero_when_no_events(db):
 def test_quota_status_counts_only_send_stk_kind(db):
     _record_event(db, "send-stk")
     _record_event(db, "send-stk")
-    _record_event(db, "send")        # SMTP — must not count
-    _record_event(db, "search")      # noise — must not count
+    _record_event(db, "send")  # SMTP — must not count
+    _record_event(db, "search")  # noise — must not count
     from endless_library.stk_rate import quota_status
+
     s = quota_status(db, daily_cap=500)
     assert s.sent_24h == 2
     assert s.remaining == 498
@@ -48,8 +51,9 @@ def test_quota_status_counts_only_send_stk_kind(db):
 
 def test_quota_status_respects_24h_window(db):
     _record_event(db, "send-stk", ts_offset_sec=-90_000)  # 25 hours ago
-    _record_event(db, "send-stk", ts_offset_sec=-3600)    # 1 hour ago
+    _record_event(db, "send-stk", ts_offset_sec=-3600)  # 1 hour ago
     from endless_library.stk_rate import quota_status
+
     s = quota_status(db, daily_cap=500)
     assert s.sent_24h == 1
 
@@ -58,6 +62,7 @@ def test_quota_status_exhausted_when_at_cap(db):
     for _ in range(5):
         _record_event(db, "send-stk")
     from endless_library.stk_rate import quota_status
+
     s = quota_status(db, daily_cap=5)
     assert s.exhausted is True
     assert s.remaining == 0

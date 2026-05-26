@@ -1,9 +1,11 @@
 """Phase 6w.9 hardening + UI smoke tests."""
+
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
 # Task 1: Patchright import check
 # ---------------------------------------------------------------------------
+
 
 def test_welib_playwright_imports_from_patchright():
     """welib_playwright must use patchright, not vanilla playwright."""
@@ -23,9 +25,7 @@ def test_welib_playwright_imports_from_patchright():
     patchright_imports = [m for m in modules if "patchright" in m]
     playwright_imports = [m for m in modules if m.startswith("playwright")]
 
-    assert patchright_imports, (
-        "welib_playwright.py should import from patchright, found none"
-    )
+    assert patchright_imports, "welib_playwright.py should import from patchright, found none"
     assert not playwright_imports, (
         f"welib_playwright.py still imports vanilla playwright: {playwright_imports}"
     )
@@ -34,6 +34,7 @@ def test_welib_playwright_imports_from_patchright():
 # ---------------------------------------------------------------------------
 # Task 2: bench records NotConfigured instead of raising
 # ---------------------------------------------------------------------------
+
 
 def test_bench_records_not_configured_instead_of_raising():
     """When registry.build raises NotConfigured, bench records per-query
@@ -61,20 +62,27 @@ def test_bench_records_not_configured_instead_of_raising():
             order = ["fake_scraper"]
             enabled = {"fake_scraper": True}
             format_priority = ["epub"]
+
         class bench:
             per_query_timeout_sec = 20
             circuit_break_after_consecutive_fails = 3
 
     queries = [
-        BenchQuery(title="Test Book", author="Author", isbn13="", language="en", tags=("en", "modern")),
+        BenchQuery(
+            title="Test Book", author="Author", isbn13="", language="en", tags=("en", "modern")
+        ),
     ]
 
     try:
         _reg_mod.build = lambda name, cfg, **kw: (_ for _ in ()).throw(NotConfigured("no creds"))
         _reg_mod.enabled_order = lambda cfg: ["fake_scraper"]
 
-        outcomes = run_bench(_FakeCfg(), queries, strategies=["fake_scraper"],
-                             corpus_tags={"fake_scraper": frozenset(["en", "modern"])})
+        outcomes = run_bench(
+            _FakeCfg(),
+            queries,
+            strategies=["fake_scraper"],
+            corpus_tags={"fake_scraper": frozenset(["en", "modern"])},
+        )
     finally:
         _reg_mod.build = original_build
         _reg_mod.enabled_order = original_enabled
@@ -88,18 +96,21 @@ def test_bench_records_not_configured_instead_of_raising():
 
 def test_not_configured_importable_from_base():
     from endless_library.scrapers.base import NotConfigured
+
     assert issubclass(NotConfigured, Exception)
 
 
 def test_not_configured_re_exported_from_mobilism():
     from endless_library.scrapers.base import NotConfigured as NCBase
     from endless_library.scrapers.mobilism import NotConfigured as NC
+
     assert NC is NCBase
 
 
 # ---------------------------------------------------------------------------
 # Task 3: PD chain verification
 # ---------------------------------------------------------------------------
+
 
 def _make_scrapers_cfg(enabled: list[str]):
     """Build a minimal ScrapersCfg-like stub for PD chain tests."""
@@ -179,6 +190,7 @@ def test_pd_chain_does_not_promote_pd_scrapers_for_modern_books():
 # ---------------------------------------------------------------------------
 # Task 4: Open Slum monitor
 # ---------------------------------------------------------------------------
+
 
 def test_open_slum_caches_within_poll_interval():
     """A second call within the poll interval must NOT trigger a remote fetch."""

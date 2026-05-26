@@ -5,6 +5,7 @@ Usage:
     python tools/sync_stkclient.py             # uses the pinned version
     python tools/sync_stkclient.py --tag X.Y   # explicit tag
 """
+
 from __future__ import annotations
 
 import argparse

@@ -12,6 +12,7 @@ Usage:
     from endless_library.async_utils import _run_async
     result = _run_async(some_async_fn())
 """
+
 from __future__ import annotations
 
 import asyncio

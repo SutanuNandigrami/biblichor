@@ -193,9 +193,7 @@ class SubprocessDockerRunner:
         except FileNotFoundError as e:
             return 127, "", str(e)
 
-    def run_to_file(
-        self, args: list[str], dest: Path, *, timeout: float = 60.0
-    ) -> tuple[int, str]:
+    def run_to_file(self, args: list[str], dest: Path, *, timeout: float = 60.0) -> tuple[int, str]:
         """Stream `docker <args>` stdout directly into `dest`. Used by
         pg_dump where stdout is gzipped binary and decoding via the
         text runner would corrupt it. stderr is captured as a string
@@ -210,7 +208,9 @@ class SubprocessDockerRunner:
                     timeout=timeout,
                     check=False,
                 )
-            return proc.returncode, proc.stderr.decode("utf-8", errors="replace") if proc.stderr else ""
+            return proc.returncode, proc.stderr.decode(
+                "utf-8", errors="replace"
+            ) if proc.stderr else ""
         except subprocess.TimeoutExpired:
             return 124, f"timeout after {timeout}s"
         except FileNotFoundError as e:
@@ -638,7 +638,7 @@ def apply_upgrade(
             db_container,
             "sh",
             "-c",
-            "pg_dump -U \"$POSTGRES_USER\" \"$POSTGRES_DB\" | gzip -9",
+            'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip -9',
         ],
         backup_path,
         timeout=600,
@@ -738,7 +738,11 @@ def apply_upgrade(
         )
         _rollback("health poll timeout")
         return result
-    _finish_step(health_step, ok=True, detail=f"healthy within {int(time.time() - (deadline - poll_timeout))}s")
+    _finish_step(
+        health_step,
+        ok=True,
+        detail=f"healthy within {int(time.time() - (deadline - poll_timeout))}s",
+    )
 
     # ---- 5. Verify version reports as target ----
     version_step = _step(result, "version.verify")

@@ -116,6 +116,7 @@ class AnnasArchiveCurl:
 
     def _get(self, url: str) -> str | None:
         from urllib.parse import urlparse as _urlparse
+
         sleep = self.bucket.acquire(url)
         if sleep > 0:
             log.debug("rate-limit sleep %.1fs for %s", sleep, url)
@@ -140,7 +141,9 @@ class AnnasArchiveCurl:
                     host = next_host
                     self._last_host = next_host
                     log.info("annas_curl: gateway %d, retrying with %s", status, next_host)
-                    r = cf.get(retry_url, headers=DEFAULT_HEADERS, impersonate="chrome120", timeout=30)
+                    r = cf.get(
+                        retry_url, headers=DEFAULT_HEADERS, impersonate="chrome120", timeout=30
+                    )
                     status, text = r.status_code, r.text
             except Exception as e:
                 log.warning("curl_cffi failed for %s: %s", url, e)
@@ -168,6 +171,7 @@ class AnnasArchiveCurl:
             self.mirrors.current,
             fmt_hint=fmt_hint,
         )
+
     @staticmethod
     def _extract_isbns(text: str) -> list[str]:
         """Pull every plausible ISBN-13 (and ISBN-10, normalized to 13) from a string."""
@@ -319,7 +323,6 @@ class AnnasArchiveCurl:
         return None
 
 
-
 # I-NEW-3: _run_async now lives in endless_library.async_utils.
 # Re-exported here for back-compat with any code importing it from this module.
 from endless_library.async_utils import _run_async  # noqa: E402
@@ -368,4 +371,3 @@ async def _probe_slow_servers_async(urls: list[str], *, timeout: float = 15.0) -
                 if not t.done():
                     t.cancel()
     return None
-

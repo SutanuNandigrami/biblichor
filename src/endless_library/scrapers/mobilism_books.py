@@ -10,6 +10,7 @@ ScrapersCfg (``mobilism_username`` / ``mobilism_password``).
 
 Candidate.provider is ``"mobilism_books"``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,8 +29,7 @@ log = logging.getLogger(__name__)
 
 _FORUM_BASE = "https://forum.mobilism.org/"
 _SEARCH_URL = (
-    "https://forum.mobilism.org/search.php"
-    "?keywords={query}&fid%5B%5D=15&sr=topics&sf=titleonly"
+    "https://forum.mobilism.org/search.php?keywords={query}&fid%5B%5D=15&sr=topics&sf=titleonly"
 )
 
 # Extension clues from thread title / post text
@@ -51,7 +51,6 @@ _MF_LINK_RE = re.compile(
 _DRIFT_PROBE_TTL = 6 * 3600
 _drift_probe_last_at: float = 0.0
 _drift_probe_lock = threading.Lock()
-
 
 
 def _check_drift(session) -> None:
@@ -82,6 +81,7 @@ def _check_drift(session) -> None:
                 )
         except Exception as _e:
             log.debug("mobilism_books: drift probe failed: %s", _e)
+
 
 def _ext_from_text(text: str) -> str | None:
     m = _EXT_RE.search(text)
@@ -198,8 +198,11 @@ class MobilismBooks:
                     publisher=None,
                     edition_hints="",
                     detail_url=href,  # share-page URL (scoring uses this)
-                    raw={"direct_url": direct, "thread_url": thread_url,
-                         "thread_title": thread_title},
+                    raw={
+                        "direct_url": direct,
+                        "thread_url": thread_url,
+                        "thread_title": thread_title,
+                    },
                 )
             )
 

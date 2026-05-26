@@ -6,6 +6,7 @@ Scraper Protocol in base.py.  Accessing instance.name raised AttributeError
 in any code path that introspects the scraper (logging, bench outcome records,
 etc.).
 """
+
 from __future__ import annotations
 
 
@@ -59,9 +60,7 @@ def test_all_registry_scrapers_have_name_attribute():
         if not hasattr(klass, "name"):
             missing.append(name)
 
-    assert not missing, (
-        f"These scrapers are missing the class-level 'name' attribute: {missing}"
-    )
+    assert not missing, f"These scrapers are missing the class-level 'name' attribute: {missing}"
 
 
 def test_archive_curl_name_matches_registry_key():

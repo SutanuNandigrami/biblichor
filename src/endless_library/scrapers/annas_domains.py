@@ -110,7 +110,9 @@ def fetch_wiki_domains(
                 WIKIPEDIA_URL,
                 timeout=timeout,
                 follow_redirects=True,
-                headers={"User-Agent": "biblichor/1.0 (+https://github.com/SutanuNandigrami/biblichor)"},
+                headers={
+                    "User-Agent": "biblichor/1.0 (+https://github.com/SutanuNandigrami/biblichor)"
+                },
             )
             status, body = r.status_code, r.content
     except Exception as e:
@@ -224,7 +226,7 @@ _MIRRORS = (
 )
 _COOL_DOWN_SEC = 5 * 60
 
-_state: dict[str, float] = {}      # mirror -> cool-until-epoch
+_state: dict[str, float] = {}  # mirror -> cool-until-epoch
 _last_working: str | None = None
 _STATE_LOCK = threading.Lock()
 

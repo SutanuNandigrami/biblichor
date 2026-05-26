@@ -15,6 +15,7 @@ This module wraps the upstream stkclient with biblichor's expected API:
   returns a plain dict. It also wraps ``get_owned_devices()`` and
   ``send_file()`` so the caller never sees upstream internals.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -51,9 +52,11 @@ class OAuth2:
         import urllib.parse
 
         verifier = base64.b64encode(os.urandom(32), b"-_").rstrip(b"=").decode("utf8")
-        challenge = base64.b64encode(
-            hashlib.sha256(verifier.encode("utf-8")).digest(), b"-_"
-        ).rstrip(b"=").decode("utf8")
+        challenge = (
+            base64.b64encode(hashlib.sha256(verifier.encode("utf-8")).digest(), b"-_")
+            .rstrip(b"=")
+            .decode("utf8")
+        )
 
         q = {
             "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
@@ -91,7 +94,9 @@ class OAuth2:
             ) from e
 
 
-def _token_exchange_with_domain(authorization_code: str, code_verifier: str, domain: str = "amazon.com") -> str:
+def _token_exchange_with_domain(
+    authorization_code: str, code_verifier: str, domain: str = "amazon.com"
+) -> str:
     """Re-implementation of _api.token_exchange with a regional auth-domain header.
 
     For non-US Amazon regions the x-amzn-identity-auth-domain header must use
@@ -150,7 +155,9 @@ class Client:
 
     # ---------- OAuth registration ----------
 
-    def register_device(self, code: str, verifier: str, domain: str = "amazon.com") -> dict[str, Any]:
+    def register_device(
+        self, code: str, verifier: str, domain: str = "amazon.com"
+    ) -> dict[str, Any]:
         """Exchange authorization code + verifier for a registered device.
 
         Returns a dict with keys:

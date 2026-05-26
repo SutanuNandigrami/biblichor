@@ -43,6 +43,7 @@ def test_open_slum_monitor_escalates_to_warning_after_n_failures(caplog):
 
     def failing_fetch():
         raise RuntimeError("simulated network failure")
+
     monitor._fetch_remote = failing_fetch
 
     with caplog.at_level(logging.DEBUG):
@@ -50,8 +51,7 @@ def test_open_slum_monitor_escalates_to_warning_after_n_failures(caplog):
             monitor._refresh()
 
     warning_records = [
-        r for r in caplog.records
-        if r.levelno == logging.WARNING and "open_slum" in r.message
+        r for r in caplog.records if r.levelno == logging.WARNING and "open_slum" in r.message
     ]
     assert len(warning_records) >= 1, "Expected at least one WARNING after N failures"
     assert monitor._consecutive_failures >= _WARN_AFTER_N_FAILURES
@@ -134,6 +134,7 @@ def test_open_slum_refresh_logs_unknown_keys(caplog, monkeypatch):
         import logging as _log_mod
 
         from endless_library.scrapers.open_slum import _KNOWN_SITE_KEYS
+
         data = {"annas_archive": {"ok": True}, "brand_new_site_xyz999": {"ok": True}}
         _logger = _log_mod.getLogger("endless_library.scrapers.open_slum")
         unknown = set(data.keys()) - _KNOWN_SITE_KEYS
@@ -179,6 +180,7 @@ def test_bulk_delete_filter_matches_real_row(tmp_path):
     books_dir.mkdir()
 
     from endless_library.config import Config, GeneralCfg
+
     cfg = Config(general=GeneralCfg(books_dir=str(books_dir)))
 
     deps = SimpleNamespace(

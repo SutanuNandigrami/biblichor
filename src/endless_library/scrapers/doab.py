@@ -1,6 +1,7 @@
 """DOAB (Directory of Open Access Books) — ~90k OA scholarly books.
 REST search at /rest/search; results carry DC metadata with download
 URLs at oapen.relation.isPartOfBook or dc.identifier.uri."""
+
 from __future__ import annotations
 
 import logging
@@ -51,19 +52,21 @@ class Doab:
             url = md.get("oapen.relation.isPartOfBook") or md.get("dc.identifier.uri")
             if not url:
                 continue
-            out.append(Candidate(
-                provider=self.provider,
-                md5=None,
-                title=md.get("dc.title", query.title),
-                author=md.get("dc.creator"),
-                language=None,
-                format="pdf",
-                filesize_bytes=None,
-                year=None,
-                publisher=None,
-                edition_hints="",
-                detail_url=url,
-            ))
+            out.append(
+                Candidate(
+                    provider=self.provider,
+                    md5=None,
+                    title=md.get("dc.title", query.title),
+                    author=md.get("dc.creator"),
+                    language=None,
+                    format="pdf",
+                    filesize_bytes=None,
+                    year=None,
+                    publisher=None,
+                    edition_hints="",
+                    detail_url=url,
+                )
+            )
         return out
 
     def resolve_cdn(self, candidate: Candidate) -> DownloadHandle | None:

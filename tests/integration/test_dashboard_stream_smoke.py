@@ -3,6 +3,7 @@
 Tests the non-streaming snapshot endpoint and verifies the SSE stream
 generator produces valid SSE frames via direct function invocation.
 """
+
 from __future__ import annotations
 
 import asyncio

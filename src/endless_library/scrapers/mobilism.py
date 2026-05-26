@@ -16,6 +16,7 @@ NotConfigured  -- raised when credentials are missing.
 AuthFailed     -- raised when the login POST redirects back to the login page
                   (phpBB's way of signalling bad credentials).
 """
+
 from __future__ import annotations
 
 import logging

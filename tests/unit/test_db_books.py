@@ -86,7 +86,9 @@ def test_zombie_sweep(repo: BookRepo) -> None:
     repo.reset_zombies(stale_minutes=30)
     row = repo.get(bid)
     assert row is not None
-    assert row.status == "queued"  # Phase 6u.5b: zombie sweep now returns books to queued so resume path picks them up
+    assert (
+        row.status == "queued"
+    )  # Phase 6u.5b: zombie sweep now returns books to queued so resume path picks them up
 
 
 def test_mark_stage_sets_timestamp(repo: BookRepo) -> None:

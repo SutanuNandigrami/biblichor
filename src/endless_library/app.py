@@ -162,6 +162,7 @@ def create_app(*, cfg: Config, deps: PipelineDeps, config_path: Path) -> FastAPI
     app.state.deps = deps
     app.state.config_path = config_path
     from endless_library.scrapers.open_slum import OpenSlumMonitor
+
     app.state.open_slum_monitor = OpenSlumMonitor()
     app.state.bookorbit_upgrade_lock = asyncio.Lock()
     api.register(app)
@@ -174,10 +175,15 @@ def create_app(*, cfg: Config, deps: PipelineDeps, config_path: Path) -> FastAPI
         # workbox-*.js, registerSW.js, icons) directly from dist. The
         # SPA catch-all below would otherwise return index.html for these.
         _PWA_ROOT_FILES = {
-            "manifest.webmanifest", "sw.js", "registerSW.js",
-            "favicon.ico", "favicon.svg",
+            "manifest.webmanifest",
+            "sw.js",
+            "registerSW.js",
+            "favicon.ico",
+            "favicon.svg",
             "pwa-icon-source.svg",
-            "pwa-64x64.png", "pwa-192x192.png", "pwa-512x512.png",
+            "pwa-64x64.png",
+            "pwa-192x192.png",
+            "pwa-512x512.png",
             "apple-touch-icon-180x180.png",
         }
 

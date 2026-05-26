@@ -202,4 +202,6 @@ def _migrate(conn) -> None:
     # Phase 6w ultrareview C2: cancel_requested flag column
     bj_cols = {row[1] for row in conn.execute("PRAGMA table_info(bench_jobs)")}
     if "cancel_requested" not in bj_cols:
-        conn.execute("ALTER TABLE bench_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            "ALTER TABLE bench_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0"
+        )

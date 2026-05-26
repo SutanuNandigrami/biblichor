@@ -13,6 +13,7 @@ Parser: delegates to endless_library.scrapers.annas_parsing.parse_search_results
 See also: annas_parsing.py (canonical), annas_curl.py (_parse_search_results
 now wraps the shared function).
 """
+
 from __future__ import annotations
 
 import logging

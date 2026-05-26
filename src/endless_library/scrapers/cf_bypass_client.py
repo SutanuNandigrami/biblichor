@@ -8,6 +8,7 @@ Phase 6w.2: uses plain httpx (NOT curl-cffi) — we don't need TLS
 fingerprint tricks to talk to our own sidecar on the biblichor network.
 Phase 6w ultrareview C6: SSRF guard added.
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,17 +29,19 @@ log = logging.getLogger(__name__)
 # to the canonical assert_safe_url which covers all RFC1918/link-local
 # ranges, cloud metadata endpoints, .local/.internal TLDs, and DNS
 # resolution (C-NEW-3 second pass).
-_BLOCKED_NETLOCS = frozenset({
-    "biblichor",
-    "bookorbit",
-    "bookorbit-db",
-    "flaresolverr",
-    "cf-bypass",
-    "tor",
-    "slskd",
-    "clamav",
-    "biblichor-clamav",
-})
+_BLOCKED_NETLOCS = frozenset(
+    {
+        "biblichor",
+        "bookorbit",
+        "bookorbit-db",
+        "flaresolverr",
+        "cf-bypass",
+        "tor",
+        "slskd",
+        "clamav",
+        "biblichor-clamav",
+    }
+)
 
 
 def resolve(url: str, *, timeout: float = 90.0) -> str:

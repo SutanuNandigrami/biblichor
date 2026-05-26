@@ -65,16 +65,18 @@ def make_fetch(responses: dict[str, str | None]):
 
 def test_full_catalog_walks_every_category_and_paginates() -> None:
     src = KindleBangla(
-        fetch=make_fetch({
-            "/categories": CATEGORIES_HTML,
-            # All categories return the same paginated pair for this test
-            "/category/উপন্যাস?page=1": CAT_PAGE1_HTML,
-            "/category/উপন্যাস?page=2": CAT_PAGE2_HTML,
-            "/category/থ্রিলার?page=1": CAT_PAGE1_HTML,
-            "/category/থ্রিলার?page=2": CAT_PAGE2_HTML,
-            "/category/ছোট-গল্প?page=1": CAT_PAGE1_HTML,
-            "/category/ছোট-গল্প?page=2": CAT_PAGE2_HTML,
-        }),
+        fetch=make_fetch(
+            {
+                "/categories": CATEGORIES_HTML,
+                # All categories return the same paginated pair for this test
+                "/category/উপন্যাস?page=1": CAT_PAGE1_HTML,
+                "/category/উপন্যাস?page=2": CAT_PAGE2_HTML,
+                "/category/থ্রিলার?page=1": CAT_PAGE1_HTML,
+                "/category/থ্রিলার?page=2": CAT_PAGE2_HTML,
+                "/category/ছোট-গল্প?page=1": CAT_PAGE1_HTML,
+                "/category/ছোট-গল্প?page=2": CAT_PAGE2_HTML,
+            }
+        ),
         delay_sec=0.0,
     )
     refs = list(src.list_to_read(identifier="full", token=None))
@@ -91,28 +93,30 @@ def test_full_catalog_walks_every_category_and_paginates() -> None:
 
 
 def test_category_filter_limits_to_one_category() -> None:
-    fetch = make_fetch({
-        "/category/উপন্যাস?page=1": CAT_PAGE1_HTML,
-        "/category/উপন্যাস?page=2": CAT_PAGE2_HTML,
-    })
+    fetch = make_fetch(
+        {
+            "/category/উপন্যাস?page=1": CAT_PAGE1_HTML,
+            "/category/উপন্যাস?page=2": CAT_PAGE2_HTML,
+        }
+    )
     src = KindleBangla(fetch=fetch, delay_sec=0.0)
     refs = list(src.list_to_read(identifier="category:উপন্যাস", token=None))
     # Should not fetch /categories at all
     assert not any("/categories" in u for u in fetch.seen)
-    assert {r.source_id for r in refs} == {
-        "test-book-one", "test-book-two", "test-book-three"
-    }
+    assert {r.source_id for r in refs} == {"test-book-one", "test-book-two", "test-book-three"}
 
 
 def test_pagination_stops_when_no_next_link() -> None:
     src = KindleBangla(
-        fetch=make_fetch({
-            "/categories": CATEGORIES_HTML,
-            "/category/উপন্যাস?page=1": CAT_PAGE1_HTML,
-            "/category/উপন্যাস?page=2": CAT_PAGE2_HTML,
-            "/category/থ্রিলার?page=1": EMPTY_CAT_HTML,
-            "/category/ছোট-গল্প?page=1": EMPTY_CAT_HTML,
-        }),
+        fetch=make_fetch(
+            {
+                "/categories": CATEGORIES_HTML,
+                "/category/উপন্যাস?page=1": CAT_PAGE1_HTML,
+                "/category/উপন্যাস?page=2": CAT_PAGE2_HTML,
+                "/category/থ্রিলার?page=1": EMPTY_CAT_HTML,
+                "/category/ছোট-গল্প?page=1": EMPTY_CAT_HTML,
+            }
+        ),
         delay_sec=0.0,
     )
     refs = list(src.list_to_read(identifier="full", token=None))
@@ -122,14 +126,16 @@ def test_pagination_stops_when_no_next_link() -> None:
 
 def test_max_pages_cap_respected() -> None:
     src = KindleBangla(
-        fetch=make_fetch({
-            "/categories": CATEGORIES_HTML,
-            "/category/উপন্যাস?page=1": CAT_PAGE1_HTML,
-            "/category/উপন্যাস?page=2": CAT_PAGE2_HTML,
-            "/category/থ্রিলার?page=1": CAT_PAGE1_HTML,
-            "/category/থ্রিলার?page=2": CAT_PAGE2_HTML,
-            "/category/ছোট-গল্প?page=1": CAT_PAGE1_HTML,
-        }),
+        fetch=make_fetch(
+            {
+                "/categories": CATEGORIES_HTML,
+                "/category/উপন্যাস?page=1": CAT_PAGE1_HTML,
+                "/category/উপন্যাস?page=2": CAT_PAGE2_HTML,
+                "/category/থ্রিলার?page=1": CAT_PAGE1_HTML,
+                "/category/থ্রিলার?page=2": CAT_PAGE2_HTML,
+                "/category/ছোট-গল্প?page=1": CAT_PAGE1_HTML,
+            }
+        ),
         delay_sec=0.0,
         max_pages=1,
     )
@@ -140,20 +146,20 @@ def test_max_pages_cap_respected() -> None:
 
 def test_fetch_failure_short_circuits_category() -> None:
     src = KindleBangla(
-        fetch=make_fetch({
-            "/categories": CATEGORIES_HTML,
-            "/category/উপন্যাস?page=1": None,  # simulates HTTP failure
-            "/category/থ্রিলার?page=1": CAT_PAGE1_HTML,
-            "/category/থ্রিলার?page=2": CAT_PAGE2_HTML,
-            "/category/ছোট-গল্প?page=1": EMPTY_CAT_HTML,
-        }),
+        fetch=make_fetch(
+            {
+                "/categories": CATEGORIES_HTML,
+                "/category/উপন্যাস?page=1": None,  # simulates HTTP failure
+                "/category/থ্রিলার?page=1": CAT_PAGE1_HTML,
+                "/category/থ্রিলার?page=2": CAT_PAGE2_HTML,
+                "/category/ছোট-গল্প?page=1": EMPTY_CAT_HTML,
+            }
+        ),
         delay_sec=0.0,
     )
     refs = list(src.list_to_read(identifier="full", token=None))
     # Failed category contributes 0; thriller still yields all 3 unique slugs
-    assert {r.source_id for r in refs} == {
-        "test-book-one", "test-book-two", "test-book-three"
-    }
+    assert {r.source_id for r in refs} == {"test-book-one", "test-book-two", "test-book-three"}
 
 
 def test_registered_in_sources_registry() -> None:

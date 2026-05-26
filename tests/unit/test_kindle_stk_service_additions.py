@@ -1,4 +1,5 @@
 """Phase STK-recovery: additional tests for urllib/APIError exception translation."""
+
 from __future__ import annotations
 
 import urllib.error
@@ -14,9 +15,11 @@ from tests._stkclient_stub import FakeVendoredClient
 # Shared fixture (mirrors fake_bookorbit_svc in main test file)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def bsvc():
     """Minimal BookOrbit service stub."""
+
     class _Svc:
         def __init__(self):
             self._secrets: dict = {}
@@ -48,6 +51,7 @@ def _configure(bsvc):
 # send_file tests
 # ---------------------------------------------------------------------------
 
+
 def test_send_file_translates_urllib_403_to_auth_expired(bsvc, monkeypatch, tmp_path):
     """A urllib.error.HTTPError 403 raised by stkclient.send_file must map
     to KindleStkAuthExpired (not bubble as Unexpected)."""
@@ -71,6 +75,7 @@ def test_send_file_translates_urllib_403_to_auth_expired(bsvc, monkeypatch, tmp_
     f.write_bytes(b"fake")
 
     from endless_library.kindle_stk.service import KindleStkService
+
     svc = KindleStkService(bsvc)
     with pytest.raises(KindleStkAuthExpired):
         svc.send_file(f, format="EPUB", title="Test", author="Auth")
@@ -100,6 +105,7 @@ def test_send_file_translates_api_error_with_devicetoken_message_to_auth_expired
     f.write_bytes(b"fake")
 
     from endless_library.kindle_stk.service import KindleStkService
+
     svc = KindleStkService(bsvc)
     with pytest.raises(KindleStkAuthExpired, match="DeviceInfoToken|Re-OAuth"):
         svc.send_file(f, format="EPUB", title="Test", author="Auth")
@@ -108,6 +114,7 @@ def test_send_file_translates_api_error_with_devicetoken_message_to_auth_expired
 # ---------------------------------------------------------------------------
 # list_devices tests
 # ---------------------------------------------------------------------------
+
 
 def test_list_devices_translates_urllib_403_to_auth_expired(bsvc, monkeypatch):
     """A urllib.error.HTTPError 403 from get_owned_devices must surface as
@@ -134,6 +141,7 @@ def test_list_devices_translates_urllib_403_to_auth_expired(bsvc, monkeypatch):
     )
 
     from endless_library.kindle_stk.service import KindleStkService
+
     svc = KindleStkService(bsvc)
     with pytest.raises(KindleStkAuthExpired):
         svc.list_devices()

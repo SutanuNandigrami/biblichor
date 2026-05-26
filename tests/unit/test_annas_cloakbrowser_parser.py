@@ -4,6 +4,7 @@ since they parse identical Anna's Archive HTML.
 The shared parser lives in annas_parsing.py; this file verifies that
 _parse_search_results in annas_cloakbrowser delegates correctly.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

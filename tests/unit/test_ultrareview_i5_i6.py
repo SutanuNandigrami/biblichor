@@ -1,6 +1,7 @@
 """Tests for ultrareview I5 (corpus_tags loaded once in bench worker)
 and I6 (progress_total uses filtered query counts, not len*len).
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -28,7 +29,9 @@ def test_bench_worker_passes_corpus_tags_to_run_bench():
     fake_jobs = MagicMock()
     fake_jobs.is_cancel_requested.return_value = False
     fake_deps = SimpleNamespace(
-        cfg=SimpleNamespace(scrapers=SimpleNamespace(order=[], enabled={}, format_priority=["epub"])),
+        cfg=SimpleNamespace(
+            scrapers=SimpleNamespace(order=[], enabled={}, format_priority=["epub"])
+        ),
         bench=MagicMock(),
         bench_jobs=fake_jobs,
     )
@@ -59,8 +62,10 @@ def test_bench_worker_corpus_tags_not_none_means_no_yaml_read():
 
     class FakeScraper:
         name = "fake"
+
         def search(self, q):
             return []
+
         def resolve_cdn(self, c):
             return None
 
@@ -80,9 +85,7 @@ def test_bench_worker_corpus_tags_not_none_means_no_yaml_read():
         # pass corpus_tags explicitly -- load_corpus_tags must NOT be called
         run_bench(fake_cfg, [], strategies=[], corpus_tags=sentinel)
 
-    assert not load_calls, (
-        "I5: run_bench with explicit corpus_tags must not call load_corpus_tags"
-    )
+    assert not load_calls, "I5: run_bench with explicit corpus_tags must not call load_corpus_tags"
 
 
 # ---------------------------------------------------------------------------

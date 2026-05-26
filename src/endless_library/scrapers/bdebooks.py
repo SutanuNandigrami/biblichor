@@ -6,6 +6,7 @@ extract into Candidate.categories so the per-source excluded_categories
 denylist can filter Islamic / religious content before pushing to
 the queue.
 """
+
 from __future__ import annotations
 
 import logging
@@ -59,9 +60,7 @@ class BDeBooks:
 
         for art in soup.select("article.post"):
             title_el = (
-                art.select_one("a.entry-title")
-                or art.select_one("h2 a")
-                or art.select_one("h1 a")
+                art.select_one("a.entry-title") or art.select_one("h2 a") or art.select_one("h1 a")
             )
             if not title_el:
                 continue
@@ -72,12 +71,17 @@ class BDeBooks:
 
             # Collect all category links from this post block
             categories = tuple(
-                a.get_text(" ", strip=True) for a in art.select("a[href*='/category/'], a.category, a[rel='category tag']")
+                a.get_text(" ", strip=True)
+                for a in art.select("a[href*='/category/'], a.category, a[rel='category tag']")
             )
 
             # Apply denylist before fetching detail page
             if excluded and set(categories) & excluded:
-                log.debug("bdebooks: skipping %r — category %s in denylist", title, set(categories) & excluded)
+                log.debug(
+                    "bdebooks: skipping %r — category %s in denylist",
+                    title,
+                    set(categories) & excluded,
+                )
                 continue
 
             # Cap serial detail fetches to avoid bench timeout (ultrareview D)

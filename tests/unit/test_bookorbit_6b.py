@@ -272,6 +272,8 @@ def test_set_secret_values_is_atomic_on_failure(tmp_path):
         row_k2 = conn.execute("SELECT name FROM secrets WHERE name=?", ("k2",)).fetchone()
     assert row_k1 is None, "k1 was persisted despite rollback"
     assert row_k2 is None, "k2 was persisted despite rollback"
+
+
 def test_set_secret_values_stores_all_on_success(tmp_path):
     """set_secret_values must atomically persist all provided values (ultrareview I13)."""
     from endless_library.bookorbit.service import BookOrbitService
