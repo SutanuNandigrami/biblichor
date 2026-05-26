@@ -2103,39 +2103,118 @@ def register(app: FastAPI) -> None:
     # ---------- search ----------
 
     @router.get("/search")
-    def search(request: Request, q: str, limit: int = 20):
-        """Search Anna's Archive and return candidates enriched with
-        an "already in library" hint per result.
+    def search(request: Request, q: str, limit: int = 20, lang: str = "", sources: str = ""):
+        """Multi-scraper fan-out search.
 
-        v1 hits Anna's directly via annas_curl. Multi-scraper fan-out
-        and BookOrbit metadata enrichment are follow-ups."""
+        Query params:
+          q       — search title text (required, 3+ chars)
+          limit   — max results to return (1..50, default 20)
+          lang    — override language: "en"/"bn"/etc, or "all" to skip
+                    filtering. Default: cfg.scrapers.language.
+          sources — comma-separated scraper names to query. Default:
+                    every enabled scraper from cfg.scrapers.
+
+        Behavior:
+          - All selected scrapers run in parallel (ThreadPoolExecutor).
+          - Per-scraper timeout 8s; timeouts/errors are skipped, not raised.
+          - Results deduped by md5 (first hit wins).
+          - Response includes sources_used + sources_skipped so the UI
+            can show which sources contributed.
+        """
+        import concurrent.futures as _cf
+
         from endless_library.domain.models import SearchQuery
         from endless_library.scrapers import registry as _reg
 
         q_clean = (q or "").strip()
         if not q_clean:
             raise HTTPException(400, "query parameter 'q' is required")
-        if "annas_curl" not in _reg.available():
-            raise HTTPException(503, "annas_curl scraper not available")
+        if len(q_clean) < 3:
+            raise HTTPException(400, "query must be at least 3 characters")
 
         deps = request.app.state.deps
         sc = deps.cfg.scrapers
+
+        # Resolve language. "all" / "" via the param means: skip language
+        # filtering at the scoring stage (the scrapers themselves may still
+        # filter via their URL params if they only support one language).
+        lang_clean = (lang or "").strip().lower()
+        if lang_clean and lang_clean != "all":
+            effective_lang = lang_clean
+        else:
+            effective_lang = getattr(sc, "language", "en") or "en"
+
+        # Resolve scraper set.
+        if sources:
+            requested = [s.strip() for s in sources.split(",") if s.strip()]
+            scraper_names = [n for n in requested if n in _reg.available()]
+        else:
+            scraper_names = _reg.enabled_order_for_query(sc, q_clean)
+        # Cap fan-out so a user-supplied huge sources list cannot DoS us.
+        scraper_names = scraper_names[:10]
+        if not scraper_names:
+            raise HTTPException(503, "no scrapers available for this query")
+
         query = SearchQuery(
             title=q_clean,
             author=None,
             isbn13=None,
             format_priority=tuple(getattr(sc, "format_priority", None) or ["epub", "mobi", "pdf"]),
-            language=getattr(sc, "language", "en") or "en",
+            language=effective_lang,
         )
-        scraper = _reg.build("annas_curl", sc)
-        try:
-            candidates = scraper.search(query)
-        except Exception as e:
-            log.exception("/api/search failed")
-            raise HTTPException(500, f"search failed: {type(e).__name__}: {e}")
-        candidates = list(candidates)[: max(1, min(int(limit), 50))]
 
-        md5s = [c.md5 for c in candidates if c.md5]
+        # Run scrapers in parallel.
+        per_scraper_timeout = 8.0
+        used: list[str] = []
+        skipped: list[dict] = []
+        merged: list = []
+
+        def _run_one(name: str):
+            try:
+                sc_inst = _reg.build(name, sc)
+            except Exception as e:
+                return name, None, f"build failed: {type(e).__name__}: {e}"
+            try:
+                return name, list(sc_inst.search(query)), None
+            except Exception as e:
+                return name, None, f"{type(e).__name__}: {e}"
+
+        with _cf.ThreadPoolExecutor(max_workers=min(len(scraper_names), 6)) as ex:
+            futures = {ex.submit(_run_one, n): n for n in scraper_names}
+            for fut in _cf.as_completed(futures, timeout=per_scraper_timeout + 2):
+                name = futures[fut]
+                try:
+                    n, cands, err = fut.result(timeout=per_scraper_timeout)
+                except (_cf.TimeoutError, Exception) as e:
+                    skipped.append({"name": name, "reason": f"timeout/{type(e).__name__}"})
+                    continue
+                if err is not None or cands is None:
+                    skipped.append({"name": n, "reason": err or "no results"})
+                    continue
+                used.append(n)
+                merged.extend(cands)
+
+        # Dedup by md5 (first hit wins); non-md5 candidates keyed by
+        # (provider, detail_url).
+        deduped: list = []
+        seen_md5: set[str] = set()
+        seen_url: set[tuple[str, str]] = set()
+        for c in merged:
+            if c.md5:
+                if c.md5 in seen_md5:
+                    continue
+                seen_md5.add(c.md5)
+            else:
+                k = (c.provider, c.detail_url)
+                if k in seen_url:
+                    continue
+                seen_url.add(k)
+            deduped.append(c)
+
+        deduped = deduped[: max(1, min(int(limit), 50))]
+
+        # biblichor books-table cross-ref.
+        md5s = [c.md5 for c in deduped if c.md5]
         in_lib: dict[str, dict] = {}
         if md5s:
             with connect(deps.db_path) as conn:
@@ -2146,10 +2225,10 @@ def register(app: FastAPI) -> None:
                 ):
                     in_lib[r["md5"]] = {"id": r["id"], "status": r["status"]}
 
-        results = []
-        for c in candidates:
+        results_out = []
+        for c in deduped:
             raw = c.raw or {}
-            results.append(
+            results_out.append(
                 {
                     "md5": c.md5,
                     "title": c.title,
@@ -2163,10 +2242,17 @@ def register(app: FastAPI) -> None:
                     "cover_url": raw.get("cover_url"),
                     "detail_url": c.detail_url,
                     "provider": c.provider,
-                    "in_library": in_lib.get(c.md5),
+                    "in_library": in_lib.get(c.md5) if c.md5 else None,
                 }
             )
-        return {"query": q_clean, "count": len(results), "results": results}
+        return {
+            "query": q_clean,
+            "lang": effective_lang,
+            "count": len(results_out),
+            "results": results_out,
+            "sources_used": used,
+            "sources_skipped": skipped,
+        }
 
     @router.post("/books/from-search")
     def add_from_search(payload: _AddFromSearchPayload, request: Request):

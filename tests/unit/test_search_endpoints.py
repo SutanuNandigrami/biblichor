@@ -162,15 +162,56 @@ def test_search_empty_query_returns_400(tmp_path):
     assert r.status_code == 400
 
 
-def test_search_scraper_exception_returns_500(tmp_path):
-    """If the scraper raises, the endpoint should surface a 500 with the
-    error class — not swallow into a misleading 200."""
+def test_search_short_query_returns_400(tmp_path):
+    """Queries shorter than 3 chars are rejected — they would match
+    millions of Anna\'s rows and are not useful for picking a book.
+    Frontend enforces this too, but the API must guard independently."""
+    app, _, _ = _make_app(tmp_path)
+    r = TestClient(app).get("/api/search?q=ed")
+    assert r.status_code == 400
+    assert "3 characters" in r.text or "at least" in r.text
+
+
+def test_search_scraper_exception_is_skipped_not_500(tmp_path):
+    """Fan-out: one broken scraper must NOT 500 the whole response.
+    Its name lands in sources_skipped; healthy scrapers still produce
+    results. Guarantees a flaky upstream cannot take down the search bar."""
     app, _, _ = _make_app(tmp_path)
     bad_scraper = MagicMock(search=MagicMock(side_effect=RuntimeError("upstream down")))
     with patch("endless_library.scrapers.registry.build", return_value=bad_scraper):
         r = TestClient(app).get("/api/search?q=cairo")
-    assert r.status_code == 500
-    assert "upstream down" in r.text or "RuntimeError" in r.text
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 0
+    assert body["sources_used"] == []
+    assert len(body["sources_skipped"]) >= 1
+    assert "RuntimeError" in body["sources_skipped"][0]["reason"]
+
+
+def test_search_returns_lang_and_source_metadata(tmp_path):
+    """The response surfaces which scrapers actually contributed (so the
+    UI can show 'searched: annas, doab') plus the effective language."""
+    app, _, _ = _make_app(tmp_path)
+    fake = [_fake_candidate("f" * 32, title="Hit")]
+    with patch("endless_library.scrapers.registry.build", return_value=MagicMock(search=lambda q: fake)):
+        r = TestClient(app).get("/api/search?q=cairo&lang=bn")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["lang"] == "bn"
+    assert "annas_curl" in body["sources_used"]
+    assert body["count"] == 1
+
+
+def test_search_lang_all_falls_back_to_cfg_default(tmp_path):
+    """lang=all means 'don't filter by language' — the endpoint normalises
+    to the cfg default for the SearchQuery passed to scrapers. The
+    response's lang field shows what was actually used."""
+    app, _, _ = _make_app(tmp_path)
+    fake = [_fake_candidate("a" * 32)]
+    with patch("endless_library.scrapers.registry.build", return_value=MagicMock(search=lambda q: fake)):
+        r = TestClient(app).get("/api/search?q=cairo&lang=all")
+    body = r.json()
+    assert body["lang"] == "en"
 
 
 # ============ from-search endpoint ============================================
