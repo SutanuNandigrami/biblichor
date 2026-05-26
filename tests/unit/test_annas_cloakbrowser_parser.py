@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from endless_library.scrapers.annas_cloakbrowser import _parse_search_results
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "annas" / "search_pragmatic.html"

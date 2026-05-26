@@ -1,8 +1,6 @@
 """Tests for ultrareview I4 (OpenSlumMonitor._refresh always updates _last_refresh)."""
 from __future__ import annotations
 
-import time
-
 
 def test_open_slum_refresh_updates_timestamp_on_non_dict_response():
     """I4: _last_refresh must be updated even when _fetch_remote returns non-dict.
@@ -84,6 +82,7 @@ def test_open_slum_get_serialised_under_concurrent_calls():
     """N threads calling get() concurrently after a stale interval must
     trigger _fetch_remote at most once (no stampede)."""
     import threading
+
     from endless_library.scrapers.open_slum import OpenSlumMonitor
 
     fetch_count = 0

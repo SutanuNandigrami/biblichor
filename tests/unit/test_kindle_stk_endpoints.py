@@ -4,7 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -185,7 +184,7 @@ def test_test_send_returns_4xx_on_send_failure(tmp_path, monkeypatch):
 
 def test_set_region_validates_against_known_list(tmp_path):
     """PUT /api/kindle-stk/region with amazon.fake should return 400."""
-    app, svc = _build_app(tmp_path)
+    app, _svc = _build_app(tmp_path)
     r = TestClient(app).put(
         "/api/kindle-stk/region",
         json={"amazon_domain": "amazon.fake"},

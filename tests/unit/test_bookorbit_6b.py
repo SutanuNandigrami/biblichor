@@ -218,8 +218,9 @@ def test_set_secret_values_is_atomic_on_failure(tmp_path):
     return a wrapper that raises on the second INSERT, then asserting that
     neither value was written."""
     import sqlite3
-    from unittest.mock import patch, MagicMock
     from contextlib import contextmanager
+    from unittest.mock import patch
+
     from endless_library.bookorbit.service import BookOrbitService
     from endless_library.config import Config
     from endless_library.db.schema import connect

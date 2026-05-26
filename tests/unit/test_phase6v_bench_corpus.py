@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 from endless_library.bench import (
@@ -19,7 +18,6 @@ from endless_library.bench import (
     load_queries,
     queries_for_scraper,
 )
-
 
 BENCH_FILE = Path(__file__).resolve().parent.parent.parent / "bench" / "queries.yaml"
 

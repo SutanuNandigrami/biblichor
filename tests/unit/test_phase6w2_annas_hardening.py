@@ -3,7 +3,7 @@ import time
 
 
 def test_next_mirror_returns_first_when_no_history():
-    from endless_library.scrapers.annas_domains import next_mirror, _reset_state_for_tests
+    from endless_library.scrapers.annas_domains import _reset_state_for_tests, next_mirror
     _reset_state_for_tests()
     m = next_mirror()
     assert m in {"annas-archive.gl", "annas-archive.li", "annas-archive.pm", "annas-archive.pk", "annas-archive.gd"}
@@ -11,7 +11,10 @@ def test_next_mirror_returns_first_when_no_history():
 
 def test_mark_cool_skips_mirror_for_5min():
     from endless_library.scrapers.annas_domains import (
-        next_mirror, mark_cool, _reset_state_for_tests, _MIRRORS,
+        _MIRRORS,
+        _reset_state_for_tests,
+        mark_cool,
+        next_mirror,
     )
     _reset_state_for_tests()
     cooled = _MIRRORS[0]
@@ -24,7 +27,10 @@ def test_mark_cool_skips_mirror_for_5min():
 
 def test_mark_success_prefers_last_working():
     from endless_library.scrapers.annas_domains import (
-        next_mirror, mark_success, _reset_state_for_tests, _MIRRORS,
+        _MIRRORS,
+        _reset_state_for_tests,
+        mark_success,
+        next_mirror,
     )
     _reset_state_for_tests()
     pick = _MIRRORS[2]
@@ -51,7 +57,8 @@ def test_cf_bypass_client_gets_url_and_returns_html(monkeypatch):
         text = "<html>resolved</html>"
         def raise_for_status(self): pass
     def _fake_get(url, params=None, timeout=None, **kw):
-        posted["url"] = url; posted["params"] = params
+        posted["url"] = url
+        posted["params"] = params
         return _R()
     monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.httpx.get", _fake_get)
     monkeypatch.setenv("CF_BYPASS_URL", "http://test-bypass:8000")
@@ -63,6 +70,7 @@ def test_cf_bypass_client_gets_url_and_returns_html(monkeypatch):
 
 def test_cf_bypass_client_raises_on_5xx(monkeypatch):
     import httpx
+
     from endless_library.scrapers import cf_bypass_client
     class _R:
         status_code = 502
@@ -72,14 +80,14 @@ def test_cf_bypass_client_raises_on_5xx(monkeypatch):
     monkeypatch.setenv("CF_BYPASS_URL", "http://test-bypass:8000")
     try:
         cf_bypass_client.resolve("https://x")
-        assert False, "should have raised"
+        raise AssertionError("should have raised")
     except httpx.HTTPStatusError:
         pass
 
 
 def test_annas_cloakbrowser_routes_through_sidecar(monkeypatch):
-    from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
     seen_url = []
     def _fake_resolve(url, **kw):
         seen_url.append(url)
@@ -103,9 +111,9 @@ def test_annas_cloakbrowser_routes_through_sidecar(monkeypatch):
 
 
 def test_annas_cloakbrowser_cools_mirror_on_resolve_failure(monkeypatch):
-    from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
-    from endless_library.scrapers import annas_domains
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers import annas_domains
+    from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
     annas_domains._reset_state_for_tests()
     def _fail(url, **kw):
         raise RuntimeError("sidecar down")
@@ -118,8 +126,9 @@ def test_annas_cloakbrowser_cools_mirror_on_resolve_failure(monkeypatch):
     assert any(annas_domains._is_cool(m) for m in annas_domains._MIRRORS)
 
 def test_cf_bypass_refuses_internal_url():
-    from endless_library.scrapers.cf_bypass_client import resolve
     import pytest
+
+    from endless_library.scrapers.cf_bypass_client import resolve
     for bad in ("http://bookorbit:3000/", "http://flaresolverr:8191/",
                 "http://127.0.0.1:8090/", "http://localhost/",
                 "file:///etc/passwd", "ftp://example.com/"):
@@ -131,6 +140,7 @@ def test_probe_slow_servers_safe_under_event_loop():
     """_run_async must not raise RuntimeError when called from within an
     already-running event loop (ultrareview I6)."""
     import asyncio
+
     from endless_library.scrapers.annas_curl import _run_async
 
     async def _inner():

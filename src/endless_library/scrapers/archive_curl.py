@@ -26,10 +26,9 @@ import logging
 from typing import Any
 from urllib.parse import quote_plus
 
-from endless_library.scrapers.http_client import make_client
-
 from endless_library.config import ScrapersCfg
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
+from endless_library.scrapers.http_client import make_client
 
 log = logging.getLogger(__name__)
 

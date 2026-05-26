@@ -4,7 +4,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Task 1: mediafire_helpers
 # ---------------------------------------------------------------------------
@@ -58,7 +57,11 @@ def _make_cfg(*, username: str = "user", password: str = "pass") -> SimpleNamesp
 
 def test_mobilism_session_raises_not_configured_when_no_creds():
     """MobilismSession.get() raises NotConfigured when credentials are absent."""
-    from endless_library.scrapers.mobilism import MobilismSession, NotConfigured, _reset_session_for_tests
+    from endless_library.scrapers.mobilism import (
+        MobilismSession,
+        NotConfigured,
+        _reset_session_for_tests,
+    )
 
     _reset_session_for_tests()
 
@@ -93,7 +96,12 @@ def test_mobilism_session_is_cached():
 def test_mobilism_session_raises_auth_failed_on_redirect_to_login():
     """MobilismSession.get() raises AuthFailed when post redirects back to login page."""
     import pytest
-    from endless_library.scrapers.mobilism import MobilismSession, AuthFailed, _reset_session_for_tests
+
+    from endless_library.scrapers.mobilism import (
+        AuthFailed,
+        MobilismSession,
+        _reset_session_for_tests,
+    )
 
     _reset_session_for_tests()
 
@@ -118,10 +126,10 @@ def test_mobilism_session_raises_auth_failed_on_redirect_to_login():
 
 def test_mobilism_books_extracts_thread_links_with_mediafire():
     """MobilismBooks.search() returns Candidates whose detail_url comes from thread links."""
-    import pytest
     from unittest.mock import patch as _patch
-    from endless_library.scrapers.mobilism_books import MobilismBooks
+
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.mobilism_books import MobilismBooks
 
     # Minimal ScrapersCfg-like stub
     cfg = SimpleNamespace(
@@ -223,8 +231,9 @@ def test_chain_does_not_promote_mobilism_books_for_old_book():
 def test_chain_for_source_does_not_promote_mobilism_for_pd_recent_book():
     """If a book is tagged is_pd=True AND is_recent_release=True (e.g.
     tag drift), the PD chain should still take precedence."""
-    from endless_library.scrapers.registry import chain_for_source
     from types import SimpleNamespace
+
+    from endless_library.scrapers.registry import chain_for_source
     cfg = SimpleNamespace(
         order=["annas_curl", "gutendex", "mobilism_books"],
         enabled={"annas_curl": True, "gutendex": True, "mobilism_books": True},

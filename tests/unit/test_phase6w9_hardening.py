@@ -1,15 +1,12 @@
 """Phase 6w.9 hardening + UI smoke tests."""
 from __future__ import annotations
 
-
 # ---------------------------------------------------------------------------
 # Task 1: Patchright import check
 # ---------------------------------------------------------------------------
 
 def test_welib_playwright_imports_from_patchright():
     """welib_playwright must use patchright, not vanilla playwright."""
-    import importlib
-    import inspect
     import ast
     from pathlib import Path
 
@@ -41,7 +38,7 @@ def test_welib_playwright_imports_from_patchright():
 def test_bench_records_not_configured_instead_of_raising():
     """When registry.build raises NotConfigured, bench records per-query
     outcomes with note='creds-missing: ...' and does not propagate."""
-    from endless_library.bench import BenchOutcome, BenchQuery, run_bench
+    from endless_library.bench import BenchQuery, run_bench
     from endless_library.scrapers.base import NotConfigured
 
     class _FakeRegistry:
@@ -54,7 +51,6 @@ def test_bench_records_not_configured_instead_of_raising():
         def available(self):
             return ["fake_scraper"]
 
-    import endless_library.bench as _bench_mod
     import endless_library.scrapers.registry as _reg_mod
 
     original_build = _reg_mod.build
@@ -96,8 +92,8 @@ def test_not_configured_importable_from_base():
 
 
 def test_not_configured_re_exported_from_mobilism():
-    from endless_library.scrapers.mobilism import NotConfigured as NC
     from endless_library.scrapers.base import NotConfigured as NCBase
+    from endless_library.scrapers.mobilism import NotConfigured as NC
     assert NC is NCBase
 
 

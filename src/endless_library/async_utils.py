@@ -18,7 +18,6 @@ import asyncio
 import concurrent.futures as _cf
 import threading
 
-
 _RUN_ASYNC_EXECUTOR: _cf.ThreadPoolExecutor | None = None
 _RUN_ASYNC_LOCK = threading.Lock()
 

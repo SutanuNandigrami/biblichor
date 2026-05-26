@@ -62,13 +62,13 @@ class _RedirectingClient:
 
             class _R:
                 status_code = 302
-                headers = {"location": self.redirect_map[url]}  # noqa: RUF012
+                headers = {"location": self.redirect_map[url]}
 
             return _R()
 
         class _R:
             status_code = 200
-            headers = {}  # noqa: RUF012
+            headers = {}
 
         return _R()
 

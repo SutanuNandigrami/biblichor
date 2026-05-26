@@ -7,9 +7,8 @@ send_to_kindle must work when invoked from an async context (e.g. via executor).
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 
 def _make_kindle_cfg(tmp_path):
@@ -63,7 +62,7 @@ def test_run_async_works_inside_running_event_loop():
 
 def test_kindle_send_safe_under_running_event_loop(tmp_path):
     """send_to_kindle must not crash when called from within asyncio.run."""
-    from endless_library.kindle import send_to_kindle, SendResult
+    from endless_library.kindle import SendResult, send_to_kindle
 
     # Create a small fake attachment
     attachment = tmp_path / "book.epub"

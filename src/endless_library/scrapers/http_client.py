@@ -33,7 +33,6 @@ from curl_cffi import requests as cffi_requests
 
 from .anubis import solve_anubis
 
-
 _ANUBIS_SIGNATURES = (
     re.compile(r'<meta\s+name="anubis-challenge"', re.I),
     re.compile(r'<title>[^<]*Making sure you[\'"]re not a bot', re.I),

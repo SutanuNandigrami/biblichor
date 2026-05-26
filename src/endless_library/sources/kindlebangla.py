@@ -35,7 +35,6 @@ from bs4 import BeautifulSoup
 
 from endless_library.domain.models import BookRef
 from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT as _BIBLICHOR_UA
-from endless_library.sources.base import normalize_isbn  # noqa: F401  (re-exported in case future sub-source needs it)
 
 log = logging.getLogger(__name__)
 
@@ -177,7 +176,4 @@ def _extract_book_cards(html: str) -> Iterable[BookRef]:
 def _has_next_page(soup: BeautifulSoup, current_page: int) -> bool:
     """True iff a `?page=<current+1>` link exists in the pagination block."""
     next_target = f"page={current_page + 1}"
-    for a in soup.find_all("a", href=True):
-        if next_target in a["href"]:
-            return True
-    return False
+    return any(next_target in a["href"] for a in soup.find_all("a", href=True))

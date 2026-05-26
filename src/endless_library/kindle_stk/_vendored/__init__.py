@@ -23,7 +23,7 @@ from typing import Any
 from . import _api as _apimod
 from ._model import DeviceInfo, OwnedDevice
 from ._stkclient import Client as _UpstreamClient
-from ._stkclient import OAuth2 as _UpstreamOAuth2
+from ._stkclient import OAuth2 as _UpstreamOAuth2  # noqa: F401
 from ._stkclient import _parse_authorization_code
 
 
@@ -125,7 +125,7 @@ def _token_exchange_with_domain(authorization_code: str, code_verifier: str, dom
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req) as r:  # noqa S310
+        with urllib.request.urlopen(req) as r:
             res = json.load(r)
     except urllib.error.HTTPError as e:
         try:
@@ -187,7 +187,7 @@ class Client:
         return self._upstream.dumps()
 
     @classmethod
-    def loads(cls, s: str) -> "Client":
+    def loads(cls, s: str) -> Client:
         """Deserialise a Client from a JSON string previously returned by dumps()."""
         upstream = _UpstreamClient.loads(s)
         return cls(upstream)

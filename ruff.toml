@@ -3,7 +3,24 @@ target-version = "py312"
 
 [lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["E501"]
+ignore = [
+    "E501",   # line length — taste
+    "RUF012", # ClassVar — too aggressive on test/dataclass patterns
+    "SIM108", # if/else -> ternary — taste
+    "SIM117", # combined with-stmt — readability tradeoff
+    "SIM105", # contextlib.suppress — taste
+    "SIM102", # collapsible if — taste
+    "SIM110", # any()/all() over loops — taste
+    "RUF005", # iterable unpacking — taste
+    "RUF043", # regex pattern named groups — taste
+    "RUF006", # asyncio.create_task store — false positive for fire-and-forget
+    "RUF059", # unpacked var unused — false positive on tuples
+    "UP042",  # str-enum — not adopting yet
+]
 
 [format]
 quote-style = "double"
+
+[lint.per-file-ignores]
+# Tests commonly do sys.path.insert() before imports for editable installs.
+"tests/**/*.py" = ["E402"]

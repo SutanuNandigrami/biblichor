@@ -12,24 +12,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from endless_library.db.bench_jobs import BenchJobsRepo
-
-from endless_library.bench import format_table, load_queries, run_bench
+from endless_library.bench import load_queries, run_bench
 from endless_library.config import save_config
 from endless_library.db.schema import connect
-from endless_library.url_safety import UnsafeUrlError, assert_safe_url
-
 from endless_library.kindle_stk import (
-    KindleStkService,
     KindleStkAuthExpired,
     KindleStkNotConfigured,
     KindleStkRateLimited,
+    KindleStkService,
     KindleStkUploadFailed,
 )
+from endless_library.url_safety import UnsafeUrlError, assert_safe_url
 
 log = logging.getLogger(__name__)
 
@@ -195,7 +192,9 @@ def _compute_bookorbit_urls(request: Request, cfg) -> dict[str, str]:
 
 
 # Phase 6w ultrareview C3: consolidated scraper→site mapping lives in registry.
-from endless_library.scrapers.registry import SCRAPER_TO_OPEN_SLUM_SITE as _SCRAPER_TO_SITE
+from endless_library.scrapers.registry import (  # noqa: E402
+    SCRAPER_TO_OPEN_SLUM_SITE as _SCRAPER_TO_SITE,
+)
 
 
 def _scraper_upstream_status(request) -> dict[str, dict]:
@@ -938,7 +937,8 @@ def register(app: FastAPI) -> None:
         from functools import partial as _partial
 
         from endless_library.bench import BenchQuery as _BQ
-        from endless_library.bench import load_corpus_tags, run_bench as _run_bench
+        from endless_library.bench import load_corpus_tags
+        from endless_library.bench import run_bench as _run_bench
         from endless_library.scrapers import registry
 
         deps = request.app.state.deps
@@ -1260,8 +1260,8 @@ def register(app: FastAPI) -> None:
         try:
             _bo_cfg = getattr(deps.cfg, "bookorbit", None)
             if _bo_cfg is not None and getattr(_bo_cfg, "enabled", False) and getattr(_bo_cfg, "url", ""):
-                import urllib.request as _urlreq
                 import urllib.error as _urlerr
+                import urllib.request as _urlreq
                 _url = str(_bo_cfg.url).rstrip("/") + "/api/v1/health"
                 try:
                     with _urlreq.urlopen(_url, timeout=2.0) as _resp:
@@ -1672,6 +1672,7 @@ def register(app: FastAPI) -> None:
         accidentally pick up a test-credential session (ultrareview I1).
         """
         from types import SimpleNamespace
+
         from endless_library.scrapers.mobilism import MobilismSession
         cfg_stub = SimpleNamespace(
             mobilism_username=payload.username,
@@ -1819,7 +1820,7 @@ def register(app: FastAPI) -> None:
             from endless_library.bookorbit.upgrade import _validate_target_version
             _validate_target_version(target)
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise HTTPException(400, str(e))  # noqa: B904
 
         deps = request.app.state.deps
         svc = _bookorbit_service(request)
@@ -1881,7 +1882,7 @@ def register(app: FastAPI) -> None:
                 from endless_library.bookorbit.upgrade import _validate_target_version
                 _validate_target_version(target)
             except ValueError as e:
-                raise HTTPException(400, str(e))
+                raise HTTPException(400, str(e))  # noqa: B904
 
             state = _upgrade_state(request.app)
             expected_token = state.get("token", "")
@@ -2384,9 +2385,9 @@ DASHBOARD_INTERVAL_SEC: float = 3.0
 
 def compute_dashboard_snapshot(db_path) -> dict:
     """Pure aggregation - no FastAPI deps, testable standalone."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     cutoff_str = (now_utc - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
 
     with connect(db_path) as conn:
@@ -2432,8 +2433,8 @@ def compute_dashboard_snapshot(db_path) -> dict:
 
         for r in tp_rows:
             try:
-                from datetime import datetime as _dt2, timezone as _tz2
-                dt = _dt2.strptime(str(r["minute"]), "%Y-%m-%dT%H:%M:00Z").replace(tzinfo=_tz2.utc)
+                from datetime import datetime as _dt2
+                dt = _dt2.strptime(str(r["minute"]), "%Y-%m-%dT%H:%M:00Z").replace(tzinfo=UTC)
                 bucket = _bucket_label(dt)
             except Exception:
                 continue

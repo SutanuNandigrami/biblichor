@@ -52,7 +52,6 @@ def test_cloakbrowser_uses_sidecar(monkeypatch):
     """Phase 6w.2: cloakbrowser now routes through cf-bypass sidecar.
     Verify it calls cf_bypass_client.resolve and returns Candidates."""
     from endless_library.domain.models import SearchQuery
-    from endless_library.scrapers import cf_bypass_client
     from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
 
     called = []

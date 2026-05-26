@@ -24,19 +24,14 @@ import httpx
 import pytest
 
 from endless_library.bookorbit.upgrade import (
-    BOOKORBIT_IMAGE,
     DANGER_WORDS,
-    ApplyResult,
-    PreflightReport,
     SubprocessDockerRunner,
-    VersionInfo,
     _scan_release_notes_for_danger,
     _swap_compose_image,
     apply_upgrade,
     get_version_info,
     preflight,
 )
-
 
 # ============ FakeDockerRunner ============
 
@@ -573,7 +568,6 @@ def test_validate_target_version_accepts_canonical():
 
 def test_validate_target_version_rejects_injection():
     from endless_library.bookorbit.upgrade import _validate_target_version
-    import pytest
     for bad in ("", "x", "v1.3", "1.3.0; rm -rf", "v1.3.0\nimage:evil", "v" * 70):
         with pytest.raises(ValueError):
             _validate_target_version(bad)
@@ -588,11 +582,11 @@ def test_bookorbit_upgrade_apply_409_when_lock_held(tmp_path: Path):
     simultaneous docker compose ops.
     """
     import asyncio
-    import httpx
-    import pytest
-    from fastapi.testclient import TestClient
-    from endless_library.web.api import register
+
     from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from endless_library.web.api import register
 
     app = FastAPI()
     # Attach the lock exactly as create_app does

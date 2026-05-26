@@ -14,17 +14,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from endless_library.db.books import BookRepo
 from endless_library.db.candidates import CandidateRepo
 from endless_library.db.schema import init_db
-from endless_library.db.books import BookRepo
 from endless_library.domain.models import Candidate
 from endless_library.scrapers.annas_parsing import parse_search_results
 from endless_library.web import api as api_mod
-
 
 # ============ cover_url extraction (pure parser) =============================
 
@@ -221,7 +219,7 @@ def test_from_search_creates_book_and_picks_candidate(tmp_path):
     """A POST creates a books row (source='manual', status='queued'),
     a candidate row, and sets picked_candidate_id so the pipeline
     honors the manual choice."""
-    app, books, cands = _make_app(tmp_path)
+    app, _books, _cands = _make_app(tmp_path)
 
     payload = {
         "md5": "d" * 32,

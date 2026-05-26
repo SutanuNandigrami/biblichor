@@ -1,7 +1,6 @@
 """Phase STK-recovery: router sleep throttle test."""
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -91,7 +90,7 @@ def test_router_sleeps_min_send_interval_before_stk_attempt(
         lambda *a, **kw: {"transaction_id": "tx-throttle"},
     )
 
-    from endless_library.kindle_router import deliver, DeliveryMethod
+    from endless_library.kindle_router import DeliveryMethod, deliver
 
     result = deliver(file_path=file_path, book=book, cfg=cfg, db_path=db, svc=svc)
 
@@ -155,7 +154,7 @@ def test_router_skips_quota_check_when_daily_cap_is_none(
         lambda *a, **kw: stk_calls.append(True) or {"transaction_id": "tx-unlimited"},
     )
 
-    from endless_library.kindle_router import deliver, DeliveryMethod
+    from endless_library.kindle_router import DeliveryMethod, deliver
 
     result = deliver(file_path=file_path, book=book, cfg=cfg_none, db_path=db, svc=svc)
 

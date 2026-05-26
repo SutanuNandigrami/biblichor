@@ -1,14 +1,12 @@
 """Phase STK 2: biblichor's exception hierarchy for Send-to-Kindle."""
 from __future__ import annotations
 
-import pytest
-
 
 def test_exceptions_form_a_hierarchy():
     from endless_library.kindle_stk.exceptions import (
+        KindleStkAuthExpired,
         KindleStkError,
         KindleStkNotConfigured,
-        KindleStkAuthExpired,
         KindleStkRateLimited,
         KindleStkUploadFailed,
     )
@@ -32,9 +30,9 @@ def test_rate_limited_defaults_retry_after_sec_to_5():
 
 def test_all_exceptions_importable_from_package_root():
     from endless_library.kindle_stk import (
+        KindleStkAuthExpired,
         KindleStkError,
         KindleStkNotConfigured,
-        KindleStkAuthExpired,
         KindleStkRateLimited,
         KindleStkUploadFailed,
     )

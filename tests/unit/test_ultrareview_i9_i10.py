@@ -24,8 +24,9 @@ def _make_doab_item(metadata: list[dict]) -> dict:
 
 def test_doab_keeps_first_metadata_value():
     """doab.Doab.search must use the FIRST dc.identifier.uri, not the last."""
-    from unittest.mock import MagicMock, patch
     from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
     from endless_library.scrapers.doab import Doab
 
     cfg = SimpleNamespace()
@@ -61,8 +62,9 @@ def test_doab_keeps_first_metadata_value():
 
 def test_doab_prefers_oapen_relation_over_identifier():
     """oapen.relation.isPartOfBook should win over dc.identifier.uri."""
-    from unittest.mock import MagicMock, patch
     from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
     from endless_library.scrapers.doab import Doab
 
     cfg = SimpleNamespace()

@@ -105,7 +105,7 @@ class OpenSlumMonitor:
                 log.debug("open_slum: refreshed %d sites", len(self._cache))
             else:
                 log.debug("open_slum: unexpected response type %s (expected dict)", type(data).__name__)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._consecutive_failures += 1
             if self._consecutive_failures >= _WARN_AFTER_N_FAILURES:
                 log.warning(

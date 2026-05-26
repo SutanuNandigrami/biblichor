@@ -5,6 +5,7 @@ def test_curl_cffi_imports():
 
 import hashlib
 
+
 def test_solve_anubis_finds_valid_nonce_at_difficulty_8():
     from endless_library.scrapers.anubis import solve_anubis
     challenge = "abc"
@@ -34,8 +35,9 @@ def test_solve_anubis_zero_difficulty_returns_zero():
 
 
 def test_make_client_returns_cffi_session():
-    from endless_library.scrapers.http_client import make_client
     from curl_cffi.requests import Session
+
+    from endless_library.scrapers.http_client import make_client
     c = make_client()
     assert isinstance(c, Session)
 
@@ -105,6 +107,7 @@ def test_anubis_cache_thread_safe():
     """N threads racing to write the same host must leave exactly one entry."""
     import threading
     from unittest.mock import patch
+
     from endless_library.scrapers import http_client as hc
 
     N = 20
@@ -124,7 +127,8 @@ def test_anubis_cache_thread_safe():
     def run():
         try:
             with patch.object(hc, "_solve_and_get_cookie", return_value="JWT-TOKEN"):
-                _fake_post_fn = lambda url, **kw: type("R2", (), {"status_code": 302, "cookies": {}})()
+                def _fake_post_fn(url, **kw):
+                    return type("R2", (), {"status_code": 302, "cookies": {}})()
                 wrapped = hc._make_anubis_wrapper(
                     object(),
                     lambda url, **kw: type(

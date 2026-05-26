@@ -15,9 +15,8 @@ from urllib.parse import quote
 
 import httpx
 
-from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
-
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
 
 log = logging.getLogger(__name__)
 

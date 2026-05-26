@@ -438,7 +438,7 @@ def _verify_extracted_paths_safe(dest_dir: Path) -> None:
         except (OSError, ValueError):
             log.warning("archive_safety: removing extracted-outside-dest file: %s", p)
             p.unlink(missing_ok=True)
-            raise ArchiveSafetyError(f"archive escaped dest_dir: {p}")
+            raise ArchiveSafetyError(f"archive escaped dest_dir: {p}")  # noqa: B904
 
 
 def _check_archive_size(path: Path, limits: SafetyLimits) -> None:

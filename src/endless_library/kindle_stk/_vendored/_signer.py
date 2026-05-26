@@ -4,7 +4,7 @@ import base64
 import datetime
 import hashlib
 from dataclasses import dataclass
-from typing import Optional, cast
+from typing import cast
 
 import rsa
 from rsa import core, transform
@@ -34,7 +34,7 @@ class Signer:
         )
 
     def digest_header_for_request(
-        self, method: str, path: str, post_data: str, signing_date: Optional[str] = None
+        self, method: str, path: str, post_data: str, signing_date: str | None = None
     ) -> str:
         """Computes the request digest to be included in the X-ADP-Request-Digest header.
 
@@ -62,7 +62,7 @@ class Signer:
         return f"{bytes64}:{signing_date}"
 
     def _make_digest_data_for_request(
-        self, method: str, path: str, post_data: str, signing_date: Optional[str] = None
+        self, method: str, path: str, post_data: str, signing_date: str | None = None
     ) -> bytes:
         if signing_date is None:
             signing_date = _get_signing_date()
@@ -74,7 +74,7 @@ class Signer:
 def _get_signing_date() -> str:
     return (
         datetime.datetime.utcnow()
-        .replace(microsecond=0, tzinfo=datetime.timezone.utc)
+        .replace(microsecond=0, tzinfo=datetime.UTC)
         .isoformat()
         .replace("+00:00", "Z")
     )

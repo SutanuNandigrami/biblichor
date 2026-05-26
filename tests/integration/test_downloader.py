@@ -39,7 +39,7 @@ class _FakeClient:
         # the URL straight through to our stream().
         class _H:
             status_code = 200
-            headers: dict = {}  # noqa: RUF012
+            headers: dict = {}
 
         return _H()
 

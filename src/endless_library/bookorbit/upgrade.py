@@ -32,7 +32,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -244,7 +244,7 @@ def get_version_info(
     """
     runner = runner or SubprocessDockerRunner()
     docker_avail = runner.available()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     info = VersionInfo(
         current=None,
@@ -470,11 +470,11 @@ def preflight(
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _backup_filename(target_version: str, backup_dir: Path) -> Path:
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return backup_dir / f"bookorbit-pre-{target_version.lstrip('v')}-{ts}.sql.gz"
 
 
@@ -685,8 +685,7 @@ def apply_upgrade(
         except OSError as e:
             log.error("rollback: compose restore failed: %s", e)
         rc_rb, _, err_rb = runner.run(
-            _compose_args(compose_path, env_file)
-            + ["up", "-d", "bookorbit"],
+            [*_compose_args(compose_path, env_file), "up", "-d", "bookorbit"],
             timeout=300,
         )
         ok_rb = rc_rb == 0
@@ -704,8 +703,7 @@ def apply_upgrade(
     # ---- 3. compose up bookorbit ----
     up_step = _step(result, "compose.up_bookorbit")
     rc, out, err = runner.run(
-        _compose_args(compose_path, env_file)
-        + ["up", "-d", "bookorbit"],
+        [*_compose_args(compose_path, env_file), "up", "-d", "bookorbit"],
         timeout=300,
     )
     if rc != 0:
@@ -746,10 +744,7 @@ def apply_upgrade(
     version_step = _step(result, "version.verify")
     try:
         r = httpx.get(f"{bookorbit_url.rstrip('/')}/api/v1/app-info", timeout=5)
-        if r.status_code == 200:
-            running_ver = (r.json().get("version") or "").lstrip("v")
-        else:
-            running_ver = None
+        running_ver = (r.json().get("version") or "").lstrip("v") if r.status_code == 200 else None
     except httpx.HTTPError:
         running_ver = None
     if running_ver is None or running_ver != target_version.lstrip("v"):

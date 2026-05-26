@@ -9,17 +9,16 @@ from typing import Any
 from urllib.parse import quote_plus, urljoin
 
 import httpx
-
 from bs4 import BeautifulSoup
 
 from endless_library.config import ScrapersCfg
-from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.domain.scoring import _is_non_latin as _query_is_non_latin
-from endless_library.scrapers.base import ANNAS_CDN_REGEX, parse_filesize, url_has_book_ext
-from endless_library.scrapers.rate_limit import MirrorRotator, TokenBucket
 from endless_library.scrapers import annas_domains as _annas_domains
 from endless_library.scrapers import annas_parsing as _annas_parsing  # shared parser
+from endless_library.scrapers.base import ANNAS_CDN_REGEX, url_has_book_ext
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
+from endless_library.scrapers.rate_limit import MirrorRotator, TokenBucket
 
 log = logging.getLogger(__name__)
 
@@ -323,7 +322,7 @@ class AnnasArchiveCurl:
 
 # I-NEW-3: _run_async now lives in endless_library.async_utils.
 # Re-exported here for back-compat with any code importing it from this module.
-from endless_library.async_utils import _run_async  # noqa: F401
+from endless_library.async_utils import _run_async  # noqa: E402
 
 
 async def _probe_slow_servers_async(urls: list[str], *, timeout: float = 15.0) -> str | None:

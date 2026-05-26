@@ -40,8 +40,9 @@ def test_anubis_depth_limit_constant():
 
 def test_solve_and_get_cookie_accepts_raw_post():
     """_solve_and_get_cookie signature must accept raw_post kwarg."""
-    from endless_library.scrapers.http_client import _solve_and_get_cookie
     import inspect
+
+    from endless_library.scrapers.http_client import _solve_and_get_cookie
     sig = inspect.signature(_solve_and_get_cookie)
     assert "raw_post" in sig.parameters, (
         "_solve_and_get_cookie must accept raw_post keyword argument"
@@ -52,8 +53,7 @@ def test_anubis_recursion_bounded():
     """Mock a Session whose .post always returns Anubis HTML.
     The wrapper must NOT recurse infinitely — it should stop at _ANUBIS_DEPTH_LIMIT.
     """
-    from endless_library.scrapers import http_client
-    from endless_library.scrapers.http_client import _make_anubis_wrapper, _ANUBIS_DEPTH_LIMIT
+    from endless_library.scrapers.http_client import _ANUBIS_DEPTH_LIMIT, _make_anubis_wrapper
 
     call_count = [0]
 
@@ -88,9 +88,9 @@ def test_anubis_recursion_bounded():
         original_limit = sys.getrecursionlimit()
         sys.setrecursionlimit(100)  # low limit to catch runaway recursion
         try:
-            result = wrapper("https://example.com/page")
+            wrapper("https://example.com/page")
         except RecursionError:
-            assert False, "Anubis wrapper recursed infinitely (recursion guard not working)"
+            raise AssertionError("Anubis wrapper recursed infinitely (recursion guard not working)")  # noqa: B904
         finally:
             sys.setrecursionlimit(original_limit)
     finally:
@@ -105,13 +105,13 @@ def test_anubis_recursion_bounded():
 
 def test_install_middleware_captures_raw_post():
     """_install_anubis_middleware must capture raw post before wrapping."""
-    from unittest.mock import MagicMock, patch
     
     # We can't easily test this directly without a real Session,
     # but we can verify that _solve_and_get_cookie is called with raw_post=
     # by checking the function signature accepts it.
-    from endless_library.scrapers.http_client import _solve_and_get_cookie
     import inspect
+
+    from endless_library.scrapers.http_client import _solve_and_get_cookie
     
     params = inspect.signature(_solve_and_get_cookie).parameters
     assert "raw_post" in params
@@ -122,8 +122,9 @@ def test_install_middleware_captures_raw_post():
 
 def test_make_anubis_wrapper_accepts_raw_post_arg():
     """_make_anubis_wrapper must accept raw_post_for_solve as third argument."""
-    from endless_library.scrapers.http_client import _make_anubis_wrapper
     import inspect
+
+    from endless_library.scrapers.http_client import _make_anubis_wrapper
     
     sig = inspect.signature(_make_anubis_wrapper)
     params = list(sig.parameters.keys())

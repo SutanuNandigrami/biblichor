@@ -8,12 +8,7 @@ That caused '>= T...' comparisons to match 0 rows. strftime fixes it.
 from __future__ import annotations
 
 import sqlite3
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
-
-import pytest
-from fastapi.testclient import TestClient
-
+from datetime import UTC
 
 # ---------------------------------------------------------------------------
 # Minimal helpers to isolate the date-parsing logic without a full app stack
@@ -37,11 +32,11 @@ def test_strftime_matches_sqlite_format():
 
 def test_tz_aware_datetime_normalised_to_utc():
     """If the input has tzinfo, it must be normalised to UTC before strftime."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
     # +05:30 is India Standard Time
     ist = timezone(timedelta(hours=5, minutes=30))
     dt_ist = datetime(2026, 5, 23, 15, 30, 0, tzinfo=ist)  # 10:00 UTC
-    dt_utc = dt_ist.astimezone(timezone.utc).replace(tzinfo=None)
+    dt_utc = dt_ist.astimezone(UTC).replace(tzinfo=None)
     result = dt_utc.strftime("%Y-%m-%d %H:%M:%S")
     assert result == "2026-05-23 10:00:00"
 

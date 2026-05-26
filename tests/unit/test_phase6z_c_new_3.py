@@ -66,7 +66,6 @@ def test_cf_bypass_rejects_ipv6_loopback():
 
 def test_cf_bypass_allows_legitimate_url(monkeypatch):
     """Legitimate public URLs must pass the SSRF guard."""
-    import httpx
     from endless_library.scrapers import cf_bypass_client
 
     class _R:

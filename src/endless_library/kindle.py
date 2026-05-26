@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-
-from endless_library.async_utils import _run_async
 import logging
 import mimetypes
 import ssl
@@ -12,6 +9,7 @@ from pathlib import Path
 
 import aiosmtplib
 
+from endless_library.async_utils import _run_async
 from endless_library.config import KindleCfg, SmtpCfg
 
 log = logging.getLogger(__name__)

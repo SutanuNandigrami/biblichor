@@ -7,10 +7,8 @@ import pytest
 
 from endless_library.kindle_stk import (
     KindleStkAuthExpired,
-    KindleStkUploadFailed,
 )
-from tests._stkclient_stub import FakeDevice, FakeVendoredClient
-
+from tests._stkclient_stub import FakeVendoredClient
 
 # ---------------------------------------------------------------------------
 # Shared fixture (mirrors fake_bookorbit_svc in main test file)

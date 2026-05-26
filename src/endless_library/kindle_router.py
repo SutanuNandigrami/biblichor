@@ -16,7 +16,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 STK_HARD_BUDGET_BYTES = 200 * 1024 * 1024  # Amazon 200 MB per-call cap
 
 
-class DeliveryMethod(str, Enum):
+class DeliveryMethod(StrEnum):
     STK = "stk"
     SMTP = "smtp"
 
@@ -245,7 +245,7 @@ def deliver_batch(
 
     Returns a list of DeliveryResult, one per input BookFile, in order.
     """
-    start_all = time.monotonic()
+    time.monotonic()
     per_file_interval = float(getattr(cfg.stk, "per_file_interval_sec", 10.0))
     stk_svc = KindleStkService(svc, per_file_interval_sec=per_file_interval)
     results: list[DeliveryResult] = []

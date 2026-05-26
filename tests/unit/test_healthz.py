@@ -161,10 +161,11 @@ def test_healthz_scrapers_count_matches_registry(healthy_db: Path):
 def test_healthz_stk_block_says_unconfigured_when_no_setup(tmp_path):
     """When STK is not configured, /healthz returns {'stk': {'configured': false}}
     with no quota fields."""
+    from types import SimpleNamespace
+
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from types import SimpleNamespace
-    from pathlib import Path
+
     from endless_library.db.schema import init_db
     from endless_library.web import api as api_mod
 
@@ -207,11 +208,12 @@ def test_healthz_stk_block_says_unconfigured_when_no_setup(tmp_path):
 
 def test_healthz_stk_block_returns_quota_when_configured(tmp_path):
     """When STK is configured, /healthz reports sent_24h, cap, remaining, exhausted."""
+    from types import SimpleNamespace
+
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from types import SimpleNamespace
-    from pathlib import Path
-    from endless_library.db.schema import init_db, connect
+
+    from endless_library.db.schema import connect, init_db
     from endless_library.web import api as api_mod
 
     db = tmp_path / "test.db"

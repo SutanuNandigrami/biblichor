@@ -1,15 +1,18 @@
 """Phase STK 8: kindle_router.deliver -- STK-first + SMTP-fallback."""
 from __future__ import annotations
+
 import time
-from pathlib import Path
 from types import SimpleNamespace
+
 import pytest
-from endless_library.db.schema import init_db, connect
+
+from endless_library.db.schema import connect, init_db
 from endless_library.kindle_stk import (
     KindleStkAuthExpired,
     KindleStkRateLimited,
     KindleStkUploadFailed,
 )
+
 
 @pytest.fixture
 def db(tmp_path):
@@ -68,7 +71,7 @@ def _configure_stk(svc):
 def test_router_picks_smtp_when_stk_not_configured(monkeypatch, db, cfg, book, file_path, svc):
     smtp_calls = []
     monkeypatch.setattr("endless_library.kindle_router._send_smtp", lambda *a, **kw: smtp_calls.append(1))
-    from endless_library.kindle_router import deliver, DeliveryMethod
+    from endless_library.kindle_router import DeliveryMethod, deliver
     result = deliver(file_path=file_path, book=book, cfg=cfg, db_path=db, svc=svc)
     assert result.ok is True
     assert result.method == DeliveryMethod.SMTP
@@ -81,7 +84,7 @@ def test_router_picks_stk_when_configured(monkeypatch, db, cfg, book, file_path,
         stk_calls.append((file, format, title, author))
         return {"transaction_id": "tx-1"}
     monkeypatch.setattr("endless_library.kindle_stk.service.KindleStkService.send_file", fake_stk_send)
-    from endless_library.kindle_router import deliver, DeliveryMethod
+    from endless_library.kindle_router import DeliveryMethod, deliver
     result = deliver(file_path=file_path, book=book, cfg=cfg, db_path=db, svc=svc)
     assert result.ok is True
     assert result.method == DeliveryMethod.STK
@@ -96,7 +99,7 @@ def test_router_falls_to_smtp_when_quota_exhausted(monkeypatch, db, cfg, book, f
     monkeypatch.setattr("endless_library.kindle_stk.service.KindleStkService.send_file", lambda *a, **kw: stk_called.append(True))
     smtp_called = []
     monkeypatch.setattr("endless_library.kindle_router._send_smtp", lambda *a, **kw: smtp_called.append(True))
-    from endless_library.kindle_router import deliver, DeliveryMethod
+    from endless_library.kindle_router import DeliveryMethod, deliver
     result = deliver(file_path=file_path, book=book, cfg=cfg, db_path=db, svc=svc)
     assert result.method == DeliveryMethod.SMTP
     assert not stk_called
@@ -111,7 +114,7 @@ def test_router_retries_stk_3x_then_falls_to_smtp(monkeypatch, db, cfg, book, fi
     monkeypatch.setattr("endless_library.kindle_stk.service.KindleStkService.send_file", fake_send)
     smtp_called = []
     monkeypatch.setattr("endless_library.kindle_router._send_smtp", lambda *a, **kw: smtp_called.append(True))
-    from endless_library.kindle_router import deliver, DeliveryMethod
+    from endless_library.kindle_router import DeliveryMethod, deliver
     result = deliver(file_path=file_path, book=book, cfg=cfg, db_path=db, svc=svc)
     assert len(attempts) == 3
     assert smtp_called
@@ -127,7 +130,7 @@ def test_router_auth_expired_skips_retries(monkeypatch, db, cfg, book, file_path
     smtp_called = []
     monkeypatch.setattr("endless_library.kindle_router._send_smtp", lambda *a, **kw: smtp_called.append(True))
     from endless_library.kindle_router import deliver
-    result = deliver(file_path=file_path, book=book, cfg=cfg, db_path=db, svc=svc)
+    deliver(file_path=file_path, book=book, cfg=cfg, db_path=db, svc=svc)
     assert len(attempts) == 1
     assert smtp_called
 
@@ -146,7 +149,7 @@ def test_router_honors_retry_after(monkeypatch, db, cfg, book, file_path, svc):
             raise nxt
         return {"transaction_id": "tx-final"}
     monkeypatch.setattr("endless_library.kindle_stk.service.KindleStkService.send_file", fake_send)
-    from endless_library.kindle_router import deliver, DeliveryMethod
+    from endless_library.kindle_router import DeliveryMethod, deliver
     result = deliver(file_path=file_path, book=book, cfg=cfg, db_path=db, svc=svc)
     assert result.method == DeliveryMethod.STK
     assert sleep_calls == [2, 4]

@@ -1,7 +1,6 @@
 """Phase 6w.6 — BDeBooks + content-filter abstraction tests."""
 from __future__ import annotations
 
-
 # ============ Task 1: Candidate.categories field ============
 
 
@@ -84,8 +83,8 @@ class _FakeClient:
 
 
 def test_bdebooks_search_extracts_titles_and_categories(monkeypatch):
-    from endless_library.scrapers.bdebooks import BDeBooks
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.bdebooks import BDeBooks
 
     monkeypatch.setattr(
         "endless_library.scrapers.bdebooks.make_client",
@@ -108,8 +107,8 @@ def test_bdebooks_search_extracts_titles_and_categories(monkeypatch):
 
 
 def test_bdebooks_excludes_islamic_when_in_denylist(monkeypatch):
-    from endless_library.scrapers.bdebooks import BDeBooks
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.bdebooks import BDeBooks
 
     html = """
     <html><body>
@@ -166,13 +165,12 @@ KB_SEARCH_HTML = """
 
 
 def test_kindlebangla_filters_excluded_categories_via_search_upstream(monkeypatch):
-    from endless_library.scrapers.kindlebangla_curl import KindleBanglaCurl
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.kindlebangla_curl import KindleBanglaCurl
 
     class _KBCfg:
         excluded_categories = ["Quran", "ধর্মীয়"]
 
-    results_from_upstream = []
 
     scraper = KindleBanglaCurl(
         _KBCfg(),
@@ -218,15 +216,15 @@ def test_enabled_order_for_query_promotes_bdebooks_for_bengali():
 def test_bdebooks_caps_detail_fetches_at_max(monkeypatch):
     """search() must fetch at most _MAX_DETAIL_FETCHES detail pages regardless
     of how many results the search page returns."""
-    from endless_library.scrapers.bdebooks import BDeBooks, _MAX_DETAIL_FETCHES
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.bdebooks import _MAX_DETAIL_FETCHES, BDeBooks
 
     # Generate 10 articles — more than the cap
     articles = "".join(
-        f'<article class="post">' +
+        '<article class="post">' +
         f'<h2 class="entry-title"><a class="entry-title" href="https://bdebooks.com/books/book{i}/">Book {i}</a></h2>' +
-        f'<a href="/category/fiction/" rel="category tag">Fiction</a>' +
-        f'</article>'
+        '<a href="/category/fiction/" rel="category tag">Fiction</a>' +
+        '</article>'
         for i in range(10)
     )
     search_html = f"<html><body>{articles}</body></html>"

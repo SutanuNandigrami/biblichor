@@ -7,10 +7,13 @@ import json
 import os
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, BinaryIO, List, Mapping, TextIO, Union
+from typing import Any, BinaryIO, TextIO
 
-from . import _api as api, _model as model, _signer as signer
+from . import _api as api
+from . import _model as model
+from . import _signer as signer
 
 OwnedDevice = model.OwnedDevice
 
@@ -26,7 +29,7 @@ class Client:
         """Initialize _signer."""
         self._signer = signer.Signer.from_device_info(self._device_info)
 
-    def get_owned_devices(self) -> List[OwnedDevice]:
+    def get_owned_devices(self) -> list[OwnedDevice]:
         """Returns a list of kindle devices owned by the end-user.
 
         Returns:
@@ -37,7 +40,7 @@ class Client:
     def send_file(
         self,
         file_path: Path,
-        target_device_serial_numbers: List[str],
+        target_device_serial_numbers: list[str],
         *,
         author: str,
         title: str,
@@ -74,7 +77,7 @@ class Client:
         api.logout(self._signer)
 
     @staticmethod
-    def load(fp: Union[TextIO, BinaryIO]) -> "Client":
+    def load(fp: TextIO | BinaryIO) -> "Client":
         """Deserializes a client from a file-like object."""
         return Client._from_dict(json.load(fp))
 
@@ -177,4 +180,4 @@ def _sha256(s: bytes) -> bytes:
     return m.digest()
 
 
-__all__ = ["OAuth2", "OwnedDevice", "Client"]
+__all__ = ["Client", "OAuth2", "OwnedDevice"]

@@ -25,9 +25,9 @@ from endless_library.config import ScrapersCfg
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.flaresolverr import FlareSolverr, FlareSolverrError
 from endless_library.scrapers.base import BOOK_EXTENSIONS, parse_filesize
+from endless_library.scrapers.http_client import make_client
 from endless_library.scrapers.rate_limit import TokenBucket
 from endless_library.scrapers.welib_cookies import parse_cookie_string
-from endless_library.scrapers.http_client import make_client
 
 log = logging.getLogger(__name__)
 

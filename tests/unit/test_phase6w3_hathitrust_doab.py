@@ -1,5 +1,4 @@
 """Tests for HathiTrust and DOAB scrapers (Phase 6w.3)."""
-import pytest
 
 
 # ============================================================================
@@ -7,8 +6,8 @@ import pytest
 # ============================================================================
 
 def test_hathitrust_returns_pd_candidate_when_isbn_match(monkeypatch):
-    from endless_library.scrapers.hathitrust import HathiTrust
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.hathitrust import HathiTrust
     fake = {
         "records": {
             "9999": {
@@ -35,8 +34,8 @@ def test_hathitrust_returns_pd_candidate_when_isbn_match(monkeypatch):
 
 
 def test_hathitrust_returns_empty_when_no_isbn():
-    from endless_library.scrapers.hathitrust import HathiTrust
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.hathitrust import HathiTrust
     ht = HathiTrust(cfg=None)
     out = ht.search(SearchQuery(title="x", author="", isbn13="",
                                 format_priority=("pdf",), language="en"))
@@ -48,8 +47,8 @@ def test_hathitrust_returns_empty_when_no_isbn():
 # ============================================================================
 
 def test_doab_search_extracts_pdf_candidates(monkeypatch):
-    from endless_library.scrapers.doab import Doab
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.doab import Doab
     fake = [
         {
             "metadata": [
@@ -74,8 +73,8 @@ def test_doab_search_extracts_pdf_candidates(monkeypatch):
 
 
 def test_doab_includes_language_filter_when_set(monkeypatch):
-    from endless_library.scrapers.doab import Doab
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.doab import Doab
     sent_params = {}
     class _R:
         status_code = 200
@@ -105,8 +104,8 @@ class _FakeSession:
 
 def test_hathitrust_closes_client_after_search(monkeypatch):
     """HathiTrust.search() must close its HTTP client after each call (ultrareview I8)."""
-    from endless_library.scrapers.hathitrust import HathiTrust
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.hathitrust import HathiTrust
 
     closed = []
 
@@ -133,9 +132,8 @@ def test_hathitrust_closes_client_after_search(monkeypatch):
 
 def test_doab_closes_client_after_search(monkeypatch):
     """Doab.search() must close its HTTP client after each call (ultrareview I8)."""
-    import json as _json
-    from endless_library.scrapers.doab import Doab
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.doab import Doab
 
     closed = []
 

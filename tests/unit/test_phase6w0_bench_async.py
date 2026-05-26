@@ -1,4 +1,5 @@
 from pathlib import Path
+
 from endless_library.db.schema import connect, init_db
 
 
@@ -24,7 +25,7 @@ def test_bench_jobs_columns_are_correct(tmp_path: Path):
     }
 
 
-from endless_library.db.bench_jobs import BenchJobsRepo, BenchJobRow
+from endless_library.db.bench_jobs import BenchJobsRepo
 
 
 def test_create_job_returns_id_and_initial_running_status(tmp_path: Path):
@@ -154,15 +155,14 @@ def test_run_bench_circuit_breaks_after_3_consecutive_fails(tmp_path, monkeypatc
     assert sum(1 for n in by_note if "circuit-broken" in n) == 3
     assert sum(1 for n in by_note if "RuntimeError" in n) == 3
 
-import json as _json
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from endless_library.web import api as api_mod
-from endless_library.db.bench import BenchRunRepo
 from endless_library.config import ScrapersCfg
+from endless_library.db.bench import BenchRunRepo
+from endless_library.web import api as api_mod
 
 
 def _app(tmp_path: Path) -> FastAPI:

@@ -9,19 +9,16 @@ Tests:
 """
 from __future__ import annotations
 
-import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from endless_library.kindle_router import BookFile, _pack_batches
 from endless_library.kindle_stk.exceptions import (
-    KindleStkAuthExpired,
     KindleStkBatchOverflow,
 )
 from endless_library.kindle_stk.service import FileEntry
-from endless_library.kindle_router import BookFile, _pack_batches
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -125,9 +122,9 @@ def test_pack_respects_max_batch_files(tmp_path):
 
 def test_send_files_records_one_event_per_book(tmp_path, configured_svc, monkeypatch):
     """deliver_batch writes one send-stk event per book (via router -> service)."""
+    from endless_library.db.schema import connect, init_db
+    from endless_library.kindle_router import BookFile, deliver_batch
     from tests._stkclient_stub import FakeVendoredClient
-    from endless_library.db.schema import init_db, connect
-    from endless_library.kindle_router import deliver_batch, BookFile
 
     fake = FakeVendoredClient()
     monkeypatch.setattr(
@@ -187,10 +184,9 @@ def test_send_files_records_one_event_per_book(tmp_path, configured_svc, monkeyp
 
 def test_send_files_translates_403_to_auth_expired(tmp_path, configured_svc, monkeypatch):
     """A 403 HTTP error from stkclient is translated to KindleStkAuthExpired."""
-    from tests._stkclient_stub import FakeVendoredClient
     from endless_library.kindle_stk import KindleStkAuthExpired
-    from endless_library.kindle_stk.service import FileEntry, KindleStkService
     from endless_library.kindle_stk._vendored import _api
+    from endless_library.kindle_stk.service import KindleStkService
 
     # Simulate 403 via APIError (the path used in the vendored layer)
     err_403 = _api.APIError("HTTP Error 403: Forbidden", b'{"Message": "Failed to validate DeviceInfoToken."}')
@@ -221,8 +217,8 @@ def test_send_files_translates_403_to_auth_expired(tmp_path, configured_svc, mon
 
 def test_send_files_raises_batch_overflow_for_oversized(tmp_path, configured_svc, monkeypatch):
     """A file > 200 MB passed to send_files raises KindleStkBatchOverflow."""
+    from endless_library.kindle_stk.service import KindleStkService
     from tests._stkclient_stub import FakeVendoredClient
-    from endless_library.kindle_stk.service import FileEntry, KindleStkService
 
     fake = FakeVendoredClient()
     monkeypatch.setattr(
@@ -247,9 +243,9 @@ def test_send_files_raises_batch_overflow_for_oversized(tmp_path, configured_svc
 def test_send_files_sleeps_per_file_interval(tmp_path, configured_svc, monkeypatch):
     """send_files() sleeps per_file_interval_sec between files (not before first,
     not after last). A 3-file batch must call time.sleep exactly twice."""
-    from tests._stkclient_stub import FakeVendoredClient
-    from endless_library.kindle_stk.service import FileEntry, KindleStkService
     import endless_library.kindle_stk.service as stk_svc_module
+    from endless_library.kindle_stk.service import KindleStkService
+    from tests._stkclient_stub import FakeVendoredClient
 
     fake = FakeVendoredClient()
     monkeypatch.setattr(

@@ -7,7 +7,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # I1 -- MobilismSession.try_login: safe credential check without singleton
 # ---------------------------------------------------------------------------
@@ -106,7 +105,7 @@ def test_try_login_does_not_corrupt_existing_singleton():
     fake_bad_session.post.return_value = fake_resp
 
     with patch("endless_library.scrapers.mobilism.make_client", return_value=fake_bad_session):
-        ok, err = MobilismSession.try_login(
+        ok, _err = MobilismSession.try_login(
             SimpleNamespace(mobilism_username="bad", mobilism_password="creds")
         )
 
@@ -165,9 +164,10 @@ def test_anubis_middleware_wrapped_methods_are_callable():
 def test_anubis_middleware_injects_cached_cookie():
     """After a cookie is cached, it is injected in the next request."""
     import time
+
     from endless_library.scrapers.http_client import (
-        _install_anubis_middleware,
         _ANUBIS_COOKIE_CACHE,
+        _install_anubis_middleware,
     )
 
     host = "anubis-test-xyz.example.com"

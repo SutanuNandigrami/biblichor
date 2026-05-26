@@ -7,12 +7,11 @@ FakeVendoredClient accepts send_file calls (one per book). We verify:
 """
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from endless_library.db.schema import init_db, connect
+from endless_library.db.schema import connect, init_db
 
 
 @pytest.fixture
@@ -50,7 +49,6 @@ def test_pipeline_batch_smoke(db, svc, tmp_path, monkeypatch):
     fake = FakeVendoredClient()
     batch_call_count = [0]
 
-    original_deliver_batch = None
 
     # Patch FakeVendoredClient into the vendored layer
     monkeypatch.setattr(
@@ -59,8 +57,8 @@ def test_pipeline_batch_smoke(db, svc, tmp_path, monkeypatch):
     )
 
     # Patch _kindle_deliver_batch to count calls (wraps real deliver_batch)
-    import endless_library.pipeline as _pipeline_mod
     import endless_library.kindle_router as _router_mod
+    import endless_library.pipeline as _pipeline_mod
 
     real_deliver_batch = _router_mod.deliver_batch
 

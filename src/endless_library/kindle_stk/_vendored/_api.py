@@ -5,7 +5,8 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import IO, Any, List, Mapping, Optional
+from collections.abc import Mapping
+from typing import IO, Any
 
 from ._model import (
     DeviceInfo,
@@ -26,7 +27,7 @@ DEFAULT_CLIENT_INFO = {
 class APIError(ValueError):
     """Represents errors returned in HTTP response of the API."""
 
-    def __init__(self, msg: str, body: Optional[bytes]):
+    def __init__(self, msg: str, body: bytes | None):
         """Construct an APIError with a given message and response body."""
         if body is not None:
             try:
@@ -72,7 +73,7 @@ def token_exchange(authorization_code: str, code_verifier: str) -> str:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req) as r:  # noqa S310
+        with urllib.request.urlopen(req) as r:
             res = json.load(r)
     except urllib.error.HTTPError as e:
         raise APIError(str(e), _text(e)) from e
@@ -116,7 +117,7 @@ def register_device_with_token(access_token: str) -> DeviceInfo:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req) as r:  # noqa S310
+        with urllib.request.urlopen(req) as r:
             return DeviceInfo.from_xml(r.read())
     except urllib.error.HTTPError as e:
         raise APIError(str(e), _text(e)) from e
@@ -176,7 +177,7 @@ def upload_file(url: str, file_size: int, fp: IO[Any]) -> None:
     u = urllib.parse.urlparse(url)
     if u.hostname is None:
         raise ValueError("Invalid URL")
-    conn = http.client.HTTPSConnection(u.hostname)  # noqa: S309
+    conn = http.client.HTTPSConnection(u.hostname)
     try:
         headers = {
             "Accept-Encoding": "gzip, deflate",
@@ -202,7 +203,7 @@ def upload_file(url: str, file_size: int, fp: IO[Any]) -> None:
 def send_to_kindle(
     signer: Signer,
     stk_token: str,
-    target_device_serial_numbers: List[str],
+    target_device_serial_numbers: list[str],
     *,
     author: str,
     title: str,
@@ -265,7 +266,7 @@ def logout(signer: Signer) -> None:
         method="GET",
     )
     try:
-        with urllib.request.urlopen(req) as r:  # noqa S310
+        with urllib.request.urlopen(req) as r:
             r.read()  # Read and discard
     except urllib.error.HTTPError as e:
         raise APIError(str(e), _text(e)) from e
@@ -293,12 +294,12 @@ def _request(path: str, signer: Signer, body: Mapping[str, Any]) -> Mapping[str,
         },
         method="POST",
     )
-    with urllib.request.urlopen(req) as r:  # noqa S310
+    with urllib.request.urlopen(req) as r:
         val: Mapping[str, Any] = json.load(r)
         return val
 
 
-def _text(e: urllib.error.HTTPError) -> Optional[bytes]:
+def _text(e: urllib.error.HTTPError) -> bytes | None:
     try:
         return e.read()
     except AttributeError:

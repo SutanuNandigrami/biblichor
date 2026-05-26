@@ -17,7 +17,7 @@ from endless_library.convert import ConvertError, convert_to_epub
 from endless_library.db.bench import BenchRunRepo
 from endless_library.db.bench_jobs import BenchJobsRepo
 from endless_library.db.books import BookRepo, BookRow
-from endless_library.db.candidates import CandidateRepo, CandidateRow
+from endless_library.db.candidates import CandidateRepo
 from endless_library.db.events import EventRepo
 from endless_library.db.mirrors import MirrorRepo
 from endless_library.db.schema import init_db
@@ -28,9 +28,13 @@ from endless_library.domain.scoring import score_candidate
 from endless_library.domain.state_machine import decide_auto_pick
 from endless_library.download import DownloadError, download
 from endless_library.kindle_router import (
-    deliver as _kindle_deliver,
-    deliver_batch as _kindle_deliver_batch,
     BookFile as _BookFile,
+)
+from endless_library.kindle_router import (
+    deliver as _kindle_deliver,
+)
+from endless_library.kindle_router import (
+    deliver_batch as _kindle_deliver_batch,
 )
 from endless_library.notifier import Notifier
 from endless_library.scrapers import registry as scrapers_registry
@@ -992,7 +996,7 @@ def process_queue(deps: PipelineDeps) -> dict[str, int]:
                 db_path=deps.db_path,
                 svc=deps.bookorbit_service,
             )
-            for (b, fp), result in zip(pending_delivery, results):
+            for (b, fp), result in zip(pending_delivery, results, strict=False):
                 if result.ok:
                     deps.books.mark_kindled(b.id, method=result.method.value)
                     # deliver_batch() already records send-stk events (batch path).

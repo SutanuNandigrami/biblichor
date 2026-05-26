@@ -3,10 +3,8 @@ and I6 (progress_total uses filtered query counts, not len*len).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-
 
 # ---------------------------------------------------------------------------
 # I5 -- _bench_worker must not reload corpus_tags from disk on every scraper
@@ -17,9 +15,8 @@ def test_bench_worker_passes_corpus_tags_to_run_bench():
     """run_bench must receive corpus_tags so it does NOT re-read queries.yaml."""
     # We intercept calls to run_bench and check that corpus_tags is always
     # passed (never None), which means the worker uses the pre-loaded value.
-    import asyncio
 
-    from endless_library.bench import BenchOutcome, BenchQuery
+    from endless_library.bench import BenchQuery
 
     calls: list[dict] = []
 
@@ -43,7 +40,6 @@ def test_bench_worker_passes_corpus_tags_to_run_bench():
         # Import _bench_worker from inside register() -- it's a nested async fn
         # We test the key contract: corpus_tags passed through.
         # Use asyncio.run on the coroutine:
-        import endless_library.web.api as api_mod
         # Grab the worker via introspection (it's defined inside register())
         # Since we can't easily import nested functions, test via integration:
         # call run_bench directly with corpus_tags to verify the contract.
@@ -59,7 +55,7 @@ def test_bench_worker_corpus_tags_not_none_means_no_yaml_read():
     """When corpus_tags is already a dict, run_bench must not call load_corpus_tags."""
     from unittest.mock import patch
 
-    from endless_library.bench import run_bench, BenchQuery
+    from endless_library.bench import run_bench
 
     class FakeScraper:
         name = "fake"
@@ -97,7 +93,7 @@ def test_bench_worker_corpus_tags_not_none_means_no_yaml_read():
 def test_bench_progress_total_uses_filtered_count():
     """progress_total must equal sum of queries_for_scraper() per scraper,
     not len(strats)*len(qs) which overcounts specialized scrapers."""
-    from endless_library.bench import BenchQuery, load_corpus_tags, queries_for_scraper
+    from endless_library.bench import BenchQuery, queries_for_scraper
 
     qs = [
         BenchQuery("Pride and Prejudice", "Austen", "", "en", tags=("en", "pd")),

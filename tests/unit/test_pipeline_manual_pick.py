@@ -14,15 +14,10 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-
-from endless_library.db.books import BookRepo
-from endless_library.db.candidates import CandidateRepo, CandidateRow
-from endless_library.db.schema import init_db
+from endless_library.db.candidates import CandidateRow
 from endless_library.pipeline import PipelineDeps, process_one
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers

@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 
 import httpx
 
-from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
-
 from endless_library.domain.models import DownloadHandle
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
 
 log = logging.getLogger(__name__)
 

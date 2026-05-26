@@ -3,9 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from endless_library.db.schema import init_db, connect
+from endless_library.db.schema import connect, init_db
 
 
 def test_books_has_sent_method_column_after_init_db(tmp_path: Path):

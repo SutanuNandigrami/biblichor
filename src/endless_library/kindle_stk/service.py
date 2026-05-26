@@ -34,7 +34,7 @@ import logging
 import re
 import time
 import urllib.error
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -141,7 +141,7 @@ class KindleStkService:
         except requests.HTTPError as e:
             raise KindleStkUploadFailed(f"register_device failed: {e}") from e
 
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         self._svc.set_secret_values(
             {
                 "kindle_stk.device_cert.pem": result["device_private_key"],

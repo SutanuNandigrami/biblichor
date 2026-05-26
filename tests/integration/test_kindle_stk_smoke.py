@@ -6,13 +6,11 @@ through the real KindleStkService + kindle_router stack.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from endless_library.db.schema import init_db, connect
+from endless_library.db.schema import connect, init_db
 
 
 @pytest.fixture
@@ -66,7 +64,7 @@ def test_router_smoke_records_send_stk_event_via_router(db, svc, tmp_path, monke
     f = tmp_path / "book.epub"
     f.write_bytes(b"FAKE")
 
-    from endless_library.kindle_router import deliver, DeliveryMethod
+    from endless_library.kindle_router import DeliveryMethod, deliver
     result = deliver(file_path=f, book=book, cfg=cfg, db_path=db, svc=svc)
     assert result.ok is True
     assert result.method == DeliveryMethod.STK

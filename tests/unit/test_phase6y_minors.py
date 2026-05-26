@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
+
 import pytest
 
 from endless_library.security.archive_safety import (
     ArchiveSafetyError,
     _check_member_safe,
 )
-
 
 # ============ M10: backslash normalization in _check_member_safe ============
 
@@ -37,7 +37,7 @@ def test_check_member_safe_still_blocks_absolute_path():
 
 def test_open_slum_monitor_escalates_to_warning_after_n_failures(caplog):
     """M11: after 3 consecutive failures, _refresh logs at WARNING."""
-    from endless_library.scrapers.open_slum import OpenSlumMonitor, _WARN_AFTER_N_FAILURES
+    from endless_library.scrapers.open_slum import _WARN_AFTER_N_FAILURES, OpenSlumMonitor
 
     monitor = OpenSlumMonitor(url="http://does-not-exist.invalid/")
 
@@ -46,7 +46,7 @@ def test_open_slum_monitor_escalates_to_warning_after_n_failures(caplog):
     monitor._fetch_remote = failing_fetch
 
     with caplog.at_level(logging.DEBUG):
-        for i in range(_WARN_AFTER_N_FAILURES + 1):
+        for _i in range(_WARN_AFTER_N_FAILURES + 1):
             monitor._refresh()
 
     warning_records = [
@@ -89,12 +89,11 @@ def test_open_slum_monitor_logs_unknown_keys(caplog):
     the real schema validation code path. The schema check is in _fetch_remote,
     so we use monkeypatch to intercept httpx and return known-unknown data.
     """
-    from endless_library.scrapers.open_slum import OpenSlumMonitor, _KNOWN_SITE_KEYS
+    from endless_library.scrapers.open_slum import _KNOWN_SITE_KEYS, OpenSlumMonitor
 
-    monitor = OpenSlumMonitor(url="http://does-not-exist.invalid/")
+    OpenSlumMonitor(url="http://does-not-exist.invalid/")
 
     # Directly test the validation logic by calling it inline
-    import logging as _logging
     test_data = {"annas_archive": {"ok": True}, "brand_new_site_xyz": {"ok": True}}
     unknown = set(test_data.keys()) - _KNOWN_SITE_KEYS
     assert "brand_new_site_xyz" in unknown, "Test data should have an unknown key"
@@ -133,6 +132,7 @@ def test_open_slum_refresh_logs_unknown_keys(caplog, monkeypatch):
     def _fake_fetch_remote():
         # Simulate the real _fetch_remote: log unknown keys and return data
         import logging as _log_mod
+
         from endless_library.scrapers.open_slum import _KNOWN_SITE_KEYS
         data = {"annas_archive": {"ok": True}, "brand_new_site_xyz999": {"ok": True}}
         _logger = _log_mod.getLogger("endless_library.scrapers.open_slum")
@@ -155,7 +155,6 @@ def test_open_slum_refresh_logs_unknown_keys(caplog, monkeypatch):
 def test_bulk_delete_filter_matches_real_row(tmp_path):
     """m-NEW-2: POST /api/books/bulk_delete?created_after= soft-deletes matching row."""
     import sqlite3
-    from pathlib import Path
     from types import SimpleNamespace
 
     from fastapi import FastAPI
@@ -211,8 +210,9 @@ def test_bulk_delete_filter_matches_real_row(tmp_path):
 
 def test_cf_bypass_retries_once_on_http_error(caplog, monkeypatch):
     """m-NEW-2 / m-NEW-5: cf_bypass.resolve() retries once and logs on HTTPError."""
+    from unittest.mock import MagicMock
+
     import httpx
-    from unittest.mock import patch, MagicMock
 
     call_count = 0
 
