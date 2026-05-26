@@ -70,7 +70,9 @@ def test_unsupported_formats_not_in_set():
 
 
 def test_enrich_metadata_writes_pdf_title(tmp_path):
-    import os as _os, pytest as _pt
+    import os as _os
+
+    import pytest as _pt
 
     if not _os.path.exists("/home/ubuntu/endless-library/data/books"):
         _pt.skip("VPS-only data files not available in CI", allow_module_level=False)
