@@ -284,7 +284,13 @@ def test_bench_job_stream_poll_interval_is_2s(tmp_path):
     """
     import pathlib
 
-    src = pathlib.Path("/home/ubuntu/endless-library/src/endless_library/web/api.py").read_text()
+    src = (
+        pathlib.Path(__file__)
+        .resolve()
+        .parents[2]
+        .joinpath("src/endless_library/web/api.py")
+        .read_text()
+    )
     assert "SSE_POLL_INTERVAL_SEC: float = 2.0" in src, (
         "Expected module-level SSE_POLL_INTERVAL_SEC = 2.0 in api.py (m-NEW-3)"
     )
