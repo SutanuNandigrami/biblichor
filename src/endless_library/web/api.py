@@ -2190,8 +2190,10 @@ def register(app: FastAPI) -> None:
         lang_clean = (lang or "").strip().lower()
         if lang_clean and lang_clean != "all":
             effective_lang = lang_clean
+            user_picked_lang = True
         else:
             effective_lang = getattr(sc, "language", "en") or "en"
+            user_picked_lang = False
 
         # Resolve scraper set. Default behaviour: Anna's-only (the dominant
         # source — sub-second response, 80%+ coverage). Multi-source fan-out
@@ -2209,14 +2211,49 @@ def register(app: FastAPI) -> None:
         if not scraper_names:
             raise HTTPException(503, "no scrapers available for this query")
 
+        # Language-aware query augmentation. Annas lang= filter is a soft
+        # hint that gets mostly ignored; their full-text index works better
+        # when we add the language NAME to the query for non-English picks.
+        # "kriya yoga" + bn -> "kriya yoga bengali" returns far more Bengali
+        # matches than the lang= filter alone (live tested 2026-05-26).
+        _LANG_NAME = {
+            "bn": "bengali",
+            "hi": "hindi",
+            "ta": "tamil",
+            "te": "telugu",
+            "ml": "malayalam",
+            "mr": "marathi",
+            "gu": "gujarati",
+            "pa": "punjabi",
+            "ja": "japanese",
+            "ko": "korean",
+            "zh": "chinese",
+            "ar": "arabic",
+            "he": "hebrew",
+            "ru": "russian",
+            "es": "spanish",
+            "fr": "french",
+            "de": "german",
+            "it": "italian",
+            "pt": "portuguese",
+        }
+        augmented_title = q_clean
+        if (
+            user_picked_lang
+            and effective_lang != "en"
+            and effective_lang in _LANG_NAME
+            and not any(ord(ch) > 0x024F for ch in q_clean)
+        ):
+            augmented_title = f"{q_clean} {_LANG_NAME[effective_lang]}"
+
         query = SearchQuery(
-            title=q_clean,
+            title=augmented_title,
             author=None,
             isbn13=None,
-            # Interactive search hits Anna’s once. Pipeline-side scraper
-            # iterates the full format ladder (epub→azw3→mobi→pdf), each one
-            # an HTTP call — fine for batch download where you want any format,
-            # ruinous for keystroke latency. Limit to the user’s top choice;
+            # Interactive search hits Anna's once. Pipeline-side scraper
+            # iterates the full format ladder (epub->azw3->mobi->pdf), each one
+            # an HTTP call -- fine for batch download where you want any format,
+            # ruinous for keystroke latency. Limit to the user's top choice;
             # if no epub exists, the SPA can hint that explicitly later.
             format_priority=((getattr(sc, "format_priority", None) or ["epub"])[0],),
             language=effective_lang,
@@ -2299,6 +2336,44 @@ def register(app: FastAPI) -> None:
                 seen_url.add(k)
             deduped.append(c)
 
+        # Language post-filter: trust script presence over Annas often-empty
+        # `language` tag. For known non-Latin langs we keep candidates whose
+        # title contains at least one glyph from that script. For Latin-script
+        # langs we fall back to c.language tag match.
+        _LANG_SCRIPT_RANGE = {
+            "bn": (0x0980, 0x09FF),
+            "hi": (0x0900, 0x097F),
+            "mr": (0x0900, 0x097F),
+            "ta": (0x0B80, 0x0BFF),
+            "te": (0x0C00, 0x0C7F),
+            "ml": (0x0D00, 0x0D7F),
+            "gu": (0x0A80, 0x0AFF),
+            "pa": (0x0A00, 0x0A7F),
+            "ja": (0x3040, 0x9FFF),
+            "ko": (0xAC00, 0xD7AF),
+            "zh": (0x4E00, 0x9FFF),
+            "ar": (0x0600, 0x06FF),
+            "he": (0x0590, 0x05FF),
+            "ru": (0x0400, 0x04FF),
+        }
+        language_filter_applied = False
+        if user_picked_lang and effective_lang != "en":
+            script_range = _LANG_SCRIPT_RANGE.get(effective_lang)
+            target_lang = effective_lang
+
+            def _matches_lang(cand) -> bool:
+                t = cand.title or ""
+                if script_range and any(script_range[0] <= ord(ch) <= script_range[1] for ch in t):
+                    return True
+                cl = (cand.language or "").lower()
+                return cl == target_lang or cl.startswith(target_lang)
+
+            filtered_results = [c for c in deduped if _matches_lang(c)]
+            if filtered_results:
+                deduped = filtered_results
+                language_filter_applied = True
+            # else: leave deduped as-is so user sees something + SPA hint.
+
         deduped = deduped[: max(1, min(int(limit), 50))]
 
         # biblichor books-table cross-ref.
@@ -2336,6 +2411,7 @@ def register(app: FastAPI) -> None:
         return {
             "query": q_clean,
             "lang": effective_lang,
+            "language_filter_applied": language_filter_applied,
             "count": len(results_out),
             "results": results_out,
             "sources_used": used,
