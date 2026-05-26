@@ -97,6 +97,11 @@ jobs:
           touch data/library.db
           chmod 666 data/library.db
           chmod -R 777 data
+          # biblichor healthz checks deploy/compose.yml is writable by the
+          # container (bookorbit in-app upgrade writes to it). Runner uid
+          # 1001 owns the file by default; chmod 666 so container uid 1000
+          # can write it.
+          chmod 666 deploy/compose.yml
           chmod 600 .env
 
       - name: Pin Postgres data dir ownership
