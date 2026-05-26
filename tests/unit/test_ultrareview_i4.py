@@ -7,10 +7,6 @@ import os
 import pytest
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="OpenSlumMonitor tests have a pre-existing CI-only flake (test-isolation issue with module state); investigate separately",
-)
 def test_open_slum_refresh_updates_timestamp_on_non_dict_response():
     """I4: _last_refresh must be updated even when _fetch_remote returns non-dict.
     Without the finally clause, a list/string response leaves _last_refresh=0,
@@ -38,10 +34,6 @@ def test_open_slum_refresh_updates_timestamp_on_non_dict_response():
     )
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="OpenSlumMonitor tests have a pre-existing CI-only flake (test-isolation issue with module state); investigate separately",
-)
 def test_open_slum_refresh_updates_timestamp_on_exception():
     """I4 pre-condition: _last_refresh is also updated when _fetch_remote raises.
     This was already true before I4; verify it stays true after the refactor.
@@ -63,10 +55,6 @@ def test_open_slum_refresh_updates_timestamp_on_exception():
     assert fetch_count == 1, "timestamp must be updated even when fetch raises"
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="OpenSlumMonitor tests have a pre-existing CI-only flake (test-isolation issue with module state); investigate separately",
-)
 def test_open_slum_cache_preserved_on_non_dict_response():
     """I4: when _fetch_remote returns a non-dict, the previous cache is preserved."""
     from endless_library.scrapers.open_slum import OpenSlumMonitor
@@ -96,10 +84,6 @@ def test_open_slum_cache_preserved_on_non_dict_response():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="OpenSlumMonitor tests have a pre-existing CI-only flake (test-isolation issue with module state); investigate separately",
-)
 def test_open_slum_get_serialised_under_concurrent_calls():
     """N threads calling get() concurrently after a stale interval must
     trigger _fetch_remote at most once (no stampede)."""
