@@ -25,46 +25,121 @@ type Result = {
   in_library: InLib
 }
 
+// Minimum query length before we hit the API. One- and two-letter queries
+// match millions of Anna's results, take ~10s, and aren't actually useful
+// for finding a book. Three chars is the sweet spot where most queries
+// narrow enough to be fast (~1s).
+const MIN_QUERY_LEN = 3
+// Debounce window. Longer than typing-pause but short enough to feel live.
+const DEBOUNCE_MS = 500
+// Cache last N queries in memory so backtracking ("eddie" -> "eddi") is
+// instant. Keyed by the trimmed-lowered query string.
+const CACHE_LIMIT = 20
+
 const query = ref('')
 const results = ref<Result[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
-const lastQuery = ref('')          // what was actually queried (for the result header)
-const queuing = ref<Set<string>>(new Set())   // md5s currently being POSTed
-const justQueued = ref<Map<string, number>>(new Map())  // md5 -> book_id (recently added)
+const lastQuery = ref('')
+const queuing = ref<Set<string>>(new Set())
 const toast = useToast()
 
-// Debounce: 350ms after typing stops, run the search.
+// AbortController for the in-flight request. When the user types another
+// letter, we cancel the previous fetch so its (now-stale) response can't
+// land after a newer one and overwrite the UI. This is the single biggest
+// fix to the "letter-by-letter lag" the user reported.
+let inflightCtrl: AbortController | null = null
+
+// In-memory cache. Keyed by normalized query string. Insertion-ordered Map
+// lets us drop the oldest entry when we exceed CACHE_LIMIT.
+const cache = new Map<string, Result[]>()
+
 let debounceTimer: number | null = null
 watch(query, (v) => {
   if (debounceTimer) window.clearTimeout(debounceTimer)
+
   const q = v.trim()
+
+  // Empty input: clear results, cancel any in-flight, reset.
   if (!q) {
+    if (inflightCtrl) inflightCtrl.abort()
+    inflightCtrl = null
     results.value = []
     error.value = null
     lastQuery.value = ''
+    loading.value = false
     return
   }
+
+  // Under the minimum: don't even queue a fetch. Show a hint instead.
+  if (q.length < MIN_QUERY_LEN) {
+    if (inflightCtrl) inflightCtrl.abort()
+    inflightCtrl = null
+    results.value = []
+    error.value = null
+    lastQuery.value = ''
+    loading.value = false
+    return
+  }
+
+  // Cache hit: render instantly, no network. Still records as the "current"
+  // query for the result header.
+  const key = q.toLowerCase()
+  const cached = cache.get(key)
+  if (cached) {
+    if (inflightCtrl) inflightCtrl.abort()
+    inflightCtrl = null
+    results.value = cached
+    lastQuery.value = q
+    error.value = null
+    loading.value = false
+    return
+  }
+
   debounceTimer = window.setTimeout(() => {
     runSearch(q)
-  }, 350)
+  }, DEBOUNCE_MS)
 })
 
 async function runSearch(q: string) {
+  // Cancel any earlier in-flight request. Critical for keystroke-by-keystroke
+  // typing: without this, a slow request for "ed" returning AFTER "eddie"
+  // would clobber the eddie results with two-letter junk.
+  if (inflightCtrl) inflightCtrl.abort()
+  const ctrl = new AbortController()
+  inflightCtrl = ctrl
+
   loading.value = true
   error.value = null
   try {
     const r = await api<{ query: string; count: number; results: Result[] }>(
       `/api/search?q=${encodeURIComponent(q)}&limit=30`,
+      { signal: ctrl.signal },
     )
+    // Ignore if a newer request started while we were waiting.
+    if (ctrl.signal.aborted) return
     results.value = r.results
     lastQuery.value = r.query
-  } catch (e) {
+    // Cache (with LRU-ish eviction).
+    cache.set(q.toLowerCase(), r.results)
+    if (cache.size > CACHE_LIMIT) {
+      const oldest = cache.keys().next().value
+      if (oldest !== undefined) cache.delete(oldest)
+    }
+  } catch (e: unknown) {
+    // Aborted requests are not errors — we cancelled them on purpose.
+    if (e instanceof DOMException && e.name === 'AbortError') return
+    const isAbort = (e as { name?: string } | null)?.name === 'AbortError'
+    if (isAbort) return
     const msg = e instanceof ApiError ? e.message : String(e)
+    if (ctrl.signal.aborted) return
     error.value = msg
     results.value = []
   } finally {
-    loading.value = false
+    if (inflightCtrl === ctrl) {
+      loading.value = false
+      inflightCtrl = null
+    }
   }
 }
 
@@ -91,17 +166,17 @@ async function addToQueue(r: Result) {
         }),
       },
     )
-    justQueued.value.set(r.md5, resp.book_id)
-    // Mutate the result row in place so the UI updates without a re-search
     const idx = results.value.findIndex((x) => x.md5 === r.md5)
     if (idx >= 0) {
       results.value[idx] = { ...results.value[idx], in_library: { id: resp.book_id, status: resp.status } }
     }
-    if (resp.created) {
-      toast.success(`Queued "${r.title}" (book #${resp.book_id})`)
-    } else {
-      toast.info(`Already tracked (book #${resp.book_id}, ${resp.status})`)
+    // Update cache entry too so backtracking to this query shows the new state.
+    if (lastQuery.value) {
+      const key = lastQuery.value.toLowerCase()
+      if (cache.has(key)) cache.set(key, [...results.value])
     }
+    if (resp.created) toast.success(`Queued "${r.title}" (book #${resp.book_id})`)
+    else toast.info(`Already tracked (book #${resp.book_id}, ${resp.status})`)
   } catch (e) {
     const msg = e instanceof ApiError ? e.message : String(e)
     toast.error(`Add failed: ${msg}`)
@@ -153,7 +228,14 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'default
       <span>{{ error }}</span>
     </div>
 
-    <div v-if="lastQuery && !loading" class="mb-3 text-sm text-muted-foreground">
+    <div
+      v-if="query.trim().length > 0 && query.trim().length < MIN_QUERY_LEN"
+      class="mb-3 text-sm text-muted-foreground"
+    >
+      Type {{ MIN_QUERY_LEN - query.trim().length }} more {{ MIN_QUERY_LEN - query.trim().length === 1 ? 'character' : 'characters' }} to search…
+    </div>
+
+    <div v-else-if="lastQuery && !loading" class="mb-3 text-sm text-muted-foreground">
       {{ results.length }} {{ results.length === 1 ? 'result' : 'results' }} for "<span class="text-foreground">{{ lastQuery }}</span>"
     </div>
 
@@ -168,7 +250,6 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'default
         :key="r.md5"
         class="flex gap-4 p-4 rounded-lg border border-border bg-card hover:bg-accent/30 transition-colors"
       >
-        <!-- Cover -->
         <div class="w-20 md:w-24 shrink-0 aspect-[2/3] rounded overflow-hidden bg-muted flex items-center justify-center">
           <img
             v-if="r.cover_url"
@@ -182,7 +263,6 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'default
           <BookOpen v-else class="w-8 h-8 text-muted-foreground/40" />
         </div>
 
-        <!-- Meta -->
         <div class="flex-1 min-w-0">
           <h3 class="font-medium leading-snug line-clamp-2 mb-1">
             {{ r.title || '(untitled)' }}
@@ -208,7 +288,6 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'default
           </div>
         </div>
 
-        <!-- Action -->
         <div class="shrink-0 self-start">
           <Button
             v-if="!r.in_library"
