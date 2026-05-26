@@ -2169,7 +2169,19 @@ def register(app: FastAPI) -> None:
             raise HTTPException(400, "query must be at least 3 characters")
 
         deps = request.app.state.deps
-        sc = deps.cfg.scrapers
+        # Interactive search uses a no-delay copy of the scrapers config.
+        # The pipeline-side cfg has request_delay_seconds=6 (polite for
+        # batch processing 1000 books); applying that to per-keystroke
+        # search means 7-8s of pure sleep before any HTTP. The token
+        # bucket on the scraper instance still enforces a saner ceiling
+        # (default 6/minute), so this isn't an abuse vector.
+        if hasattr(deps.cfg.scrapers, "model_copy"):
+            sc = deps.cfg.scrapers.model_copy(update={"request_delay_seconds": 0.0})
+        else:
+            # SimpleNamespace test stub — mutate a copy via copy.copy()
+            import copy as _copy
+            sc = _copy.copy(deps.cfg.scrapers)
+            sc.request_delay_seconds = 0.0
 
         # Resolve language. "all" / "" via the param means: skip language
         # filtering at the scoring stage (the scrapers themselves may still
