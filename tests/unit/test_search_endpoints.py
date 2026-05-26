@@ -287,3 +287,56 @@ def test_from_search_idempotent_on_existing_md5(tmp_path):
     assert body2["created"] is False
     assert body2["book_id"] == r1.json()["book_id"]
     assert "already tracked" in body2["message"]
+
+
+# ============ post-PR-6 regression: pool timeout no longer 500s =============
+
+
+def test_default_search_uses_annas_only_not_full_fanout(tmp_path):
+    """PR #6 made the default search hit every enabled scraper, taking
+    ~9s per keystroke. Default behaviour reverted to Anna's-only;
+    multi-source is opt-in via explicit ?sources=. This test pins the
+    default so we don't regress UX into a 9-second-per-letter search."""
+    app, _, _ = _make_app(tmp_path)
+    builds: list[str] = []
+
+    def _fake_build(name, sc, **kwargs):
+        builds.append(name)
+        return MagicMock(search=lambda q: [])
+
+    with patch("endless_library.scrapers.registry.build", side_effect=_fake_build):
+        r = TestClient(app).get("/api/search?q=anything")
+    assert r.status_code == 200
+    body = r.json()
+    # Only annas_curl should have been built.
+    assert builds == ["annas_curl"], f"default fan-out leaked: built {builds}"
+    assert body["sources_used"] == [] or body["sources_used"] == ["annas_curl"]
+
+
+def test_slow_scraper_does_not_500_the_endpoint(tmp_path):
+    """If a scraper hangs past per_scraper_timeout, concurrent.futures'
+    as_completed() raises TimeoutError from the loop iterator itself.
+    The fast-path patch wraps that in try/except so we never 500 — we
+    return partial results from whoever finished + flag the slow one
+    as skipped. Regression for PR #6 which exploded with TimeoutError."""
+    import time as _time
+
+    app, _, _ = _make_app(tmp_path)
+
+    def _slow_search(_q):
+        _time.sleep(4)  # past the 3s per-scraper budget
+        return []
+
+    # Explicit ?sources= triggers fan-out across multiple scrapers.
+    with patch(
+        "endless_library.scrapers.registry.build",
+        return_value=MagicMock(search=_slow_search),
+    ):
+        r = TestClient(app).get(
+            "/api/search?q=anything&sources=annas_curl,doab",
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["count"] == 0
+    # Both scrapers should appear as skipped (they hung past the budget)
+    assert len(body["sources_skipped"]) >= 1

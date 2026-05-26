@@ -2180,14 +2180,19 @@ def register(app: FastAPI) -> None:
         else:
             effective_lang = getattr(sc, "language", "en") or "en"
 
-        # Resolve scraper set.
+        # Resolve scraper set. Default behaviour: Anna's-only (the dominant
+        # source — sub-second response, 80%+ coverage). Multi-source fan-out
+        # is opt-in via explicit ?sources=annas_curl,doab,... because every
+        # extra scraper adds its own external latency and rate-limit risk.
+        # This default reverts the over-eager change from PR #6 which made
+        # every keystroke wait ~9s for the slowest of 7 scrapers.
         if sources:
             requested = [s.strip() for s in sources.split(",") if s.strip()]
             scraper_names = [n for n in requested if n in _reg.available()]
         else:
-            scraper_names = _reg.enabled_order_for_query(sc, q_clean)
-        # Cap fan-out so a user-supplied huge sources list cannot DoS us.
-        scraper_names = scraper_names[:10]
+            scraper_names = ["annas_curl"] if "annas_curl" in _reg.available() else []
+        # Cap fan-out at 6 even if user requests more.
+        scraper_names = scraper_names[:6]
         if not scraper_names:
             raise HTTPException(503, "no scrapers available for this query")
 
@@ -2199,8 +2204,9 @@ def register(app: FastAPI) -> None:
             language=effective_lang,
         )
 
-        # Run scrapers in parallel.
-        per_scraper_timeout = 8.0
+        # Tight per-scraper budget. Anna's typically returns in <1s; 3s gives
+        # slower sources a fair shake without blocking the UI.
+        per_scraper_timeout = 3.0
         used: list[str] = []
         skipped: list[dict] = []
         merged: list = []
@@ -2217,18 +2223,46 @@ def register(app: FastAPI) -> None:
 
         with _cf.ThreadPoolExecutor(max_workers=min(len(scraper_names), 6)) as ex:
             futures = {ex.submit(_run_one, n): n for n in scraper_names}
-            for fut in _cf.as_completed(futures, timeout=per_scraper_timeout + 2):
-                name = futures[fut]
-                try:
-                    n, cands, err = fut.result(timeout=per_scraper_timeout)
-                except (_cf.TimeoutError, Exception) as e:
-                    skipped.append({"name": name, "reason": f"timeout/{type(e).__name__}"})
-                    continue
-                if err is not None or cands is None:
-                    skipped.append({"name": n, "reason": err or "no results"})
-                    continue
-                used.append(n)
-                merged.extend(cands)
+            # NOTE: as_completed() itself raises TimeoutError when the outer
+            # deadline expires with futures still pending. PR #6 only caught
+            # exceptions inside the loop body, so a slow scraper exploded the
+            # whole endpoint as a 500. Wrap the iteration to catch the
+            # pool-level timeout cleanly.
+            try:
+                for fut in _cf.as_completed(futures, timeout=per_scraper_timeout + 1):
+                    name = futures[fut]
+                    try:
+                        n, cands, err = fut.result(timeout=0.1)
+                    except (_cf.TimeoutError, Exception) as e:
+                        skipped.append({"name": name, "reason": f"{type(e).__name__}"})
+                        continue
+                    if err is not None or cands is None:
+                        skipped.append({"name": n, "reason": err or "no results"})
+                        continue
+                    used.append(n)
+                    merged.extend(cands)
+            except _cf.TimeoutError:
+                # Pool-level timeout: collect anything that DID finish in time
+                # and mark the rest as skipped. The user gets fast partial
+                # results instead of a 500.
+                for fut, name in futures.items():
+                    if (
+                        fut.done()
+                        and name not in used
+                        and not any(s["name"] == name for s in skipped)
+                    ):
+                        try:
+                            n, cands, err = fut.result(timeout=0.1)
+                            if err is None and cands is not None:
+                                used.append(n)
+                                merged.extend(cands)
+                            else:
+                                skipped.append({"name": n, "reason": err or "no results"})
+                        except Exception as e:
+                            skipped.append({"name": name, "reason": f"{type(e).__name__}"})
+                    elif not fut.done():
+                        skipped.append({"name": name, "reason": "timeout"})
+                        fut.cancel()
 
         # Dedup by md5 (first hit wins); non-md5 candidates keyed by
         # (provider, detail_url).
