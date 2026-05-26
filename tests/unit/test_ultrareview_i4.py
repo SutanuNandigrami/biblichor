@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
-import pytest
-
 
 def test_open_slum_refresh_updates_timestamp_on_non_dict_response():
     """I4: _last_refresh must be updated even when _fetch_remote returns non-dict.

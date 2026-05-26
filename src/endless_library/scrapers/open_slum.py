@@ -66,7 +66,8 @@ class OpenSlumMonitor:
         # regardless of what time.monotonic() returns at construction time.
         # 0.0 broke on fresh hosts where monotonic() < poll_interval at process
         # start (CI runners, freshly-booted containers) — the first fetch was
-        # silently skipped and callers saw stale empty data forever.
+        # silently skipped and callers saw stale empty data until clock
+        # caught up past poll_interval seconds.
         self._last_refresh: float = float("-inf")
         self._cache: dict[str, Any] = {}
         self._consecutive_failures: int = 0
