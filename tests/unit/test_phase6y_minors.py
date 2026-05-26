@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 
 import pytest
 
@@ -27,10 +26,6 @@ def test_check_member_safe_still_blocks_traversal_after_backslash_norm():
         _check_member_safe(r"..\evil.epub")
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="OpenSlumMonitor tests have a pre-existing CI-only flake (test-isolation issue with module state); investigate separately",
-)
 def test_check_member_safe_still_blocks_absolute_path():
     """M10: Absolute paths still caught after normalization."""
     with pytest.raises(ArchiveSafetyError):
@@ -40,10 +35,6 @@ def test_check_member_safe_still_blocks_absolute_path():
 # ============ M11: OpenSlumMonitor failure escalation ============
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="OpenSlumMonitor tests have a pre-existing CI-only flake (test-isolation issue with module state); investigate separately",
-)
 def test_open_slum_monitor_escalates_to_warning_after_n_failures(caplog):
     """M11: after 3 consecutive failures, _refresh logs at WARNING."""
     from endless_library.scrapers.open_slum import _WARN_AFTER_N_FAILURES, OpenSlumMonitor
@@ -66,10 +57,6 @@ def test_open_slum_monitor_escalates_to_warning_after_n_failures(caplog):
     assert monitor._consecutive_failures >= _WARN_AFTER_N_FAILURES
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="OpenSlumMonitor tests have a pre-existing CI-only flake (test-isolation issue with module state); investigate separately",
-)
 def test_open_slum_monitor_resets_counter_on_success():
     """M11: consecutive failure counter resets to 0 on successful refresh."""
     from endless_library.scrapers.open_slum import OpenSlumMonitor
@@ -95,10 +82,6 @@ def test_open_slum_monitor_resets_counter_on_success():
 # ============ M3: OpenSlumMonitor schema validation ============
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="OpenSlumMonitor tests have a pre-existing CI-only flake (test-isolation issue with module state); investigate separately",
-)
 def test_open_slum_monitor_logs_unknown_keys(caplog):
     """M3: unknown site keys in the JSON response are logged at DEBUG.
 
@@ -121,10 +104,6 @@ def test_open_slum_monitor_logs_unknown_keys(caplog):
     assert "brand_new_site_xyz" not in _KNOWN_SITE_KEYS
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="OpenSlumMonitor tests have a pre-existing CI-only flake (test-isolation issue with module state); investigate separately",
-)
 def test_open_slum_monitor_known_keys_set_excludes_garbage():
     """M3: _KNOWN_SITE_KEYS contains expected sites and not garbage."""
     from endless_library.scrapers.open_slum import _KNOWN_SITE_KEYS
@@ -139,10 +118,6 @@ def test_open_slum_monitor_known_keys_set_excludes_garbage():
 # ============ m-NEW-2: additional sad-path tests ============
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="OpenSlumMonitor tests have a pre-existing CI-only flake (test-isolation issue with module state); investigate separately",
-)
 def test_open_slum_refresh_logs_unknown_keys(caplog, monkeypatch):
     """m-NEW-2: _fetch_remote logs DEBUG when JSON has unexpected site keys.
 
