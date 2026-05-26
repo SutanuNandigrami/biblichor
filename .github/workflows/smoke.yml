@@ -91,8 +91,12 @@ jobs:
           kindle:
             recipient: smoke@kindle.com
           EOF
-          # Seed an empty library.db so biblichor can boot
+          # Seed an empty library.db so biblichor can boot.
+          # Container biblichor user is uid 1000; runner is 1001. Use
+          # world-writable for the smoke DB so the container can WAL-mode it.
           touch data/library.db
+          chmod 666 data/library.db
+          chmod -R 777 data
           chmod 600 .env
 
       - name: Pin Postgres data dir ownership
