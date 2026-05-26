@@ -9,6 +9,15 @@ import Badge from '@/components/ui/Badge.vue'
 
 type InLib = { id: number; status: string } | null
 
+type SearchResponse = {
+  query: string
+  lang: string
+  count: number
+  results: Result[]
+  sources_used: string[]
+  sources_skipped: { name: string; reason: string }[]
+}
+
 type Result = {
   md5: string
   title: string | null
@@ -37,6 +46,18 @@ const DEBOUNCE_MS = 500
 const CACHE_LIMIT = 20
 
 const query = ref('')
+const lang = ref<string>('all')  // 'all' = use cfg default (no override)
+const sourcesUsed = ref<string[]>([])
+const sourcesSkipped = ref<{ name: string; reason: string }[]>([])
+const LANG_OPTIONS = [
+  { value: 'all', label: 'All languages' },
+  { value: 'en', label: 'English' },
+  { value: 'bn', label: 'Bengali' },
+  { value: 'hi', label: 'Hindi' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'fr', label: 'French' },
+  { value: 'de', label: 'German' },
+] as const
 const results = ref<Result[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -55,6 +76,12 @@ let inflightCtrl: AbortController | null = null
 const cache = new Map<string, Result[]>()
 
 let debounceTimer: number | null = null
+// Also re-run when lang changes (fires immediately, no debounce — the
+// user explicitly picked the language).
+watch(lang, () => {
+  const q = query.value.trim()
+  if (q.length >= MIN_QUERY_LEN) runSearch(q)
+})
 watch(query, (v) => {
   if (debounceTimer) window.clearTimeout(debounceTimer)
 
@@ -84,7 +111,7 @@ watch(query, (v) => {
 
   // Cache hit: render instantly, no network. Still records as the "current"
   // query for the result header.
-  const key = q.toLowerCase()
+  const key = `${lang.value}|${q.toLowerCase()}`
   const cached = cache.get(key)
   if (cached) {
     if (inflightCtrl) inflightCtrl.abort()
@@ -112,16 +139,18 @@ async function runSearch(q: string) {
   loading.value = true
   error.value = null
   try {
-    const r = await api<{ query: string; count: number; results: Result[] }>(
-      `/api/search?q=${encodeURIComponent(q)}&limit=30`,
+    const r = await api<SearchResponse>(
+      `/api/search?q=${encodeURIComponent(q)}&limit=30` + (lang.value && lang.value !== 'all' ? `&lang=${encodeURIComponent(lang.value)}` : ''),
       { signal: ctrl.signal },
     )
     // Ignore if a newer request started while we were waiting.
     if (ctrl.signal.aborted) return
     results.value = r.results
     lastQuery.value = r.query
+    sourcesUsed.value = r.sources_used || []
+    sourcesSkipped.value = r.sources_skipped || []
     // Cache (with LRU-ish eviction).
-    cache.set(q.toLowerCase(), r.results)
+    cache.set(`${lang.value}|${q.toLowerCase()}`, r.results)
     if (cache.size > CACHE_LIMIT) {
       const oldest = cache.keys().next().value
       if (oldest !== undefined) cache.delete(oldest)
@@ -211,16 +240,27 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'default
       </p>
     </div>
 
-    <div class="relative mb-4">
-      <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-      <Input
-        v-model="query"
-        type="search"
-        placeholder="title, author, isbn..."
-        class="pl-9 h-11 text-base"
-        autofocus
-      />
-      <Loader2 v-if="loading" class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-muted-foreground" />
+    <div class="flex gap-2 mb-4 items-stretch">
+      <div class="relative flex-1">
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+        <Input
+          v-model="query"
+          type="search"
+          placeholder="title, author, isbn..."
+          class="pl-9 h-11 text-base w-full"
+          autofocus
+        />
+        <Loader2 v-if="loading" class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-muted-foreground" />
+      </div>
+      <select
+        v-model="lang"
+        class="h-11 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        aria-label="Filter by language"
+      >
+        <option v-for="opt in LANG_OPTIONS" :key="opt.value" :value="opt.value">
+          {{ opt.label }}
+        </option>
+      </select>
     </div>
 
     <div v-if="error" class="mb-4 p-3 rounded-md border border-destructive/30 bg-destructive/5 text-sm text-destructive flex items-start gap-2">
@@ -235,8 +275,16 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'default
       Type {{ MIN_QUERY_LEN - query.trim().length }} more {{ MIN_QUERY_LEN - query.trim().length === 1 ? 'character' : 'characters' }} to search…
     </div>
 
-    <div v-else-if="lastQuery && !loading" class="mb-3 text-sm text-muted-foreground">
-      {{ results.length }} {{ results.length === 1 ? 'result' : 'results' }} for "<span class="text-foreground">{{ lastQuery }}</span>"
+    <div v-else-if="lastQuery && !loading" class="mb-3 text-sm text-muted-foreground space-y-1">
+      <div>
+        {{ results.length }} {{ results.length === 1 ? 'result' : 'results' }} for "<span class="text-foreground">{{ lastQuery }}</span>"
+      </div>
+      <div v-if="sourcesUsed.length" class="text-xs opacity-70">
+        searched: <span class="font-medium">{{ sourcesUsed.join(', ') }}</span>
+        <template v-if="sourcesSkipped.length">
+          · skipped: <span class="font-medium">{{ sourcesSkipped.map(s => s.name).join(', ') }}</span>
+        </template>
+      </div>
     </div>
 
     <div v-if="!query.trim() && results.length === 0 && !loading" class="text-center py-16 text-muted-foreground">
