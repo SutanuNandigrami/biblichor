@@ -340,3 +340,91 @@ def test_slow_scraper_does_not_500_the_endpoint(tmp_path):
     assert body["count"] == 0
     # Both scrapers should appear as skipped (they hung past the budget)
     assert len(body["sources_skipped"]) >= 1
+
+
+# ============ lang-aware augmentation + post-filter ============================
+
+
+def _fake_cand_bn(md5: str, *, title: str) -> Candidate:
+    """Bengali-script-titled candidate (Annas often returns language=None)."""
+    return Candidate(
+        provider="annas",
+        md5=md5,
+        title=title,
+        author=None,
+        language=None,
+        format="epub",
+        filesize_bytes=500_000,
+        year=2020,
+        publisher=None,
+        edition_hints="",
+        detail_url=f"https://annas-archive.gl/md5/{md5}",
+        raw={"isbn13": None, "row_text": "", "isbns": [], "cover_url": None},
+    )
+
+
+def test_search_with_bengali_lang_augments_and_filters_by_script(tmp_path):
+    """User picks Bengali AND types Latin 'kriya yoga'. Endpoint should
+    (a) augment the query to 'kriya yoga bengali' before hitting Annas,
+    (b) post-filter results so only Bengali-script titles or language=bn
+    entries survive."""
+    app, _, _ = _make_app(tmp_path)
+    seen_query: list[str] = []
+    fake = [
+        _fake_candidate("a" * 32, title="Kriya Yoga English Manual"),
+        _fake_cand_bn("b" * 32, title="ক্রিয়াযোগ"),
+        _fake_candidate("c" * 32, title="Self-Realization Fellowship Lessons"),
+    ]
+
+    class _SpyScraper:
+        def search(self, query):
+            seen_query.append(query.title)
+            return fake
+
+    with patch("endless_library.scrapers.registry.build", return_value=_SpyScraper()):
+        r = TestClient(app).get("/api/search?q=kriya%20yoga&lang=bn")
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Augmentation: scraper saw the augmented form
+    assert seen_query == ["kriya yoga bengali"], seen_query
+    # Post-filter: only the Bengali-script candidate made it through
+    assert body["count"] == 1
+    assert body["results"][0]["md5"] == "b" * 32
+    assert body["language_filter_applied"] is True
+
+
+def test_search_with_lang_all_does_not_augment_or_filter(tmp_path):
+    """lang=all is a no-op: no query augmentation, no script post-filter."""
+    app, _, _ = _make_app(tmp_path)
+    seen: list[str] = []
+    fake = [_fake_candidate("a" * 32, title="anything")]
+
+    class _SpyScraper:
+        def search(self, query):
+            seen.append(query.title)
+            return fake
+
+    with patch("endless_library.scrapers.registry.build", return_value=_SpyScraper()):
+        r = TestClient(app).get("/api/search?q=kriya%20yoga&lang=all")
+
+    assert seen == ["kriya yoga"]
+    body = r.json()
+    assert body["language_filter_applied"] is False
+    assert body["count"] == 1
+
+
+def test_search_bengali_filter_falls_back_when_zero_matches(tmp_path):
+    """If the script post-filter would drop EVERY result, we fall back to
+    unfiltered output so the user sees something. The flag tells the SPA
+    to show a 'no exact lang matches' hint."""
+    app, _, _ = _make_app(tmp_path)
+    fake = [_fake_candidate("a" * 32, title="English Only Result")]
+    with patch(
+        "endless_library.scrapers.registry.build",
+        return_value=MagicMock(search=lambda q: fake),
+    ):
+        r = TestClient(app).get("/api/search?q=foobar&lang=bn")
+    body = r.json()
+    assert body["count"] == 1
+    assert body["language_filter_applied"] is False
