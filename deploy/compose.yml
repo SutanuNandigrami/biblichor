@@ -17,6 +17,36 @@ name: biblichor
 
 services:
 
+  # ---------------------------------------------------------------------
+  # biblichor-fixperms — runs to completion before biblichor starts.
+  #
+  # Self-heals the uid 1000/1001 mismatch hell. Bind-mounted dirs on the
+  # host can be owned by whatever user runs `docker compose` (ubuntu uid
+  # 1001 on most clouds, github-actions runner 1001, opc 1000 on Oracle
+  # Linux). The biblichor container runs as uid 1000. Without this init,
+  # any host user other than uid 1000 produces files biblichor can't
+  # write, and the in-app upgrade flow + /healthz silently fail.
+  #
+  # The init container runs as root, chowns the mount points to 1000:1000
+  # (matches the biblichor + bookorbit container users), and surgically
+  # preserves data/bookorbit-db at 999:999 (postgres). See
+  # deploy/init-fix-perms.sh.
+  #
+  # Runs on every `docker compose up`. Idempotent. Adds ~2s to startup.
+  biblichor-fixperms:
+    image: alpine:3.20
+    container_name: biblichor-fixperms
+    user: "0:0"
+    network_mode: none
+    volumes:
+      - ../data:/host/data
+      - ../library:/host/library
+      - ../config:/host/config
+      - ../deploy/compose.yml:/host/deploy/compose.yml
+      - ./init-fix-perms.sh:/init-fix-perms.sh:ro
+    entrypoint: ["/bin/sh", "/init-fix-perms.sh"]
+    restart: "no"
+
   biblichor:
     build:
       context: ..
@@ -84,6 +114,8 @@ services:
       # user invoked compose from (which is the repo root).
       HOST_REPO_PATH: "${PWD}"
     depends_on:
+      biblichor-fixperms:
+        condition: service_completed_successfully
       flaresolverr:
         condition: service_healthy
       bookorbit:

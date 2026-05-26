@@ -91,18 +91,12 @@ jobs:
           kindle:
             recipient: smoke@kindle.com
           EOF
-          # Seed an empty library.db so biblichor can boot.
-          # Container biblichor user is uid 1000; runner is 1001. Use
-          # world-writable for the smoke DB so the container can WAL-mode it.
+          # Seed an empty library.db so biblichor can boot. The
+          # biblichor-fixperms init container chowns it (and every other
+          # bind-mounted path) to 1000:1000 on every `docker compose up`,
+          # so no manual chmod is needed — runner uid 1001 vs container
+          # uid 1000 self-heals via the init service.
           touch data/library.db
-          # Container biblichor user is uid 1000; runner is 1001. Open up
-          # all the bind-mounted dirs/files so the container can write.
-          chmod -R 777 data config library
-          # biblichor healthz checks deploy/compose.yml is writable by the
-          # container (bookorbit in-app upgrade writes to it). Runner uid
-          # 1001 owns the file by default; chmod 666 so container uid 1000
-          # can write it.
-          chmod 666 deploy/compose.yml
           chmod 600 .env
 
       - name: Pin Postgres data dir ownership
