@@ -70,6 +70,13 @@ def test_unsupported_formats_not_in_set():
 
 
 def test_enrich_metadata_writes_pdf_title(tmp_path):
+    import os as _os
+
+    import pytest as _pt
+
+    if not _os.path.exists("/home/ubuntu/endless-library/data/books"):
+        _pt.skip("VPS-only data files not available in CI", allow_module_level=False)
+
     """End-to-end via a real PDF: enrich_metadata --title writes the
     PDF info dict, and ebook-meta can read it back. This is what makes
     Kindle show the right title when ingesting the personal doc."""

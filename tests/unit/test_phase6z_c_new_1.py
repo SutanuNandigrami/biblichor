@@ -3,6 +3,7 @@
 C-NEW-1: if any secret's ciphertext is tampered, rotate_secrets must fail
 BEFORE touching any row — all secrets remain decryptable with the OLD key.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -49,9 +50,7 @@ def test_rotate_secrets_atomic_on_decrypt_failure(conn, old_key, new_key):
     set_secret(conn, old_key, "gamma", "value-gamma")
 
     # Tamper the ciphertext for 'beta' — decryption will fail
-    conn.execute(
-        "UPDATE secrets SET ciphertext = X'DEADBEEF' WHERE name = 'beta'"
-    )
+    conn.execute("UPDATE secrets SET ciphertext = X'DEADBEEF' WHERE name = 'beta'")
     conn.commit()
 
     # Rotation should raise (InvalidTag on beta)

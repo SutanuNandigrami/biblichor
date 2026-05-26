@@ -10,13 +10,14 @@ Signature adaptation notes:
   which do not match. _smtp_deliver() uses the real keyword args.
 - events.message is NOT NULL per schema; _record_event() requires it.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import time
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +39,7 @@ log = logging.getLogger(__name__)
 STK_HARD_BUDGET_BYTES = 200 * 1024 * 1024  # Amazon 200 MB per-call cap
 
 
-class DeliveryMethod(str, Enum):
+class DeliveryMethod(StrEnum):
     STK = "stk"
     SMTP = "smtp"
 
@@ -55,6 +56,7 @@ class DeliveryResult:
 # ---------------------------------------------------------------------------
 # Single-file delivery (original path, unchanged contract)
 # ---------------------------------------------------------------------------
+
 
 def deliver(
     *,
@@ -77,8 +79,11 @@ def deliver(
     if not stk_svc.is_configured():
         ok, err = _smtp_deliver(file_path, book, cfg, db_path=db_path)
         return DeliveryResult(
-            ok=ok, method=DeliveryMethod.SMTP, error=err,
-            attempts=1, duration_ms=int((time.monotonic() - start) * 1000),
+            ok=ok,
+            method=DeliveryMethod.SMTP,
+            error=err,
+            attempts=1,
+            duration_ms=int((time.monotonic() - start) * 1000),
         )
 
     # Branch 2: STK configured but daily quota exhausted -> SMTP fallback.
@@ -87,13 +92,18 @@ def deliver(
         status = _stk_quota_status(db_path, daily_cap=cfg.stk.daily_cap)
         if status.exhausted:
             _record_event(
-                db_path, "send-stk-failed", book.id,
+                db_path,
+                "send-stk-failed",
+                book.id,
                 message="stk-cap-reached",
                 meta={"reason": "stk-cap-reached", "sent_24h": status.sent_24h, "cap": status.cap},
             )
             ok, err = _smtp_deliver(file_path, book, cfg, db_path=db_path)
             return DeliveryResult(
-                ok=ok, method=DeliveryMethod.SMTP, error=err, attempts=1,
+                ok=ok,
+                method=DeliveryMethod.SMTP,
+                error=err,
+                attempts=1,
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
@@ -121,19 +131,25 @@ def deliver(
         try:
             stk_svc.send_file(file_path, format=fmt, title=title, author=author)
             _record_event(
-                db_path, "send-stk", book.id,
+                db_path,
+                "send-stk",
+                book.id,
                 message="send-stk-ok",
                 meta={"attempts": attempt, "duration_ms": int((time.monotonic() - start) * 1000)},
             )
             return DeliveryResult(
-                ok=True, method=DeliveryMethod.STK, error=None,
+                ok=True,
+                method=DeliveryMethod.STK,
+                error=None,
                 attempts=attempt,
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
         except KindleStkAuthExpired as e:
             last_error = str(e)
             auth_expired = True
-            log.warning("kindle_router: AuthExpired on attempt %d, skipping retries: %s", attempt, e)
+            log.warning(
+                "kindle_router: AuthExpired on attempt %d, skipping retries: %s", attempt, e
+            )
             break
         except KindleStkRateLimited as e:
             last_error = str(e)
@@ -146,17 +162,23 @@ def deliver(
                 backoff *= factor
 
     _record_event(
-        db_path, "send-stk-failed", book.id,
+        db_path,
+        "send-stk-failed",
+        book.id,
         message=last_error or "send-stk-failed",
         meta={
-            "attempts": attempt, "last_error": last_error,
-            "auth_expired": auth_expired, "fellback_to": "smtp",
+            "attempts": attempt,
+            "last_error": last_error,
+            "auth_expired": auth_expired,
+            "fellback_to": "smtp",
         },
     )
 
     ok, err = _smtp_deliver(file_path, book, cfg, db_path=db_path)
     return DeliveryResult(
-        ok=ok, method=DeliveryMethod.SMTP, error=err,
+        ok=ok,
+        method=DeliveryMethod.SMTP,
+        error=err,
         attempts=attempt + 1,
         duration_ms=int((time.monotonic() - start) * 1000),
     )
@@ -166,9 +188,11 @@ def deliver(
 # BookFile -- thin descriptor used by deliver_batch callers
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BookFile:
     """Descriptor for one book ready for delivery."""
+
     book_id: int
     file_path: Path
     title: str
@@ -178,6 +202,7 @@ class BookFile:
 # ---------------------------------------------------------------------------
 # Greedy bin-packer
 # ---------------------------------------------------------------------------
+
 
 def _pack_batches(
     book_files: list[BookFile],
@@ -220,6 +245,7 @@ def _pack_batches(
 # Batch delivery
 # ---------------------------------------------------------------------------
 
+
 def deliver_batch(
     *,
     files: list[BookFile],
@@ -245,7 +271,7 @@ def deliver_batch(
 
     Returns a list of DeliveryResult, one per input BookFile, in order.
     """
-    start_all = time.monotonic()
+    time.monotonic()
     per_file_interval = float(getattr(cfg.stk, "per_file_interval_sec", 10.0))
     stk_svc = KindleStkService(svc, per_file_interval_sec=per_file_interval)
     results: list[DeliveryResult] = []
@@ -269,19 +295,22 @@ def deliver_batch(
                 author = bf.author
 
             ok, err = _smtp_deliver(bf.file_path, _FakeBook(), cfg, db_path=db_path)
-            results.append(DeliveryResult(
-                ok=ok, method=DeliveryMethod.SMTP, error=err,
-                attempts=1, duration_ms=int((time.monotonic() - start) * 1000),
-            ))
+            results.append(
+                DeliveryResult(
+                    ok=ok,
+                    method=DeliveryMethod.SMTP,
+                    error=err,
+                    attempts=1,
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                )
+            )
         return results
 
     max_batch_bytes = int(getattr(cfg.stk, "max_batch_bytes", STK_HARD_BUDGET_BYTES))
     max_batch_files = int(getattr(cfg.stk, "max_batch_files", 25))
     min_interval = float(getattr(cfg.stk, "min_send_interval_sec", 10.0))
 
-    batches, oversized = _pack_batches(
-        files, max_bytes=max_batch_bytes, max_files=max_batch_files
-    )
+    batches, oversized = _pack_batches(files, max_bytes=max_batch_bytes, max_files=max_batch_files)
 
     # --- Handle oversized files immediately ---
     oversized_results: dict[int, DeliveryResult] = {}
@@ -289,13 +318,18 @@ def deliver_batch(
         sz = bf.file_path.stat().st_size
         msg = f"file-too-large-for-stk ({sz // 1_048_576} MB > 200 MB)"
         _record_event(
-            db_path, "send-stk-failed", bf.book_id,
+            db_path,
+            "send-stk-failed",
+            bf.book_id,
             message=msg,
             meta={"reason": "file-too-large-for-stk", "size_bytes": sz},
         )
         oversized_results[bf.book_id] = DeliveryResult(
-            ok=False, method=DeliveryMethod.STK, error=msg,
-            attempts=0, duration_ms=0,
+            ok=False,
+            method=DeliveryMethod.STK,
+            error=msg,
+            attempts=0,
+            duration_ms=0,
         )
 
     # Map book_id -> result for final ordering
@@ -321,13 +355,20 @@ def deliver_batch(
         batch_error: str | None = None
         try:
             stk_svc.send_files(entries, max_batch_bytes=max_batch_bytes)
-        except (KindleStkAuthExpired, KindleStkRateLimited,
-                KindleStkUploadFailed, KindleStkNotConfigured,
-                KindleStkBatchOverflow) as e:
+        except (
+            KindleStkAuthExpired,
+            KindleStkRateLimited,
+            KindleStkUploadFailed,
+            KindleStkNotConfigured,
+            KindleStkBatchOverflow,
+        ) as e:
             batch_ok = False
             batch_error = str(e)
-            log.warning("kindle_router.deliver_batch: batch failed (%s), falling back per-book: %s",
-                        type(e).__name__, e)
+            log.warning(
+                "kindle_router.deliver_batch: batch failed (%s), falling back per-book: %s",
+                type(e).__name__,
+                e,
+            )
         except Exception as e:
             batch_ok = False
             batch_error = str(e)
@@ -339,7 +380,9 @@ def deliver_batch(
         if batch_ok:
             # Record batch-level event
             _record_event(
-                db_path, "send-stk-batch", None,
+                db_path,
+                "send-stk-batch",
+                None,
                 message=f"stk-batch-ok: {len(batch)} files, {total_sz // 1024} KB",
                 meta={
                     "file_count": len(batch),
@@ -350,13 +393,18 @@ def deliver_batch(
             )
             for bf in batch:
                 _record_event(
-                    db_path, "send-stk", bf.book_id,
+                    db_path,
+                    "send-stk",
+                    bf.book_id,
                     message="send-stk-ok",
                     meta={"batch": True, "duration_ms": batch_dur},
                 )
                 result_map[bf.book_id] = DeliveryResult(
-                    ok=True, method=DeliveryMethod.STK, error=None,
-                    attempts=1, duration_ms=batch_dur,
+                    ok=True,
+                    method=DeliveryMethod.STK,
+                    error=None,
+                    attempts=1,
+                    duration_ms=batch_dur,
                 )
         else:
             # Batch failed -> fall back each book individually to SMTP
@@ -368,14 +416,19 @@ def deliver_batch(
                     author = bf.author
 
                 _record_event(
-                    db_path, "send-stk-failed", bf.book_id,
+                    db_path,
+                    "send-stk-failed",
+                    bf.book_id,
                     message=batch_error or "stk-batch-failed",
                     meta={"batch": True, "fell_back_to": "smtp"},
                 )
                 ok, err = _smtp_deliver(bf.file_path, _FakeBook(), cfg, db_path=db_path)
                 result_map[bf.book_id] = DeliveryResult(
-                    ok=ok, method=DeliveryMethod.SMTP, error=err,
-                    attempts=2, duration_ms=int((time.monotonic() - batch_start) * 1000),
+                    ok=ok,
+                    method=DeliveryMethod.SMTP,
+                    error=err,
+                    attempts=2,
+                    duration_ms=int((time.monotonic() - batch_start) * 1000),
                 )
 
     # Return results in original input order
@@ -388,6 +441,7 @@ def deliver_batch(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def _smtp_deliver(
     file_path: Path,
@@ -409,13 +463,15 @@ def _smtp_deliver(
     if db_path is not None:
         try:
             from .smtp_rate import quota_status as _smtp_qs
+
             smtp_cap = int(getattr(getattr(cfg, "smtp", None), "daily_cap", 0) or 0)
             if smtp_cap > 0:
                 qs = _smtp_qs(db_path, daily_cap=smtp_cap)
                 if qs.exhausted:
                     log.warning(
                         "kindle_router: SMTP cap exhausted (%d/%d), skipping fallback",
-                        qs.sent_24h, qs.cap,
+                        qs.sent_24h,
+                        qs.cap,
                     )
                     return False, f"smtp-cap-reached ({qs.sent_24h}/{qs.cap})"
         except Exception as e:
@@ -440,9 +496,19 @@ def _infer_format(file_path: Path) -> str:
     """Return the STK format token from the file extension."""
     ext = file_path.suffix.lower().lstrip(".")
     return {
-        "epub": "EPUB", "pdf": "PDF", "doc": "DOC", "docx": "DOCX",
-        "txt": "TXT", "rtf": "RTF", "htm": "HTM", "html": "HTM",
-        "png": "PNG", "gif": "GIF", "jpg": "JPG", "jpeg": "JPG", "bmp": "BMP",
+        "epub": "EPUB",
+        "pdf": "PDF",
+        "doc": "DOC",
+        "docx": "DOCX",
+        "txt": "TXT",
+        "rtf": "RTF",
+        "htm": "HTM",
+        "html": "HTM",
+        "png": "PNG",
+        "gif": "GIF",
+        "jpg": "JPG",
+        "jpeg": "JPG",
+        "bmp": "BMP",
     }.get(ext, "EPUB")
 
 

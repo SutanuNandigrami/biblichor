@@ -5,14 +5,14 @@ FakeVendoredClient accepts send_file calls (one per book). We verify:
     send_file calls on the vendored client (batched in one signed session).
   - 5 'send-stk' events + 1 'send-stk-batch' event in the audit log.
 """
+
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from endless_library.db.schema import init_db, connect
+from endless_library.db.schema import connect, init_db
 
 
 @pytest.fixture
@@ -50,8 +50,6 @@ def test_pipeline_batch_smoke(db, svc, tmp_path, monkeypatch):
     fake = FakeVendoredClient()
     batch_call_count = [0]
 
-    original_deliver_batch = None
-
     # Patch FakeVendoredClient into the vendored layer
     monkeypatch.setattr(
         "endless_library.kindle_stk._vendored.Client",
@@ -59,8 +57,8 @@ def test_pipeline_batch_smoke(db, svc, tmp_path, monkeypatch):
     )
 
     # Patch _kindle_deliver_batch to count calls (wraps real deliver_batch)
-    import endless_library.pipeline as _pipeline_mod
     import endless_library.kindle_router as _router_mod
+    import endless_library.pipeline as _pipeline_mod
 
     real_deliver_batch = _router_mod.deliver_batch
 
@@ -134,21 +132,18 @@ def test_pipeline_batch_smoke(db, svc, tmp_path, monkeypatch):
     deps.notifier = _FakeNotifier()
 
     from endless_library.pipeline import process_queue
+
     tally = process_queue(deps)
 
     assert tally["sent"] == 5, f"Expected 5 sent, got: {tally}"
     assert tally["failed"] == 0, f"Unexpected failures: {tally}"
 
     # Verify batch call happened (exactly 1, since all 5 fit in 1 batch of 25)
-    assert batch_call_count[0] == 1, (
-        f"Expected 1 deliver_batch call, got {batch_call_count[0]}"
-    )
+    assert batch_call_count[0] == 1, f"Expected 1 deliver_batch call, got {batch_call_count[0]}"
 
     # Verify audit log
     with connect(db) as conn:
-        event_kinds = [
-            row["kind"] for row in conn.execute("SELECT kind FROM events ORDER BY id")
-        ]
+        event_kinds = [row["kind"] for row in conn.execute("SELECT kind FROM events ORDER BY id")]
     assert event_kinds.count("send-stk") == 5
     assert event_kinds.count("send-stk-batch") == 1
 

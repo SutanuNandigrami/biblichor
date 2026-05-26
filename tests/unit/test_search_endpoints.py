@@ -14,17 +14,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from endless_library.db.books import BookRepo
 from endless_library.db.candidates import CandidateRepo
 from endless_library.db.schema import init_db
-from endless_library.db.books import BookRepo
 from endless_library.domain.models import Candidate
 from endless_library.scrapers.annas_parsing import parse_search_results
 from endless_library.web import api as api_mod
-
 
 # ============ cover_url extraction (pure parser) =============================
 
@@ -135,15 +133,20 @@ def test_search_returns_candidates_with_cover_and_in_library(tmp_path):
     books.upsert(title="A", author="X", isbn13=None, source="manual", source_id="t1")
     # Manually attach md5 to the existing row so the endpoint's lookup finds it.
     import sqlite3
+
     conn = sqlite3.connect(app.state.deps.db_path)
     conn.execute("UPDATE books SET md5 = ?, status = 'kindled' WHERE id = 1", (md5_a,))
     conn.commit()
     conn.close()
 
-    fake = [_fake_candidate(md5_a, title="A", cover="http://covers/a.jpg"),
-            _fake_candidate(md5_b, title="B")]
+    fake = [
+        _fake_candidate(md5_a, title="A", cover="http://covers/a.jpg"),
+        _fake_candidate(md5_b, title="B"),
+    ]
 
-    with patch("endless_library.scrapers.registry.build", return_value=MagicMock(search=lambda q: fake)):
+    with patch(
+        "endless_library.scrapers.registry.build", return_value=MagicMock(search=lambda q: fake)
+    ):
         r = TestClient(app).get("/api/search?q=anything&limit=10")
 
     assert r.status_code == 200, r.text
@@ -193,7 +196,9 @@ def test_search_returns_lang_and_source_metadata(tmp_path):
     UI can show 'searched: annas, doab') plus the effective language."""
     app, _, _ = _make_app(tmp_path)
     fake = [_fake_candidate("f" * 32, title="Hit")]
-    with patch("endless_library.scrapers.registry.build", return_value=MagicMock(search=lambda q: fake)):
+    with patch(
+        "endless_library.scrapers.registry.build", return_value=MagicMock(search=lambda q: fake)
+    ):
         r = TestClient(app).get("/api/search?q=cairo&lang=bn")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -208,7 +213,9 @@ def test_search_lang_all_falls_back_to_cfg_default(tmp_path):
     response's lang field shows what was actually used."""
     app, _, _ = _make_app(tmp_path)
     fake = [_fake_candidate("a" * 32)]
-    with patch("endless_library.scrapers.registry.build", return_value=MagicMock(search=lambda q: fake)):
+    with patch(
+        "endless_library.scrapers.registry.build", return_value=MagicMock(search=lambda q: fake)
+    ):
         r = TestClient(app).get("/api/search?q=cairo&lang=all")
     body = r.json()
     assert body["lang"] == "en"
@@ -221,7 +228,7 @@ def test_from_search_creates_book_and_picks_candidate(tmp_path):
     """A POST creates a books row (source='manual', status='queued'),
     a candidate row, and sets picked_candidate_id so the pipeline
     honors the manual choice."""
-    app, books, cands = _make_app(tmp_path)
+    app, _books, _cands = _make_app(tmp_path)
 
     payload = {
         "md5": "d" * 32,
@@ -244,6 +251,7 @@ def test_from_search_creates_book_and_picks_candidate(tmp_path):
 
     # books row exists with picked_candidate_id wired up
     import sqlite3
+
     conn = sqlite3.connect(app.state.deps.db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()

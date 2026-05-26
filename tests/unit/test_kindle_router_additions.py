@@ -1,7 +1,7 @@
 """Phase STK-recovery: router sleep throttle test."""
+
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -91,7 +91,7 @@ def test_router_sleeps_min_send_interval_before_stk_attempt(
         lambda *a, **kw: {"transaction_id": "tx-throttle"},
     )
 
-    from endless_library.kindle_router import deliver, DeliveryMethod
+    from endless_library.kindle_router import DeliveryMethod, deliver
 
     result = deliver(file_path=file_path, book=book, cfg=cfg, db_path=db, svc=svc)
 
@@ -102,17 +102,17 @@ def test_router_sleeps_min_send_interval_before_stk_attempt(
         f"Expected sleep({cfg.stk.min_send_interval_sec}) but got sleep calls: {sleep_calls}"
     )
 
+
 def test_router_default_throttle_is_10_seconds(monkeypatch, db, book, file_path, svc):
     """The default min_send_interval_sec in StkCfg must be 10.0 seconds."""
     from endless_library.config import StkCfg
+
     assert StkCfg().min_send_interval_sec == 10.0, (
         f"Expected default throttle 10.0s, got {StkCfg().min_send_interval_sec}"
     )
 
 
-def test_router_skips_quota_check_when_daily_cap_is_none(
-    monkeypatch, db, book, file_path, svc
-):
+def test_router_skips_quota_check_when_daily_cap_is_none(monkeypatch, db, book, file_path, svc):
     """When daily_cap is None, deliver() skips the quota gate and goes straight to STK."""
     _configure_stk(svc)
 
@@ -130,6 +130,7 @@ def test_router_skips_quota_check_when_daily_cap_is_none(
 
     # Seed > any cap so quota_status would say exhausted if it were called
     from endless_library.db.schema import connect
+
     with connect(db) as conn:
         for _ in range(1000):
             conn.execute(
@@ -155,7 +156,7 @@ def test_router_skips_quota_check_when_daily_cap_is_none(
         lambda *a, **kw: stk_calls.append(True) or {"transaction_id": "tx-unlimited"},
     )
 
-    from endless_library.kindle_router import deliver, DeliveryMethod
+    from endless_library.kindle_router import DeliveryMethod, deliver
 
     result = deliver(file_path=file_path, book=book, cfg=cfg_none, db_path=db, svc=svc)
 

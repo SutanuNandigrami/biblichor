@@ -24,6 +24,7 @@ def db(tmp_path: Path) -> Path:
 
 _seed_seq = 0
 
+
 def _seed_book(db_path: Path, status: str = "queued") -> int:
     # Legacy column name: per-source identifier lives in `goodreads_id`.
     # The (source, goodreads_id) pair has a UNIQUE constraint, so each
@@ -43,13 +44,12 @@ def _seed_book(db_path: Path, status: str = "queued") -> int:
 
 # --- claim_for_processing -----------------------------------------------------
 
+
 def test_claim_succeeds_from_queued(db: Path) -> None:
     bid = _seed_book(db, status="queued")
     repo = BookRepo(db)
     assert repo.claim_for_processing(bid) is True
-    row = sqlite3.connect(db).execute(
-        "SELECT status FROM books WHERE id=?", (bid,)
-    ).fetchone()
+    row = sqlite3.connect(db).execute("SELECT status FROM books WHERE id=?", (bid,)).fetchone()
     assert row[0] == "searching"
 
 
@@ -95,9 +95,11 @@ def test_reset_zombies_returns_to_queued_not_failed(db: Path) -> None:
     repo = BookRepo(db)
     n = repo.reset_zombies(stale_minutes=30)
     assert n == 1
-    row = sqlite3.connect(db).execute(
-        "SELECT status, last_error FROM books WHERE id = ?", (bid,)
-    ).fetchone()
+    row = (
+        sqlite3.connect(db)
+        .execute("SELECT status, last_error FROM books WHERE id = ?", (bid,))
+        .fetchone()
+    )
     assert row[0] == "queued"
     assert "zombie" in (row[1] or "").lower()
 
@@ -109,13 +111,12 @@ def test_reset_zombies_skips_fresh_in_flight(db: Path) -> None:
     repo = BookRepo(db)
     n = repo.reset_zombies(stale_minutes=30)
     assert n == 0
-    row = sqlite3.connect(db).execute(
-        "SELECT status FROM books WHERE id = ?", (bid,)
-    ).fetchone()
+    row = sqlite3.connect(db).execute("SELECT status FROM books WHERE id = ?", (bid,)).fetchone()
     assert row[0] == "searching"
 
 
 # --- download.py: httpx exceptions wrap to DownloadError ----------------------
+
 
 def _stub_handle(url: str = "http://book.example/x.epub") -> DownloadHandle:
     return DownloadHandle(url=url, headers={"User-Agent": "t"}, expected_filename=None)
@@ -147,6 +148,7 @@ def _client_factory_that_raises(exc_cls, msg: str = "boom"):
                 status_code = 200
                 headers = {}
                 url = httpx.URL("http://book.example/x.epub")
+
             return _NoRedirect()
 
         def head(self, *_a, **_k):
@@ -154,6 +156,7 @@ def _client_factory_that_raises(exc_cls, msg: str = "boom"):
                 status_code = 200
                 headers = {}
                 url = httpx.URL("http://book.example/x.epub")
+
             return _NoRedirect()
 
         def __enter__(self):
@@ -197,6 +200,7 @@ def test_part_file_cleaned_up_on_network_error(tmp_path: Path) -> None:
 
 # --- empty-body sentinel ------------------------------------------------------
 
+
 def test_empty_body_raises_download_error(tmp_path: Path) -> None:
     """Drive sometimes returns HTTP 200 + zero bytes (private file /
     quota exceeded). The downstream archive check would mistake that
@@ -227,6 +231,7 @@ def test_empty_body_raises_download_error(tmp_path: Path) -> None:
                 status_code = 200
                 headers = {}
                 url = httpx.URL("http://book.example/x.epub")
+
             return _R()
 
         def head(self, *_a, **_k):
@@ -234,6 +239,7 @@ def test_empty_body_raises_download_error(tmp_path: Path) -> None:
                 status_code = 200
                 headers = {}
                 url = httpx.URL("http://book.example/x.epub")
+
             return _R()
 
         def __enter__(self):
@@ -252,6 +258,7 @@ def test_empty_body_raises_download_error(tmp_path: Path) -> None:
 
 
 # --- uuid .part isolation -----------------------------------------------------
+
 
 def test_part_filename_includes_uuid_suffix(tmp_path: Path) -> None:
     """Concurrent workers must never share a .part filename. Verified by
@@ -285,6 +292,7 @@ def test_part_filename_includes_uuid_suffix(tmp_path: Path) -> None:
                     status_code = 200
                     headers = {}
                     url = httpx.URL("http://book.example/x.epub")
+
                 return _R()
 
             def head(self, *_a, **_k):
@@ -292,6 +300,7 @@ def test_part_filename_includes_uuid_suffix(tmp_path: Path) -> None:
                     status_code = 200
                     headers = {}
                     url = httpx.URL("http://book.example/x.epub")
+
                 return _R()
 
             def __enter__(self):

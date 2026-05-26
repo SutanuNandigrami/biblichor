@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-
-from endless_library.async_utils import _run_async
 import logging
 import mimetypes
 import ssl
@@ -12,6 +9,7 @@ from pathlib import Path
 
 import aiosmtplib
 
+from endless_library.async_utils import _run_async
 from endless_library.config import KindleCfg, SmtpCfg
 
 log = logging.getLogger(__name__)
@@ -33,12 +31,12 @@ class KindleRateLimited(KindleSendError):
 # on the message body since aiosmtplib doesn't always surface the smtp code
 # cleanly for SMTPDataError vs SMTPException.
 _RATE_LIMIT_SIGNALS = (
-    "421",                                  # generic 4.7.0 throttle
+    "421",  # generic 4.7.0 throttle
     "4.7.0",
-    "452",                                  # 4.5.3 domain msg limit
+    "452",  # 4.5.3 domain msg limit
     "4.5.3",
-    "4.7.28",                               # gmail per-IP throttle
-    "550 5.4.5",                            # daily user sending limit
+    "4.7.28",  # gmail per-IP throttle
+    "550 5.4.5",  # daily user sending limit
     "5.4.5",
     "try again later",
     "sending limit exceeded",
@@ -129,9 +127,7 @@ async def _send_smtp(
         # 421/452/550 5.4.5 / 4.7.28 — rate-limit codes. Surface separately
         # so the pipeline defers instead of marking the book failed.
         if code in (421, 450, 451, 452) or _looks_like_rate_limit(str(e)):
-            raise KindleRateLimited(
-                f"SMTP rate-limited (code={code}); deferring: {e}"
-            ) from e
+            raise KindleRateLimited(f"SMTP rate-limited (code={code}); deferring: {e}") from e
         raise KindleSendError(f"SMTP data error (code={code}): {e}") from e
     except aiosmtplib.SMTPConnectError as e:
         raise KindleSendError(

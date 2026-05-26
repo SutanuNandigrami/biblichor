@@ -5,6 +5,7 @@ class="sourceurl" or class="urlbar". The fix uses:
     contains(concat(' ', normalize-space(@class), ' '), ' url ')
 which is a proper word-boundary check.
 """
+
 from __future__ import annotations
 
 

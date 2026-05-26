@@ -48,9 +48,7 @@ def test_backfill_sets_smtp_on_null_sent_rows(tmp_path: Path) -> None:
 
     conn = sqlite3.connect(db)
     for rid in (sent_row, kindled_row):
-        method = conn.execute(
-            "SELECT sent_method FROM books WHERE id=?", (rid,)
-        ).fetchone()[0]
+        method = conn.execute("SELECT sent_method FROM books WHERE id=?", (rid,)).fetchone()[0]
         assert method == "smtp", f"row {rid} not backfilled: got {method!r}"
     conn.close()
 
@@ -70,12 +68,8 @@ def test_backfill_leaves_non_sent_rows_alone(tmp_path: Path) -> None:
 
     conn = sqlite3.connect(db)
     for rid in (queued, needs_review, failed):
-        method = conn.execute(
-            "SELECT sent_method FROM books WHERE id=?", (rid,)
-        ).fetchone()[0]
-        assert method is None, (
-            f"non-sent row {rid} was incorrectly backfilled to {method!r}"
-        )
+        method = conn.execute("SELECT sent_method FROM books WHERE id=?", (rid,)).fetchone()[0]
+        assert method is None, f"non-sent row {rid} was incorrectly backfilled to {method!r}"
     conn.close()
 
 
@@ -90,12 +84,8 @@ def test_backfill_does_not_overwrite_existing_method(tmp_path: Path) -> None:
     init_db(db)
 
     conn = sqlite3.connect(db)
-    method = conn.execute(
-        "SELECT sent_method FROM books WHERE id=?", (stk_row,)
-    ).fetchone()[0]
-    assert method == "stk", (
-        f"backfill clobbered an existing sent_method='stk' -> {method!r}"
-    )
+    method = conn.execute("SELECT sent_method FROM books WHERE id=?", (stk_row,)).fetchone()[0]
+    assert method == "stk", f"backfill clobbered an existing sent_method='stk' -> {method!r}"
     conn.close()
 
 

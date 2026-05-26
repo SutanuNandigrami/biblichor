@@ -110,7 +110,7 @@ def test_age_recipient_without_age_binary_raises(fake_world, monkeypatch):
     )
     if not _is_zstd_available():
         pytest.skip("real zstd needed for this path")
-    with pytest.raises(BackupError, match="age.*not on PATH"):  # noqa: RUF043
+    with pytest.raises(BackupError, match="age.*not on PATH"):
         make_backup(
             db_path=fake_world["db"],
             config_path=fake_world["cfg"],

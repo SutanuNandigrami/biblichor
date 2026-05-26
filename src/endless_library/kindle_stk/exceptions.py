@@ -3,6 +3,7 @@
 Maps vendored stkclient's raw exceptions (requests.HTTPError, ValueError)
 to typed biblichor exceptions so callers can pattern-match.
 """
+
 from __future__ import annotations
 
 
@@ -21,7 +22,7 @@ class KindleStkAuthExpired(KindleStkError):
 class KindleStkRateLimited(KindleStkError):
     """Amazon returned 429. Honors Retry-After header where present."""
 
-    def __init__(self, message: str = '', *, retry_after_sec: int = 5) -> None:
+    def __init__(self, message: str = "", *, retry_after_sec: int = 5) -> None:
         super().__init__(message)
         self.retry_after_sec = retry_after_sec
 
@@ -37,7 +38,7 @@ class KindleStkBatchOverflow(KindleStkError):
     the book needs_review with last_error='file-too-large-for-stk'.
     """
 
-    def __init__(self, message: str = '', *, file_path: str = '', size_bytes: int = 0) -> None:
+    def __init__(self, message: str = "", *, file_path: str = "", size_bytes: int = 0) -> None:
         super().__init__(message)
         self.file_path = file_path
         self.size_bytes = size_bytes

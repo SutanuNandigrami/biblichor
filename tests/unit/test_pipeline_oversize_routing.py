@@ -33,6 +33,7 @@ OVERSIZE_RAW_BYTES = 30 * 1024 * 1024
 
 # --- helpers --------------------------------------------------------------
 
+
 def _make_deps(tmp_path: Path) -> PipelineDeps:
     cfg = Config()
     cfg.scrapers.order = ["annas_curl"]
@@ -64,6 +65,7 @@ def _seed_book(deps: PipelineDeps) -> object:
 
 # --- tests ----------------------------------------------------------------
 
+
 def test_oversize_with_stk_configured_does_not_bounce_to_needs_review(tmp_path):
     """When STK is configured and the file is too large for SMTP, the
     pipeline must NOT mark the book needs_review. It should log an
@@ -75,14 +77,18 @@ def test_oversize_with_stk_configured_does_not_bounce_to_needs_review(tmp_path):
     big_file = _make_oversize_epub(tmp_path)
 
     # Pretend STK is configured.
-    with patch(
-        "endless_library.kindle_stk.KindleStkService.is_configured",
-        return_value=True,
-    ), patch(
-        "endless_library.pipeline._kindle_deliver",
-    ) as mock_deliver:
+    with (
+        patch(
+            "endless_library.kindle_stk.KindleStkService.is_configured",
+            return_value=True,
+        ),
+        patch(
+            "endless_library.pipeline._kindle_deliver",
+        ) as mock_deliver,
+    ):
         # Simulate a successful STK delivery so the function returns "sent".
         from endless_library.kindle_router import DeliveryMethod, DeliveryResult
+
         mock_deliver.return_value = DeliveryResult(
             ok=True,
             method=DeliveryMethod.STK,
@@ -129,6 +135,5 @@ def test_oversize_with_stk_unconfigured_still_bounces_to_needs_review(tmp_path):
     refreshed = deps.books.get(book.id)
     assert refreshed.status == "needs_review"
     assert "STK not configured" in (refreshed.last_error or ""), (
-        f"error message should explain why this is unrecoverable; got "
-        f"{refreshed.last_error!r}"
+        f"error message should explain why this is unrecoverable; got {refreshed.last_error!r}"
     )

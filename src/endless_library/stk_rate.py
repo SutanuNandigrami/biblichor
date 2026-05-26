@@ -4,6 +4,7 @@ Mirrors smtp_rate.py — counts events with kind='send-stk' in a rolling
 24h window. Daily cap is supplied by the caller (typically
 cfg.stk.daily_cap).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

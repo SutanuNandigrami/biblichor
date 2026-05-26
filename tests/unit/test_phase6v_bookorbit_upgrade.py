@@ -24,19 +24,14 @@ import httpx
 import pytest
 
 from endless_library.bookorbit.upgrade import (
-    BOOKORBIT_IMAGE,
     DANGER_WORDS,
-    ApplyResult,
-    PreflightReport,
     SubprocessDockerRunner,
-    VersionInfo,
     _scan_release_notes_for_danger,
     _swap_compose_image,
     apply_upgrade,
     get_version_info,
     preflight,
 )
-
 
 # ============ FakeDockerRunner ============
 
@@ -77,9 +72,7 @@ class FakeDockerRunner:
         self.calls.append(args)
         return self._match(args)
 
-    def run_to_file(
-        self, args: list[str], dest: Path, *, timeout: float = 60.0
-    ) -> tuple[int, str]:
+    def run_to_file(self, args: list[str], dest: Path, *, timeout: float = 60.0) -> tuple[int, str]:
         self.calls.append(args)
         for prefix, result, payload in self._file_responses:
             if args[: len(prefix)] == prefix:
@@ -95,12 +88,14 @@ class FakeDockerRunner:
 def test_get_version_info_returns_current_and_latest_from_app_info():
     """Happy path: BookOrbit returns version + latestVersion."""
     transport = httpx.MockTransport(
-        lambda req: httpx.Response(
-            200,
-            json={"version": "v1.2.0", "latestVersion": "v1.3.0", "updateAvailable": True},
+        lambda req: (
+            httpx.Response(
+                200,
+                json={"version": "v1.2.0", "latestVersion": "v1.3.0", "updateAvailable": True},
+            )
+            if req.url.path == "/api/v1/app-info"
+            else httpx.Response(200, json={"accessToken": "tok"})
         )
-        if req.url.path == "/api/v1/app-info"
-        else httpx.Response(200, json={"accessToken": "tok"})
     )
     client = httpx.Client(base_url="http://fake", transport=transport)
     info = get_version_info(
@@ -140,7 +135,9 @@ def test_get_version_info_handles_app_info_unreachable():
 
 
 def test_release_notes_scan_flags_breaking_change():
-    safe, hits = _scan_release_notes_for_danger("This release contains a breaking change in /libraries")
+    safe, hits = _scan_release_notes_for_danger(
+        "This release contains a breaking change in /libraries"
+    )
     assert safe is False
     assert "breaking change" in hits
 
@@ -564,8 +561,10 @@ def test_subprocess_runner_handles_missing_docker_cli(monkeypatch, tmp_path: Pat
     runner = SubprocessDockerRunner()
     assert runner.available() is False
 
+
 def test_validate_target_version_accepts_canonical():
     from endless_library.bookorbit.upgrade import _validate_target_version
+
     assert _validate_target_version("v1.3.0") == "v1.3.0"
     assert _validate_target_version("1.3.0") == "1.3.0"
     assert _validate_target_version("v2.0.0-beta.1") == "v2.0.0-beta.1"
@@ -573,7 +572,7 @@ def test_validate_target_version_accepts_canonical():
 
 def test_validate_target_version_rejects_injection():
     from endless_library.bookorbit.upgrade import _validate_target_version
-    import pytest
+
     for bad in ("", "x", "v1.3", "1.3.0; rm -rf", "v1.3.0\nimage:evil", "v" * 70):
         with pytest.raises(ValueError):
             _validate_target_version(bad)
@@ -588,11 +587,11 @@ def test_bookorbit_upgrade_apply_409_when_lock_held(tmp_path: Path):
     simultaneous docker compose ops.
     """
     import asyncio
-    import httpx
-    import pytest
-    from fastapi.testclient import TestClient
-    from endless_library.web.api import register
+
     from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from endless_library.web.api import register
 
     app = FastAPI()
     # Attach the lock exactly as create_app does

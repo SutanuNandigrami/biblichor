@@ -1,6 +1,7 @@
 """HathiTrust PD lookup. Only fires when SearchQuery carries an ISBN13
 and matched records have a public-domain rights code. Full-text
 search via Hathifiles bulk ingestion is deferred (see spec risks)."""
+
 from __future__ import annotations
 
 import logging
@@ -49,19 +50,21 @@ class HathiTrust:
                     if not htid:
                         continue
                     dl = f"https://babel.hathitrust.org/cgi/imgsrv/download/pdf?id={htid}"
-                    out.append(Candidate(
-                        provider=self.provider,
-                        md5=None,
-                        title=title,
-                        author=None,
-                        language=None,
-                        format="pdf",
-                        filesize_bytes=None,
-                        year=None,
-                        publisher=None,
-                        edition_hints="",
-                        detail_url=dl,
-                    ))
+                    out.append(
+                        Candidate(
+                            provider=self.provider,
+                            md5=None,
+                            title=title,
+                            author=None,
+                            language=None,
+                            format="pdf",
+                            filesize_bytes=None,
+                            year=None,
+                            publisher=None,
+                            edition_hints="",
+                            detail_url=dl,
+                        )
+                    )
         return out
 
     def resolve_cdn(self, candidate: Candidate) -> DownloadHandle | None:

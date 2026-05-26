@@ -6,6 +6,7 @@ canonical parser so fixes apply once.
 
 If you update extraction logic here, there is no other copy to update.
 """
+
 from __future__ import annotations
 
 import re
@@ -69,7 +70,7 @@ def parse_search_results(
         # Format: prefer the filename-hint sibling (contains ".<ext>"),
         # fall back to row_text scan.
         fmt = None
-        for sib in (a.parent.children if a.parent else []):
+        for sib in a.parent.children if a.parent else []:
             sib_text = (
                 getattr(sib, "get_text", lambda **_: "")(" ", strip=True)
                 if hasattr(sib, "get_text")
@@ -102,11 +103,7 @@ def parse_search_results(
         if row is not None:
             img = row.find("img")
             if img is not None:
-                _src = (
-                    img.get("src")
-                    or img.get("data-src")
-                    or img.get("data-lazy-src")
-                )
+                _src = img.get("src") or img.get("data-src") or img.get("data-lazy-src")
                 if _src and _src.startswith("http"):
                     cover_url = _src
 
@@ -152,9 +149,7 @@ def extract_isbns(text: str) -> list[str]:
         if len(cleaned) != 10:
             continue
         body = "978" + cleaned[:9]
-        chk = (
-            10 - sum((1 if i % 2 == 0 else 3) * int(c) for i, c in enumerate(body)) % 10
-        ) % 10
+        chk = (10 - sum((1 if i % 2 == 0 else 3) * int(c) for i, c in enumerate(body)) % 10) % 10
         found.append(body + str(chk))
     # Dedup, preserve order
     seen: set[str] = set()

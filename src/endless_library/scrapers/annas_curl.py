@@ -9,17 +9,16 @@ from typing import Any
 from urllib.parse import quote_plus, urljoin
 
 import httpx
-
 from bs4 import BeautifulSoup
 
 from endless_library.config import ScrapersCfg
-from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.domain.scoring import _is_non_latin as _query_is_non_latin
-from endless_library.scrapers.base import ANNAS_CDN_REGEX, parse_filesize, url_has_book_ext
-from endless_library.scrapers.rate_limit import MirrorRotator, TokenBucket
 from endless_library.scrapers import annas_domains as _annas_domains
 from endless_library.scrapers import annas_parsing as _annas_parsing  # shared parser
+from endless_library.scrapers.base import ANNAS_CDN_REGEX, url_has_book_ext
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT
+from endless_library.scrapers.rate_limit import MirrorRotator, TokenBucket
 
 log = logging.getLogger(__name__)
 
@@ -117,6 +116,7 @@ class AnnasArchiveCurl:
 
     def _get(self, url: str) -> str | None:
         from urllib.parse import urlparse as _urlparse
+
         sleep = self.bucket.acquire(url)
         if sleep > 0:
             log.debug("rate-limit sleep %.1fs for %s", sleep, url)
@@ -141,7 +141,9 @@ class AnnasArchiveCurl:
                     host = next_host
                     self._last_host = next_host
                     log.info("annas_curl: gateway %d, retrying with %s", status, next_host)
-                    r = cf.get(retry_url, headers=DEFAULT_HEADERS, impersonate="chrome120", timeout=30)
+                    r = cf.get(
+                        retry_url, headers=DEFAULT_HEADERS, impersonate="chrome120", timeout=30
+                    )
                     status, text = r.status_code, r.text
             except Exception as e:
                 log.warning("curl_cffi failed for %s: %s", url, e)
@@ -169,6 +171,7 @@ class AnnasArchiveCurl:
             self.mirrors.current,
             fmt_hint=fmt_hint,
         )
+
     @staticmethod
     def _extract_isbns(text: str) -> list[str]:
         """Pull every plausible ISBN-13 (and ISBN-10, normalized to 13) from a string."""
@@ -320,10 +323,9 @@ class AnnasArchiveCurl:
         return None
 
 
-
 # I-NEW-3: _run_async now lives in endless_library.async_utils.
 # Re-exported here for back-compat with any code importing it from this module.
-from endless_library.async_utils import _run_async  # noqa: F401
+from endless_library.async_utils import _run_async  # noqa: E402
 
 
 async def _probe_slow_servers_async(urls: list[str], *, timeout: float = 15.0) -> str | None:
@@ -369,4 +371,3 @@ async def _probe_slow_servers_async(urls: list[str], *, timeout: float = 15.0) -
                 if not t.done():
                     t.cancel()
     return None
-

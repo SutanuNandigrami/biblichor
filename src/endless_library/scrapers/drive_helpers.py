@@ -177,9 +177,7 @@ def resolve_download_url(
                     cookies[c.name] = c.value
 
                 ct2 = r2.headers.get("content-type", "")
-                if "text/html" in ct2 and (
-                    "virus" in r2.text.lower() or "scan" in r2.text.lower()
-                ):
+                if "text/html" in ct2 and ("virus" in r2.text.lower() or "scan" in r2.text.lower()):
                     parsed = _parse_scan_warning_form(r2.text)
                     if parsed:
                         return parsed, _cookies_as_headers(cookies)

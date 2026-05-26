@@ -1,13 +1,14 @@
 """Tests for Phase 6w.5 — Mobilism scraper suite."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Task 1: mediafire_helpers
 # ---------------------------------------------------------------------------
+
 
 class _FakeResponse:
     def __init__(self, text: str, status_code: int = 200):
@@ -49,6 +50,7 @@ def test_mediafire_resolve_returns_none_when_no_href():
 # Task 2: MobilismSession
 # ---------------------------------------------------------------------------
 
+
 def _make_cfg(*, username: str = "user", password: str = "pass") -> SimpleNamespace:
     return SimpleNamespace(
         mobilism_username=username,
@@ -58,7 +60,11 @@ def _make_cfg(*, username: str = "user", password: str = "pass") -> SimpleNamesp
 
 def test_mobilism_session_raises_not_configured_when_no_creds():
     """MobilismSession.get() raises NotConfigured when credentials are absent."""
-    from endless_library.scrapers.mobilism import MobilismSession, NotConfigured, _reset_session_for_tests
+    from endless_library.scrapers.mobilism import (
+        MobilismSession,
+        NotConfigured,
+        _reset_session_for_tests,
+    )
 
     _reset_session_for_tests()
 
@@ -93,7 +99,12 @@ def test_mobilism_session_is_cached():
 def test_mobilism_session_raises_auth_failed_on_redirect_to_login():
     """MobilismSession.get() raises AuthFailed when post redirects back to login page."""
     import pytest
-    from endless_library.scrapers.mobilism import MobilismSession, AuthFailed, _reset_session_for_tests
+
+    from endless_library.scrapers.mobilism import (
+        AuthFailed,
+        MobilismSession,
+        _reset_session_for_tests,
+    )
 
     _reset_session_for_tests()
 
@@ -116,12 +127,13 @@ def test_mobilism_session_raises_auth_failed_on_redirect_to_login():
 # Task 3: mobilism_books scraper
 # ---------------------------------------------------------------------------
 
+
 def test_mobilism_books_extracts_thread_links_with_mediafire():
     """MobilismBooks.search() returns Candidates whose detail_url comes from thread links."""
-    import pytest
     from unittest.mock import patch as _patch
-    from endless_library.scrapers.mobilism_books import MobilismBooks
+
     from endless_library.domain.models import SearchQuery
+    from endless_library.scrapers.mobilism_books import MobilismBooks
 
     # Minimal ScrapersCfg-like stub
     cfg = SimpleNamespace(
@@ -158,8 +170,10 @@ def test_mobilism_books_extracts_thread_links_with_mediafire():
     fake_session = MagicMock()
     fake_session.get.side_effect = [fake_response_forum, fake_response_post, fake_response_post]
 
-    with _patch("endless_library.scrapers.mobilism_books.MobilismSession") as mock_sess_cls, \
-         _patch("endless_library.scrapers.mobilism_books.resolve", return_value=direct_url):
+    with (
+        _patch("endless_library.scrapers.mobilism_books.MobilismSession") as mock_sess_cls,
+        _patch("endless_library.scrapers.mobilism_books.resolve", return_value=direct_url),
+    ):
         mock_sess_cls.get.return_value = fake_session
         scraper = MobilismBooks(cfg)
         sq = SearchQuery(
@@ -179,6 +193,7 @@ def test_mobilism_books_extracts_thread_links_with_mediafire():
 # ---------------------------------------------------------------------------
 # Task 5: chain_for_source promotes mobilism_books for recent releases
 # ---------------------------------------------------------------------------
+
 
 def _make_scrapers_cfg(enabled_names: list[str]) -> SimpleNamespace:
     return SimpleNamespace(
@@ -220,17 +235,21 @@ def test_chain_does_not_promote_mobilism_books_for_old_book():
     if "mobilism_books" in chain and len(chain) > 1:
         assert chain[0] != "mobilism_books"
 
+
 def test_chain_for_source_does_not_promote_mobilism_for_pd_recent_book():
     """If a book is tagged is_pd=True AND is_recent_release=True (e.g.
     tag drift), the PD chain should still take precedence."""
-    from endless_library.scrapers.registry import chain_for_source
     from types import SimpleNamespace
+
+    from endless_library.scrapers.registry import chain_for_source
+
     cfg = SimpleNamespace(
         order=["annas_curl", "gutendex", "mobilism_books"],
         enabled={"annas_curl": True, "gutendex": True, "mobilism_books": True},
     )
-    chain = chain_for_source(cfg, source=None, query_title="Pride and Prejudice",
-                             is_pd=True, is_recent_release=True)
+    chain = chain_for_source(
+        cfg, source=None, query_title="Pride and Prejudice", is_pd=True, is_recent_release=True
+    )
     # PD scraper should appear before mobilism_books
     if "gutendex" in chain and "mobilism_books" in chain:
         assert chain.index("gutendex") < chain.index("mobilism_books")

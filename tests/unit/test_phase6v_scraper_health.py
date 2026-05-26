@@ -15,7 +15,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -24,7 +23,6 @@ from endless_library.config import ScrapersCfg
 from endless_library.db.bench import BenchRunRepo
 from endless_library.db.schema import init_db
 from endless_library.web import api as api_mod
-
 
 # ============ BenchRunRepo.ever_run / last_run_at ============
 

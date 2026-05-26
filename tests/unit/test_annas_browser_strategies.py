@@ -52,7 +52,6 @@ def test_cloakbrowser_uses_sidecar(monkeypatch):
     """Phase 6w.2: cloakbrowser now routes through cf-bypass sidecar.
     Verify it calls cf_bypass_client.resolve and returns Candidates."""
     from endless_library.domain.models import SearchQuery
-    from endless_library.scrapers import cf_bypass_client
     from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
 
     called = []
@@ -60,15 +59,15 @@ def test_cloakbrowser_uses_sidecar(monkeypatch):
     def _fake_resolve(url, **kw):
         called.append(url)
         return (
-            '<html><body>'
+            "<html><body>"
             '<div class="flex pt-3 pb-3 border-b border-gray-100">'
             '<div class="max-w-full overflow-hidden flex flex-col">'
             '<a class="js-vim-focus custom-a" href="/md5/abcdef1234567890abcdef1234567890">'
-            'Test Book'
-            '</a>'
+            "Test Book"
+            "</a>"
             '<div class="text-xs">English [en], epub, 1.0 MB, 2020</div>'
-            '</div></div>'
-            '</body></html>'
+            "</div></div>"
+            "</body></html>"
         )
 
     monkeypatch.setattr("endless_library.scrapers.cf_bypass_client.resolve", _fake_resolve)

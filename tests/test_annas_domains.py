@@ -204,10 +204,12 @@ def test_effective_mirrors_ignores_empty_entries():
 # Ultrareview B: thread-safe annas_domains state
 # ---------------------------------------------------------------------------
 
+
 def test_annas_domains_thread_safe():
     """20 threads mix of mark_cool/mark_success/next_mirror — no exception,
     state stays consistent (at most one _last_working value)."""
     import threading
+
     from endless_library.scrapers import annas_domains as ad
 
     ad._reset_state_for_tests()
@@ -247,18 +249,19 @@ def test_annas_domains_thread_safe():
 
 def test_fetch_wiki_uses_correct_user_agent(monkeypatch):
     """fetch_wiki_domains() sends the Wikipedia-policy-compliant UA (no http_get injection)."""
-    import httpx
-    from endless_library.scrapers.annas_domains import fetch_wiki_domains, WIKIPEDIA_URL
+    from endless_library.scrapers.annas_domains import WIKIPEDIA_URL, fetch_wiki_domains
 
     captured: dict = {}
 
     def fake_httpx_get(url, *, timeout, follow_redirects, headers):
         captured["url"] = url
         captured["ua"] = headers.get("User-Agent", "")
+
         # Return a minimal 200 response so fetch_wiki_domains doesn't short-circuit
         class _Resp:
             status_code = 200
             content = b"<html><body></body></html>"
+
         return _Resp()
 
     monkeypatch.setattr("endless_library.scrapers.annas_domains.httpx.get", fake_httpx_get)

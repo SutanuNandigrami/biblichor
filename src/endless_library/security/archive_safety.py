@@ -293,22 +293,16 @@ def safe_extract_rar(
             f"bsdtar could not read RAR: {(listing.stderr or '').strip()[:200]}"
         )
 
-    raw_names = [
-        m for m in (line.rstrip("\r") for line in listing.stdout.splitlines()) if m
-    ]
+    raw_names = [m for m in (line.rstrip("\r") for line in listing.stdout.splitlines()) if m]
     if len(raw_names) > limits.max_members:
-        raise ArchiveSafetyError(
-            f"too many members ({len(raw_names)} > {limits.max_members})"
-        )
+        raise ArchiveSafetyError(f"too many members ({len(raw_names)} > {limits.max_members})")
     for name in raw_names:
         _check_member_safe(name)  # security-only (raises on traversal etc.)
     # Phase 6u.7c: filter to extractable-format members only. Skip
     # directories, .kfx/.jpg/.opf siblings, .original_kfx, etc.
     member_names = [n for n in raw_names if _member_is_extractable_format(n)]
     if not member_names:
-        raise ArchiveSafetyError(
-            f"no extractable ebook member in archive (saw {raw_names!r})"
-        )
+        raise ArchiveSafetyError(f"no extractable ebook member in archive (saw {raw_names!r})")
 
     # bsdtar doesn't report uncompressed size in -tf output without -v.
     # Run a -tvf for size accounting — still fast (metadata only).
@@ -349,9 +343,7 @@ def safe_extract_rar(
         except subprocess.TimeoutExpired as e:
             raise ArchiveSafetyError(f"bsdtar extract timed out: {e}") from e
         if r.returncode != 0:
-            raise ArchiveSafetyError(
-                f"bsdtar extract failed: {(r.stderr or '').strip()[:200]}"
-            )
+            raise ArchiveSafetyError(f"bsdtar extract failed: {(r.stderr or '').strip()[:200]}")
         # Post-extraction path safety check: ensure bsdtar didn't write
         # anything outside target_dir (e.g. via relative-path escapes
         # that slipped past _check_member_safe).
@@ -438,7 +430,7 @@ def _verify_extracted_paths_safe(dest_dir: Path) -> None:
         except (OSError, ValueError):
             log.warning("archive_safety: removing extracted-outside-dest file: %s", p)
             p.unlink(missing_ok=True)
-            raise ArchiveSafetyError(f"archive escaped dest_dir: {p}")
+            raise ArchiveSafetyError(f"archive escaped dest_dir: {p}")  # noqa: B904
 
 
 def _check_archive_size(path: Path, limits: SafetyLimits) -> None:

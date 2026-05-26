@@ -16,6 +16,7 @@ NotConfigured  -- raised when credentials are missing.
 AuthFailed     -- raised when the login POST redirects back to the login page
                   (phpBB's way of signalling bad credentials).
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,7 +31,7 @@ _LOGIN_URL = "https://forum.mobilism.org/ucp.php?mode=login"
 _SESSION_TTL = 24 * 3600  # seconds
 
 
-from endless_library.scrapers.base import NotConfigured  # noqa: F401
+from endless_library.scrapers.base import NotConfigured  # noqa: E402
 
 
 class AuthFailed(Exception):

@@ -284,6 +284,13 @@ def test_try_compress_pdf_falls_through_to_aggressive(tmp_path: Path, monkeypatc
 
 
 def test_compress_pdf_round_trips_real_pdf(tmp_path: Path):
+    import os as _os
+
+    import pytest as _pt
+
+    if not _os.path.exists("/home/ubuntu/endless-library/data/books"):
+        _pt.skip("VPS-only data files not available in CI", allow_module_level=False)
+
     """If ocrmypdf is on the box and we have a real PDF to test against,
     confirm a real round-trip. Skipped in CI where neither is true."""
     if shutil.which("ocrmypdf") is None:

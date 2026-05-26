@@ -207,9 +207,7 @@ def download(
                 content_type = r.headers.get("content-type")
                 if content_type and "text/html" in content_type.lower():
                     snippet = r.read()[:200]
-                    raise DownloadError(
-                        f"got HTML, not book (ct={content_type}): {snippet!r}"
-                    )
+                    raise DownloadError(f"got HTML, not book (ct={content_type}): {snippet!r}")
                 with part.open("wb") as f:
                     for chunk in r.iter_bytes(CHUNK):
                         if not chunk:

@@ -52,7 +52,9 @@ def _patch_compose_path(target: Path):
     real_path = Path
     return patch(
         "endless_library.web.api.Path",
-        side_effect=lambda p=None, *a, **kw: target if str(p) == "/app/deploy/compose.yml" else real_path(p, *a, **kw),
+        side_effect=lambda p=None, *a, **kw: (
+            target if str(p) == "/app/deploy/compose.yml" else real_path(p, *a, **kw)
+        ),
     )
 
 
@@ -67,9 +69,7 @@ def test_healthz_passes_when_compose_yml_not_present(healthy_db: Path):
     assert "deploy_compose_writable" not in body or body["deploy_compose_writable"] is True
 
 
-def test_healthz_flips_to_503_when_compose_yml_not_writable(
-    healthy_db: Path, tmp_path: Path
-):
+def test_healthz_flips_to_503_when_compose_yml_not_writable(healthy_db: Path, tmp_path: Path):
     """If /app/deploy/compose.yml exists but is read-only, healthz must
     return 503 with deploy_compose_writable=False."""
     compose = tmp_path / "compose.yml"
@@ -89,9 +89,7 @@ def test_healthz_flips_to_503_when_compose_yml_not_writable(
         os.chmod(compose, 0o644)
 
 
-def test_healthz_passes_when_compose_yml_writable(
-    healthy_db: Path, tmp_path: Path
-):
+def test_healthz_passes_when_compose_yml_writable(healthy_db: Path, tmp_path: Path):
     """Positive case: file exists and is group-writable -> healthz green."""
     compose = tmp_path / "compose.yml"
     compose.write_text("version: '3'\n")

@@ -15,6 +15,7 @@ This module wraps the upstream stkclient with biblichor's expected API:
   returns a plain dict. It also wraps ``get_owned_devices()`` and
   ``send_file()`` so the caller never sees upstream internals.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,7 +24,7 @@ from typing import Any
 from . import _api as _apimod
 from ._model import DeviceInfo, OwnedDevice
 from ._stkclient import Client as _UpstreamClient
-from ._stkclient import OAuth2 as _UpstreamOAuth2
+from ._stkclient import OAuth2 as _UpstreamOAuth2  # noqa: F401
 from ._stkclient import _parse_authorization_code
 
 
@@ -51,9 +52,11 @@ class OAuth2:
         import urllib.parse
 
         verifier = base64.b64encode(os.urandom(32), b"-_").rstrip(b"=").decode("utf8")
-        challenge = base64.b64encode(
-            hashlib.sha256(verifier.encode("utf-8")).digest(), b"-_"
-        ).rstrip(b"=").decode("utf8")
+        challenge = (
+            base64.b64encode(hashlib.sha256(verifier.encode("utf-8")).digest(), b"-_")
+            .rstrip(b"=")
+            .decode("utf8")
+        )
 
         q = {
             "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
@@ -91,7 +94,9 @@ class OAuth2:
             ) from e
 
 
-def _token_exchange_with_domain(authorization_code: str, code_verifier: str, domain: str = "amazon.com") -> str:
+def _token_exchange_with_domain(
+    authorization_code: str, code_verifier: str, domain: str = "amazon.com"
+) -> str:
     """Re-implementation of _api.token_exchange with a regional auth-domain header.
 
     For non-US Amazon regions the x-amzn-identity-auth-domain header must use
@@ -125,7 +130,7 @@ def _token_exchange_with_domain(authorization_code: str, code_verifier: str, dom
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req) as r:  # noqa S310
+        with urllib.request.urlopen(req) as r:
             res = json.load(r)
     except urllib.error.HTTPError as e:
         try:
@@ -150,7 +155,9 @@ class Client:
 
     # ---------- OAuth registration ----------
 
-    def register_device(self, code: str, verifier: str, domain: str = "amazon.com") -> dict[str, Any]:
+    def register_device(
+        self, code: str, verifier: str, domain: str = "amazon.com"
+    ) -> dict[str, Any]:
         """Exchange authorization code + verifier for a registered device.
 
         Returns a dict with keys:
@@ -187,7 +194,7 @@ class Client:
         return self._upstream.dumps()
 
     @classmethod
-    def loads(cls, s: str) -> "Client":
+    def loads(cls, s: str) -> Client:
         """Deserialise a Client from a JSON string previously returned by dumps()."""
         upstream = _UpstreamClient.loads(s)
         return cls(upstream)

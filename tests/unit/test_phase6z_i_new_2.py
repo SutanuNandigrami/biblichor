@@ -3,6 +3,7 @@
 The probe used to fire on every empty search result. Now it's rate-limited
 to once per _DRIFT_PROBE_TTL seconds (6 hours).
 """
+
 from __future__ import annotations
 
 import time
@@ -12,6 +13,7 @@ from unittest.mock import MagicMock
 def _reset_drift_probe():
     """Reset the module-level probe timestamp between tests."""
     import endless_library.scrapers.mobilism_books as m
+
     m._drift_probe_last_at = 0.0
 
 

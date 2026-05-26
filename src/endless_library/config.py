@@ -104,35 +104,39 @@ class CalibreCfg(BaseModel):
 
 
 class BdebooksCfg(BaseModel):
-    excluded_categories: list[str] = Field(default_factory=lambda: [
-        "Islamic Books",
-        "ইসলামিক বই",
-        "Islamic",
-        "Islam",
-        "Religion",
-        "Religious",
-        "ধর্ম",
-        "ধর্মীয়",
-        "Hadith",
-        "হাদিস",
-        "Quran",
-        "কোরআন",
-        "Prophet",
-        "নবী",
-        "Islamic Studies",
-        "ইসলামিক স্টাডিজ",
-    ])
+    excluded_categories: list[str] = Field(
+        default_factory=lambda: [
+            "Islamic Books",
+            "ইসলামিক বই",
+            "Islamic",
+            "Islam",
+            "Religion",
+            "Religious",
+            "ধর্ম",
+            "ধর্মীয়",
+            "Hadith",
+            "হাদিস",
+            "Quran",
+            "কোরআন",
+            "Prophet",
+            "নবী",
+            "Islamic Studies",
+            "ইসলামিক স্টাডিজ",
+        ]
+    )
 
 
 class KindleBanglaCfg(BaseModel):
-    excluded_categories: list[str] = Field(default_factory=lambda: [
-        "Islamic",
-        "Religion",
-        "Religious",
-        "ধর্মীয়",
-        "Hadith",
-        "Quran",
-    ])
+    excluded_categories: list[str] = Field(
+        default_factory=lambda: [
+            "Islamic",
+            "Religion",
+            "Religious",
+            "ধর্মীয়",
+            "Hadith",
+            "Quran",
+        ]
+    )
 
 
 class ScrapersCfg(BaseModel):
@@ -274,8 +278,6 @@ class StorageCfg(BaseModel):
     hybrid_mode: str = "mirror"  # "mirror" or "scheduled"
 
 
-
-
 class BenchCfg(BaseModel):
     per_query_timeout_sec: int = 45
     circuit_break_after_consecutive_fails: int = 3
@@ -283,6 +285,7 @@ class BenchCfg(BaseModel):
 
 class StkCfg(BaseModel):
     """Send-to-Kindle delivery configuration."""
+
     daily_cap: int | None = None
     max_attempts: int = 3
     backoff_initial_sec: float = 5.0

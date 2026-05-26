@@ -116,10 +116,12 @@ class BookOrbitService:
         return None
 
     def store_admin_creds(self, username: str, password: str) -> None:
-        self.set_secret_values({
-            SECRET_ADMIN_USER: username,
-            SECRET_ADMIN_PASSWORD: password,
-        })
+        self.set_secret_values(
+            {
+                SECRET_ADMIN_USER: username,
+                SECRET_ADMIN_PASSWORD: password,
+            }
+        )
 
     def clear_admin_creds(self) -> None:
         with connect(self._db_path) as conn:
@@ -408,7 +410,7 @@ class BookOrbitService:
         under the given key. Used by Phase 6s.5 for Z-Library creds
         and browser cookie jars."""
         from endless_library.db.schema import connect
-        from endless_library.secrets_store import init_secrets_table, set_secret
+        from endless_library.secrets_store import init_secrets_table
 
         with connect(self._db_path) as conn:
             init_secrets_table(conn)
@@ -426,9 +428,11 @@ class BookOrbitService:
             return
         import os as _os
         import time as _time
+
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
         from endless_library.db.schema import connect
         from endless_library.secrets_store import init_secrets_table
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
         key = self._secrets_key
         aes = AESGCM(key)

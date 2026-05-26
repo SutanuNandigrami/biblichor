@@ -6,6 +6,7 @@ Scraper Protocol in base.py.  Accessing instance.name raised AttributeError
 in any code path that introspects the scraper (logging, bench outcome records,
 etc.).
 """
+
 from __future__ import annotations
 
 
@@ -31,12 +32,12 @@ def test_kindlebangla_curl_has_name_attribute():
 
 def test_all_registry_scrapers_have_name_attribute():
     """Every scraper in the registry must expose a 'name' class attribute."""
-    from endless_library.scrapers import registry
-    from endless_library.config import ScrapersCfg
     from types import SimpleNamespace
 
+    from endless_library.scrapers import registry
+
     # Build a minimal cfg stub so we can instantiate scrapers without real config
-    cfg = SimpleNamespace(
+    SimpleNamespace(
         annas_mirrors=[],
         request_delay_seconds=0.0,
         slow_download_timeout_seconds=30,
@@ -59,9 +60,7 @@ def test_all_registry_scrapers_have_name_attribute():
         if not hasattr(klass, "name"):
             missing.append(name)
 
-    assert not missing, (
-        f"These scrapers are missing the class-level 'name' attribute: {missing}"
-    )
+    assert not missing, f"These scrapers are missing the class-level 'name' attribute: {missing}"
 
 
 def test_archive_curl_name_matches_registry_key():

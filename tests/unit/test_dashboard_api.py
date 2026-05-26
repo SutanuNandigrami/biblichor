@@ -2,6 +2,7 @@
 
 Tests exercise the pure aggregation function directly — no FastAPI deps.
 """
+
 from __future__ import annotations
 
 import sys
@@ -11,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 import pytest
+
 from endless_library.db.schema import connect, init_db
 from endless_library.web.api import compute_dashboard_snapshot
 
@@ -28,8 +30,10 @@ def _next_id() -> str:
 # Helpers
 # ──────────────────────────────────────────────────────────
 
-def _seed_book(conn, *, source="goodreads", status="queued", file_path=None,
-               sent_method=None, sent_at=None):
+
+def _seed_book(
+    conn, *, source="goodreads", status="queued", file_path=None, sent_method=None, sent_at=None
+):
     gid = _next_id()
     conn.execute(
         """
@@ -67,6 +71,7 @@ def _seed_event(conn, *, kind, ts_offset_hours=0):
 # Fixtures
 # ──────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test.db"
@@ -77,6 +82,7 @@ def db(tmp_path: Path) -> Path:
 # ──────────────────────────────────────────────────────────
 # 1. Status counts
 # ──────────────────────────────────────────────────────────
+
 
 def test_snapshot_returns_status_counts(db: Path):
     with connect(db) as conn:
@@ -102,6 +108,7 @@ def test_snapshot_has_required_top_level_keys(db: Path):
 # ──────────────────────────────────────────────────────────
 # 2. Throughput bucketing
 # ──────────────────────────────────────────────────────────
+
 
 def test_snapshot_throughput_buckets_5min(db: Path):
     with connect(db) as conn:
@@ -140,6 +147,7 @@ def test_snapshot_throughput_has_289_buckets(db: Path):
 # 3. Method breakdown
 # ──────────────────────────────────────────────────────────
 
+
 def test_snapshot_method_breakdown_only_counts_kindled(db: Path):
     """method_breakdown_24h keys must always be present (even if zero)."""
     snap = compute_dashboard_snapshot(db)
@@ -159,8 +167,7 @@ def test_snapshot_method_breakdown_excludes_non_kindled(db: Path):
     """Books with status='sent' (not 'kindled') must not be counted."""
     with connect(db) as conn:
         # status=sent should be excluded even with sent_method set
-        _seed_book(conn, source="goodreads", status="sent",
-                   sent_method="stk", sent_at=None)
+        _seed_book(conn, source="goodreads", status="sent", sent_method="stk", sent_at=None)
 
     snap = compute_dashboard_snapshot(db)
     # The 'sent' book has no sent_at, and status != 'kindled', so stk=0
@@ -170,6 +177,7 @@ def test_snapshot_method_breakdown_excludes_non_kindled(db: Path):
 # ──────────────────────────────────────────────────────────
 # 4. Source funnel
 # ──────────────────────────────────────────────────────────
+
 
 def test_snapshot_source_funnel_derives_stages(db: Path):
     with connect(db) as conn:

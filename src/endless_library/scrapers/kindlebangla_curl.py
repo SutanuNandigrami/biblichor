@@ -28,10 +28,9 @@ import logging
 from typing import Any
 from urllib.parse import quote_plus, urljoin
 
-from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT as _BIBLICHOR_UA, make_client
 from bs4 import BeautifulSoup
 
-from endless_library.config import KindleBanglaCfg, ScrapersCfg
+from endless_library.config import KindleBanglaCfg
 from endless_library.domain.models import Candidate, DownloadHandle, SearchQuery
 from endless_library.scrapers.drive_helpers import (
     find_in_folder,
@@ -39,6 +38,8 @@ from endless_library.scrapers.drive_helpers import (
     parse_drive_url,
     resolve_download_url,
 )
+from endless_library.scrapers.http_client import BIBLICHOR_USER_AGENT as _BIBLICHOR_UA
+from endless_library.scrapers.http_client import make_client
 
 log = logging.getLogger(__name__)
 

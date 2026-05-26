@@ -133,9 +133,7 @@ def unpack_if_archive(
     # identifier (kindlebangla slug, Anna's md5, etc) so collisions are
     # structurally impossible.
     try:
-        downloaded_path.rename(
-            downloaded_path.with_suffix(downloaded_path.suffix + ".orig")
-        )
+        downloaded_path.rename(downloaded_path.with_suffix(downloaded_path.suffix + ".orig"))
     except OSError as e:
         log.warning(
             "unpack: could not preserve original at %s.orig: %s",

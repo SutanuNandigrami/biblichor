@@ -20,6 +20,7 @@ PD scrapers (gutendex, standard_ebooks, oapen_doab, wikisource) and the
 async slow_servers probe in annas_curl still use httpx -- they do not benefit
 from TLS fingerprint impersonation and their respx-based tests would break.
 """
+
 from __future__ import annotations
 
 import re
@@ -32,7 +33,6 @@ from urllib.parse import urljoin, urlparse
 from curl_cffi import requests as cffi_requests
 
 from .anubis import solve_anubis
-
 
 _ANUBIS_SIGNATURES = (
     re.compile(r'<meta\s+name="anubis-challenge"', re.I),
@@ -84,16 +84,14 @@ def make_client(
 def _is_anubis_response(resp: Any) -> bool:
     if getattr(resp, "status_code", None) != 200:
         return False
-    ctype = (resp.headers.get("content-type", "") if hasattr(resp, "headers") else "")
+    ctype = resp.headers.get("content-type", "") if hasattr(resp, "headers") else ""
     if "text/html" not in ctype.lower():
         return False
     text = getattr(resp, "text", "") or ""
     return any(p.search(text) for p in _ANUBIS_SIGNATURES)
 
 
-def _solve_and_get_cookie(
-    html: str, request_url: str, *, raw_post: Any
-) -> str | None:
+def _solve_and_get_cookie(html: str, request_url: str, *, raw_post: Any) -> str | None:
     """Parse challenge + difficulty + action from HTML, solve the PoW,
     POST nonce+challenge using raw_post (the ORIGINAL session.post, not the
     wrapped version — prevents recursive Anubis interception on the submit
@@ -111,8 +109,9 @@ def _solve_and_get_cookie(
     nonce = solve_anubis(challenge, difficulty)
     submit_url = urljoin(request_url, action)
     # Use the raw (pre-wrap) post so we don't recurse into the wrapper
-    resp = raw_post(submit_url,
-                    data={"challenge": challenge, "nonce": str(nonce), "redir": request_url})
+    resp = raw_post(
+        submit_url, data={"challenge": challenge, "nonce": str(nonce), "redir": request_url}
+    )
     if getattr(resp, "status_code", 0) not in (200, 302):
         return None
     for k, v in (getattr(resp, "cookies", {}) or {}).items():
@@ -160,6 +159,7 @@ def _make_anubis_wrapper(session: Any, orig_fn: Any, raw_post_for_solve: Any):
                 kw["cookies"]["techaro-anubis-auth"] = cookie
                 r = orig_fn(url, **kw)
         return r
+
     return wrapper
 
 

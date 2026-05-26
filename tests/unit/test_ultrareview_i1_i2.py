@@ -2,11 +2,11 @@
 and I2 (Anubis middleware wraps all HTTP methods).
 Ultrareview commit batch 1.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-
 
 # ---------------------------------------------------------------------------
 # I1 -- MobilismSession.try_login: safe credential check without singleton
@@ -106,7 +106,7 @@ def test_try_login_does_not_corrupt_existing_singleton():
     fake_bad_session.post.return_value = fake_resp
 
     with patch("endless_library.scrapers.mobilism.make_client", return_value=fake_bad_session):
-        ok, err = MobilismSession.try_login(
+        ok, _err = MobilismSession.try_login(
             SimpleNamespace(mobilism_username="bad", mobilism_password="creds")
         )
 
@@ -165,9 +165,10 @@ def test_anubis_middleware_wrapped_methods_are_callable():
 def test_anubis_middleware_injects_cached_cookie():
     """After a cookie is cached, it is injected in the next request."""
     import time
+
     from endless_library.scrapers.http_client import (
-        _install_anubis_middleware,
         _ANUBIS_COOKIE_CACHE,
+        _install_anubis_middleware,
     )
 
     host = "anubis-test-xyz.example.com"
@@ -186,8 +187,7 @@ def test_anubis_middleware_injects_cached_cookie():
     session = MagicMock()
     session.get = fake_get
     for m in ("post", "head", "put", "delete"):
-        setattr(session, m, MagicMock(return_value=MagicMock(
-            status_code=200, text="", headers={})))
+        setattr(session, m, MagicMock(return_value=MagicMock(status_code=200, text="", headers={})))
 
     _install_anubis_middleware(session)
     session.get(f"https://{host}/path")
@@ -206,7 +206,8 @@ def test_anubis_middleware_injects_cached_cookie():
 def test_scraper_to_open_slum_site_not_duplicated():
     """SCRAPER_TO_OPEN_SLUM_SITE must be defined exactly once in registry.py."""
     from pathlib import Path
-    src = Path("/home/ubuntu/endless-library/src/endless_library/scrapers/registry.py")
+
+    src = Path(__file__).resolve().parents[2].joinpath("src/endless_library/scrapers/registry.py")
     count = src.read_text().count("SCRAPER_TO_OPEN_SLUM_SITE: dict")
     assert count == 1, (
         f"SCRAPER_TO_OPEN_SLUM_SITE is defined {count} times in registry.py (expected 1)"

@@ -30,7 +30,9 @@ from endless_library.db.schema import init_db
 from endless_library.web import api as api_mod
 
 
-def _build_app(*, db_path: Path, bo_enabled: bool, bo_url: str = "http://bookorbit:3000") -> FastAPI:
+def _build_app(
+    *, db_path: Path, bo_enabled: bool, bo_url: str = "http://bookorbit:3000"
+) -> FastAPI:
     app = FastAPI()
     deps = SimpleNamespace(
         db_path=db_path,
@@ -72,8 +74,12 @@ def test_bo_enabled_and_healthy_keeps_ok_true(healthy_db: Path):
 
     class _Resp:
         status = 200
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
 
     with patch("urllib.request.urlopen", return_value=_Resp()):
         r = TestClient(app).get("/healthz")
@@ -95,7 +101,10 @@ def test_bo_enabled_but_unreachable_flips_to_503(healthy_db: Path):
     body = r.json()
     assert body["ok"] is False
     assert body["bookorbit"]["reachable"] is False
-    assert "URLError" in body["bookorbit"]["error"] or "Connection refused" in body["bookorbit"]["error"]
+    assert (
+        "URLError" in body["bookorbit"]["error"]
+        or "Connection refused" in body["bookorbit"]["error"]
+    )
 
 
 def test_bo_enabled_but_timeout_flips_to_503(healthy_db: Path):

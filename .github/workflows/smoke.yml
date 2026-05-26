@@ -91,8 +91,18 @@ jobs:
           kindle:
             recipient: smoke@kindle.com
           EOF
-          # Seed an empty library.db so biblichor can boot
+          # Seed an empty library.db so biblichor can boot.
+          # Container biblichor user is uid 1000; runner is 1001. Use
+          # world-writable for the smoke DB so the container can WAL-mode it.
           touch data/library.db
+          # Container biblichor user is uid 1000; runner is 1001. Open up
+          # all the bind-mounted dirs/files so the container can write.
+          chmod -R 777 data config library
+          # biblichor healthz checks deploy/compose.yml is writable by the
+          # container (bookorbit in-app upgrade writes to it). Runner uid
+          # 1001 owns the file by default; chmod 666 so container uid 1000
+          # can write it.
+          chmod 666 deploy/compose.yml
           chmod 600 .env
 
       - name: Pin Postgres data dir ownership
@@ -105,6 +115,18 @@ jobs:
           docker compose -f deploy/compose.yml --env-file .env up -d --wait \
             --wait-timeout 240
         timeout-minutes: 6
+
+      - name: Show biblichor logs on failure
+        if: failure()
+        run: |
+          echo "=== biblichor container status ==="
+          docker compose -f deploy/compose.yml --env-file .env ps biblichor || true
+          echo "=== biblichor logs (last 80 lines) ==="
+          docker compose -f deploy/compose.yml --env-file .env logs biblichor 2>&1 | tail -80 || true
+          echo "=== biblichor inspect ==="
+          docker inspect biblichor --format 'state: {{.State.Status}}  health: {{.State.Health.Status}}  exit: {{.State.ExitCode}}' || true
+          echo "=== /healthz attempt ==="
+          curl -v http://localhost:8090/healthz 2>&1 | head -30 || true
 
       - name: biblichor /healthz returns 200
         run: |

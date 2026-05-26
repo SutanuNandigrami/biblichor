@@ -9,26 +9,26 @@ from endless_library.scrapers.annas_flaresolverr import AnnasArchiveFlareSolverr
 from endless_library.scrapers.annas_playwright import AnnasArchivePlaywright
 from endless_library.scrapers.archive_curl import ArchiveOrgCurl
 
+# Phase 6w.6 — BDeBooks Bengali source
+from endless_library.scrapers.bdebooks import BDeBooks
+from endless_library.scrapers.doab import Doab
+
 # Phase 6s.1 — public-domain curated sources
 from endless_library.scrapers.gutendex import Gutendex
+
+# Phase 6w.3 — HathiTrust + DOAB
+from endless_library.scrapers.hathitrust import HathiTrust
 from endless_library.scrapers.kindlebangla_curl import KindleBanglaCurl
 from endless_library.scrapers.libgen_curl import LibgenCurl
+
+# Phase 6w.5 — Mobilism books
+from endless_library.scrapers.mobilism_books import MobilismBooks
 from endless_library.scrapers.oapen_doab import OapenDoab
 from endless_library.scrapers.standard_ebooks import StandardEbooks
 from endless_library.scrapers.welib_curl import WelibCurl
 from endless_library.scrapers.welib_playwright import WelibPlaywright
 from endless_library.scrapers.wikisource import Wikisource
 from endless_library.scrapers.zlib_singlelogin import ZlibSingleLogin
-
-# Phase 6w.3 — HathiTrust + DOAB
-from endless_library.scrapers.hathitrust import HathiTrust
-from endless_library.scrapers.doab import Doab
-
-# Phase 6w.5 — Mobilism books
-from endless_library.scrapers.mobilism_books import MobilismBooks
-
-# Phase 6w.6 — BDeBooks Bengali source
-from endless_library.scrapers.bdebooks import BDeBooks
 
 _REGISTRY = {
     "annas_curl": AnnasArchiveCurl,
@@ -137,8 +137,9 @@ def pd_aware_order(cfg: ScrapersCfg, *, query_title: str, is_pd: bool) -> list[s
     return promoted + rest
 
 
-def chain_for_source(cfg, *, source: str | None, query_title: str,
-                     is_pd: bool, is_recent_release: bool = False) -> list[str]:
+def chain_for_source(
+    cfg, *, source: str | None, query_title: str, is_pd: bool, is_recent_release: bool = False
+) -> list[str]:
     """Source-aware chain. For sources where the Source adapter already
     knows the per-book download path (e.g. kindlebangla emits slugs that
     kindlebangla_curl resolves directly), short-circuit the chain to

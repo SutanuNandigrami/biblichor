@@ -5,6 +5,7 @@ Results are cached for a configurable poll interval to avoid hammering the
 endpoint. The monitor swallows all errors internally — it is best-effort
 health data only; a failure to refresh does not affect the main pipeline.
 """
+
 from __future__ import annotations
 
 import logging
@@ -13,10 +14,19 @@ import time
 from typing import Any
 
 # Keys we expect in the upstream status JSON. Extras are logged at DEBUG.
-_KNOWN_SITE_KEYS = frozenset({
-    "annas_archive", "libgen", "gutenberg", "open_library", "zlib",
-    "sci_hub", "internet_archive", "wikisource", "standard_ebooks",
-})
+_KNOWN_SITE_KEYS = frozenset(
+    {
+        "annas_archive",
+        "libgen",
+        "gutenberg",
+        "open_library",
+        "zlib",
+        "sci_hub",
+        "internet_archive",
+        "wikisource",
+        "standard_ebooks",
+    }
+)
 
 # Number of consecutive refresh failures before bumping log level to WARNING.
 _WARN_AFTER_N_FAILURES = 3
@@ -104,13 +114,16 @@ class OpenSlumMonitor:
                 self._consecutive_failures = 0
                 log.debug("open_slum: refreshed %d sites", len(self._cache))
             else:
-                log.debug("open_slum: unexpected response type %s (expected dict)", type(data).__name__)
-        except Exception as exc:  # noqa: BLE001
+                log.debug(
+                    "open_slum: unexpected response type %s (expected dict)", type(data).__name__
+                )
+        except Exception as exc:
             self._consecutive_failures += 1
             if self._consecutive_failures >= _WARN_AFTER_N_FAILURES:
                 log.warning(
                     "open_slum: refresh failed (%d consecutive): %s",
-                    self._consecutive_failures, exc,
+                    self._consecutive_failures,
+                    exc,
                 )
             else:
                 log.debug("open_slum: refresh failed: %s", exc)

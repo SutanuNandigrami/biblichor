@@ -49,10 +49,7 @@ def parse_domains_from_html(html: bytes | str) -> list[str]:
     """
     from lxml import etree  # deferred; only needed during wiki refresh
 
-    if isinstance(html, bytes):
-        html_str = html.decode("utf-8", errors="replace")
-    else:
-        html_str = html
+    html_str = html.decode("utf-8", errors="replace") if isinstance(html, bytes) else html
 
     try:
         tree = etree.fromstring(html_str.encode("utf-8"), etree.HTMLParser())
@@ -113,7 +110,9 @@ def fetch_wiki_domains(
                 WIKIPEDIA_URL,
                 timeout=timeout,
                 follow_redirects=True,
-                headers={"User-Agent": "biblichor/1.0 (+https://github.com/SutanuNandigrami/biblichor)"},
+                headers={
+                    "User-Agent": "biblichor/1.0 (+https://github.com/SutanuNandigrami/biblichor)"
+                },
             )
             status, body = r.status_code, r.content
     except Exception as e:
@@ -227,7 +226,7 @@ _MIRRORS = (
 )
 _COOL_DOWN_SEC = 5 * 60
 
-_state: dict[str, float] = {}      # mirror -> cool-until-epoch
+_state: dict[str, float] = {}  # mirror -> cool-until-epoch
 _last_working: str | None = None
 _STATE_LOCK = threading.Lock()
 

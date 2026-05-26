@@ -4,22 +4,23 @@ The public surface is small: KindleStkService for OAuth + send, and
 the typed exception hierarchy. The pipeline does not import this
 module directly -- it goes through kindle_router.deliver(...).
 """
+
 from .exceptions import (
+    KindleStkAuthExpired,
+    KindleStkBatchOverflow,
     KindleStkError,
     KindleStkNotConfigured,
-    KindleStkAuthExpired,
     KindleStkRateLimited,
     KindleStkUploadFailed,
-    KindleStkBatchOverflow,
 )
 from .service import KindleStkService
 
 __all__ = [
-    "KindleStkService",
+    "KindleStkAuthExpired",
+    "KindleStkBatchOverflow",
     "KindleStkError",
     "KindleStkNotConfigured",
-    "KindleStkAuthExpired",
     "KindleStkRateLimited",
+    "KindleStkService",
     "KindleStkUploadFailed",
-    "KindleStkBatchOverflow",
 ]

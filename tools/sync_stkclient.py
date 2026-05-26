@@ -5,6 +5,7 @@ Usage:
     python tools/sync_stkclient.py             # uses the pinned version
     python tools/sync_stkclient.py --tag X.Y   # explicit tag
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,7 +40,7 @@ def main() -> int:
         # fallback to flat layout
         src = tmp / "stkclient"
     if not src.is_dir():
-        print(f"FATAL: stkclient package not found in upstream clone", file=sys.stderr)
+        print("FATAL: stkclient package not found in upstream clone", file=sys.stderr)
         return 1
     for f in src.glob("*.py"):
         if f.name in ("__init__.py", "__main__.py"):
@@ -65,8 +66,8 @@ def main() -> int:
             flags=re.M,
         )
         dest.write_text(text, encoding="utf-8")
-        print(f"Synced _stkclient.py")
-    print(f"Done. Verify with: python -m pytest tests/unit/test_kindle_stk_*.py -v")
+        print("Synced _stkclient.py")
+    print("Done. Verify with: python -m pytest tests/unit/test_kindle_stk_*.py -v")
     return 0
 
 

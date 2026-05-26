@@ -38,10 +38,10 @@ _BLOCKED_NETWORKS_V4: tuple[ipaddress.IPv4Network, ...] = (
     ipaddress.IPv4Network("240.0.0.0/4"),  # reserved
 )
 _BLOCKED_NETWORKS_V6: tuple[ipaddress.IPv6Network, ...] = (
-    ipaddress.IPv6Network("::1/128"),        # loopback
-    ipaddress.IPv6Network("fc00::/7"),       # unique local
-    ipaddress.IPv6Network("fe80::/10"),      # link-local
-    ipaddress.IPv6Network("::ffff:0:0/96"), # IPv4-mapped (catches ::ffff:127.0.0.1)
+    ipaddress.IPv6Network("::1/128"),  # loopback
+    ipaddress.IPv6Network("fc00::/7"),  # unique local
+    ipaddress.IPv6Network("fe80::/10"),  # link-local
+    ipaddress.IPv6Network("::ffff:0:0/96"),  # IPv4-mapped (catches ::ffff:127.0.0.1)
 )
 
 

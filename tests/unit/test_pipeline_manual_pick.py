@@ -14,22 +14,19 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-
-from endless_library.db.books import BookRepo
-from endless_library.db.candidates import CandidateRepo, CandidateRow
-from endless_library.db.schema import init_db
+from endless_library.db.candidates import CandidateRow
 from endless_library.pipeline import PipelineDeps, process_one
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_deps(tmp_path: Path) -> PipelineDeps:
     from endless_library.config import Config
+
     cfg = Config()
     cfg.scrapers.order = ["annas_curl"]
     cfg.scrapers.enabled = {"annas_curl": True}
@@ -57,7 +54,9 @@ def _seed_book(deps: PipelineDeps, *, picked_candidate_id: int | None = None) ->
     return deps.books.get(bid)
 
 
-def _seed_candidate(deps: PipelineDeps, book_id: int, cand_id_hint: int | None = None) -> CandidateRow:
+def _seed_candidate(
+    deps: PipelineDeps, book_id: int, cand_id_hint: int | None = None
+) -> CandidateRow:
     """Insert a candidate row and return it."""
     inserted_id = deps.cands.insert(
         book_id=book_id,
@@ -81,6 +80,7 @@ def _seed_candidate(deps: PipelineDeps, book_id: int, cand_id_hint: int | None =
 # ---------------------------------------------------------------------------
 # Test 1: manual pick honored — search must NOT run
 # ---------------------------------------------------------------------------
+
 
 def test_process_one_honors_manual_pick(tmp_path: Path) -> None:
     """When book.picked_candidate_id is set, process_one must call
@@ -111,15 +111,19 @@ def test_process_one_honors_manual_pick(tmp_path: Path) -> None:
     fake_file = tmp_path / "mcgilchrist.epub"
     fake_file.write_bytes(b"fake epub content")
 
-    with patch(
-        "endless_library.pipeline._resolve_and_download",
-        return_value=(fake_file, None),
-    ) as mock_resolve, patch(
-        "endless_library.pipeline._process_from_downloaded",
-        return_value="sent",
-    ) as mock_process, patch(
-        "endless_library.pipeline._search_with_strategies",
-        side_effect=AssertionError("search must NOT run when manual pick is set"),
+    with (
+        patch(
+            "endless_library.pipeline._resolve_and_download",
+            return_value=(fake_file, None),
+        ) as mock_resolve,
+        patch(
+            "endless_library.pipeline._process_from_downloaded",
+            return_value="sent",
+        ) as mock_process,
+        patch(
+            "endless_library.pipeline._search_with_strategies",
+            side_effect=AssertionError("search must NOT run when manual pick is set"),
+        ),
     ):
         result = process_one(deps, book)
 
@@ -137,14 +141,14 @@ def test_process_one_honors_manual_pick(tmp_path: Path) -> None:
     events_db = deps.events.recent_for_book(bid)
     messages = [e.message for e in events_db]
     assert any(
-        "honoring manual pick" in (m or "") and str(cand.id) in (m or "")
-        for m in messages
+        "honoring manual pick" in (m or "") and str(cand.id) in (m or "") for m in messages
     ), f"honoring event not found in: {messages}"
 
 
 # ---------------------------------------------------------------------------
 # Test 2: picked candidate pruned — must fall through to fresh search
 # ---------------------------------------------------------------------------
+
 
 def test_process_one_falls_through_when_picked_candidate_missing(tmp_path: Path) -> None:
     """If picked_candidate_id points to a row that no longer exists
@@ -186,7 +190,6 @@ def test_process_one_falls_through_when_picked_candidate_missing(tmp_path: Path)
     # Verify the fallback event was logged
     events_db = deps.events.recent_for_book(bid)
     messages = [e.message for e in events_db]
-    assert any(
-        "not found" in (m or "") and "re-searching" in (m or "")
-        for m in messages
-    ), f"fallback event not found in: {messages}"
+    assert any("not found" in (m or "") and "re-searching" in (m or "") for m in messages), (
+        f"fallback event not found in: {messages}"
+    )

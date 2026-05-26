@@ -27,6 +27,7 @@ Ephemeral OAuth state
 ----------------------
     kindle_stk.oauth_state.code_verifier -- PKCE verifier, deleted after exchange
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -34,7 +35,7 @@ import logging
 import re
 import time
 import urllib.error
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -141,7 +142,7 @@ class KindleStkService:
         except requests.HTTPError as e:
             raise KindleStkUploadFailed(f"register_device failed: {e}") from e
 
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         self._svc.set_secret_values(
             {
                 "kindle_stk.device_cert.pem": result["device_private_key"],
@@ -196,13 +197,9 @@ class KindleStkService:
         Raises ValueError if device_sn is not in the current device list.
         """
         devices = self.list_devices()
-        match = next(
-            (d for d in devices if d.device_serial_number == device_sn), None
-        )
+        match = next((d for d in devices if d.device_serial_number == device_sn), None)
         if not match:
-            raise ValueError(
-                f"unknown device: {device_sn!r} is not in your device list"
-            )
+            raise ValueError(f"unknown device: {device_sn!r} is not in your device list")
         self._svc.set_secret_values(
             {
                 "kindle_stk.default_destination_sn": device_sn,
@@ -233,9 +230,7 @@ class KindleStkService:
             )
 
         devices = self.list_devices()
-        dest = next(
-            (d for d in devices if d.device_serial_number == dest_sn), None
-        )
+        dest = next((d for d in devices if d.device_serial_number == dest_sn), None)
         if not dest:
             raise KindleStkNotConfigured(
                 f"Default device {dest_sn!r} is no longer registered. Re-pick a device."
@@ -294,9 +289,7 @@ class KindleStkService:
             )
 
         devices = self.list_devices()
-        dest = next(
-            (d for d in devices if d.device_serial_number == dest_sn), None
-        )
+        dest = next((d for d in devices if d.device_serial_number == dest_sn), None)
         if not dest:
             raise KindleStkNotConfigured(
                 f"Default device {dest_sn!r} is no longer registered. Re-pick a device."
@@ -308,8 +301,7 @@ class KindleStkService:
             sz = fe.path.stat().st_size
             if sz > max_batch_bytes:
                 raise KindleStkBatchOverflow(
-                    f"File {fe.path.name!r} ({sz // 1_048_576} MB) exceeds "
-                    f"200 MB STK hard limit",
+                    f"File {fe.path.name!r} ({sz // 1_048_576} MB) exceeds 200 MB STK hard limit",
                     file_path=str(fe.path),
                     size_bytes=sz,
                 )

@@ -17,7 +17,7 @@ from endless_library.convert import ConvertError, convert_to_epub
 from endless_library.db.bench import BenchRunRepo
 from endless_library.db.bench_jobs import BenchJobsRepo
 from endless_library.db.books import BookRepo, BookRow
-from endless_library.db.candidates import CandidateRepo, CandidateRow
+from endless_library.db.candidates import CandidateRepo
 from endless_library.db.events import EventRepo
 from endless_library.db.mirrors import MirrorRepo
 from endless_library.db.schema import init_db
@@ -28,9 +28,13 @@ from endless_library.domain.scoring import score_candidate
 from endless_library.domain.state_machine import decide_auto_pick
 from endless_library.download import DownloadError, download
 from endless_library.kindle_router import (
-    deliver as _kindle_deliver,
-    deliver_batch as _kindle_deliver_batch,
     BookFile as _BookFile,
+)
+from endless_library.kindle_router import (
+    deliver as _kindle_deliver,
+)
+from endless_library.kindle_router import (
+    deliver_batch as _kindle_deliver_batch,
 )
 from endless_library.notifier import Notifier
 from endless_library.scrapers import registry as scrapers_registry
@@ -278,8 +282,11 @@ def _search_with_strategies(
         return [synth], "kindlebangla_curl"
 
     for s_name in scrapers_registry.chain_for_source(
-        deps.cfg.scrapers, source=_book_source, query_title=book.title or "",
-        is_pd=_is_pd, is_recent_release=_is_recent
+        deps.cfg.scrapers,
+        source=_book_source,
+        query_title=book.title or "",
+        is_pd=_is_pd,
+        is_recent_release=_is_recent,
     ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
@@ -398,8 +405,11 @@ def _resolve_and_download(
     last_error: str | None = None
     _is_pd, _is_recent, _book_source = _book_context(book, deps.cfg)
     for s_name in scrapers_registry.chain_for_source(
-        deps.cfg.scrapers, source=_book_source, query_title=book.title or "",
-        is_pd=_is_pd, is_recent_release=_is_recent
+        deps.cfg.scrapers,
+        source=_book_source,
+        query_title=book.title or "",
+        is_pd=_is_pd,
+        is_recent_release=_is_recent,
     ):
         try:
             scraper = scrapers_registry.build(s_name, deps.cfg.scrapers)
@@ -582,7 +592,8 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
             file_path, dl_err = _resolve_and_download(deps, book, picked_cand)
             if not file_path:
                 return _search_fail_or_skip(
-                    deps, book,
+                    deps,
+                    book,
                     dl_err or f"manual pick (cand {book.picked_candidate_id}) failed to download",
                 )
             return _process_from_downloaded(deps, book, file_path)
@@ -858,11 +869,7 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
     _bo_already_done = any(
         e.kind == "bookorbit" for e in deps.events.recent_for_book(book.id, limit=200)
     )
-    if (
-        not _bo_already_done
-        and deps.cfg.bookorbit.enabled
-        and deps.cfg.bookorbit.library_root
-    ):
+    if not _bo_already_done and deps.cfg.bookorbit.enabled and deps.cfg.bookorbit.library_root:
         library_root_path = Path(deps.cfg.bookorbit.library_root)
         if not library_root_path.exists():
             log.warning(
@@ -920,7 +927,11 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
         # STK delivery: kindle_router.deliver() already recorded the send-stk event.
         # SMTP delivery: kindle_router._smtp_deliver() does NOT record events, so we do it here.
         if result.method.value != "stk":
-            deps.events.append(book_id=book.id, kind=f"send-{result.method.value}", message=f"sent via {result.method.value}")
+            deps.events.append(
+                book_id=book.id,
+                kind=f"send-{result.method.value}",
+                message=f"sent via {result.method.value}",
+            )
         deps.notifier.book_sent(book.title, book.author, file_path.suffix.lstrip("."))
         return "sent"
     else:
@@ -948,8 +959,12 @@ def process_queue(deps: PipelineDeps) -> dict[str, int]:
 
     deps.books.reset_zombies(stale_minutes=deps.cfg.general.zombie_stale_minutes)
     tally: dict[str, int] = {
-        "sent": 0, "failed": 0, "needs_review": 0,
-        "skipped": 0, "deferred": 0, "in_flight": 0,
+        "sent": 0,
+        "failed": 0,
+        "needs_review": 0,
+        "skipped": 0,
+        "deferred": 0,
+        "in_flight": 0,
     }
 
     # Determine whether to use STK batch mode.
@@ -992,14 +1007,15 @@ def process_queue(deps: PipelineDeps) -> dict[str, int]:
                 db_path=deps.db_path,
                 svc=deps.bookorbit_service,
             )
-            for (b, fp), result in zip(pending_delivery, results):
+            for (b, fp), result in zip(pending_delivery, results, strict=False):
                 if result.ok:
                     deps.books.mark_kindled(b.id, method=result.method.value)
                     # deliver_batch() already records send-stk events (batch path).
                     # For SMTP fallback from a failed batch, record the event here.
                     if result.method.value != "stk":
                         deps.events.append(
-                            book_id=b.id, kind=f"send-{result.method.value}",
+                            book_id=b.id,
+                            kind=f"send-{result.method.value}",
                             message=f"sent via {result.method.value}",
                         )
                     deps.notifier.book_sent(b.title, b.author, fp.suffix.lstrip("."))

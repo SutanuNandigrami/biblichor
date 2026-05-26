@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .schema import connect
@@ -21,7 +21,7 @@ class BenchJobRow:
     cancel_requested: int = 0  # stored in DB column
 
     @classmethod
-    def from_row(cls, r: sqlite3.Row) -> "BenchJobRow":
+    def from_row(cls, r: sqlite3.Row) -> BenchJobRow:
         return cls(
             id=r["id"],
             started_at=r["started_at"],
@@ -36,7 +36,7 @@ class BenchJobRow:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class BenchJobsRepo:
@@ -82,9 +82,7 @@ class BenchJobsRepo:
 
     def get(self, job_id: int) -> BenchJobRow | None:
         with connect(self.db_path) as conn:
-            r = conn.execute(
-                "SELECT * FROM bench_jobs WHERE id = ?", (job_id,)
-            ).fetchone()
+            r = conn.execute("SELECT * FROM bench_jobs WHERE id = ?", (job_id,)).fetchone()
         return BenchJobRow.from_row(r) if r else None
 
     def list_recent(self, limit: int = 20) -> list[BenchJobRow]:

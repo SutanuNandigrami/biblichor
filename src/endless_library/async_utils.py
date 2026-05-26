@@ -12,12 +12,12 @@ Usage:
     from endless_library.async_utils import _run_async
     result = _run_async(some_async_fn())
 """
+
 from __future__ import annotations
 
 import asyncio
 import concurrent.futures as _cf
 import threading
-
 
 _RUN_ASYNC_EXECUTOR: _cf.ThreadPoolExecutor | None = None
 _RUN_ASYNC_LOCK = threading.Lock()

@@ -12,24 +12,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from endless_library.db.bench_jobs import BenchJobsRepo
-
-from endless_library.bench import format_table, load_queries, run_bench
+from endless_library.bench import load_queries, run_bench
 from endless_library.config import save_config
 from endless_library.db.schema import connect
-from endless_library.url_safety import UnsafeUrlError, assert_safe_url
-
 from endless_library.kindle_stk import (
-    KindleStkService,
     KindleStkAuthExpired,
     KindleStkNotConfigured,
     KindleStkRateLimited,
+    KindleStkService,
     KindleStkUploadFailed,
 )
+from endless_library.url_safety import UnsafeUrlError, assert_safe_url
 
 log = logging.getLogger(__name__)
 
@@ -195,7 +192,9 @@ def _compute_bookorbit_urls(request: Request, cfg) -> dict[str, str]:
 
 
 # Phase 6w ultrareview C3: consolidated scraper→site mapping lives in registry.
-from endless_library.scrapers.registry import SCRAPER_TO_OPEN_SLUM_SITE as _SCRAPER_TO_SITE
+from endless_library.scrapers.registry import (  # noqa: E402
+    SCRAPER_TO_OPEN_SLUM_SITE as _SCRAPER_TO_SITE,
+)
 
 
 def _scraper_upstream_status(request) -> dict[str, dict]:
@@ -411,6 +410,7 @@ def register(app: FastAPI) -> None:
                 ).rowcount
             conn.commit()
         return {"deleted": n, "hard": payload.hard}
+
     @router.post("/books/{book_id}/delete")
     def soft_delete(book_id: int, request: Request):
         deps = request.app.state.deps
@@ -604,6 +604,7 @@ def register(app: FastAPI) -> None:
         # the registry as the source of truth means future sources
         # auto-enable here.
         from endless_library.sources import registry as _src_reg
+
         if payload.source not in _src_reg._SOURCES:
             raise HTTPException(400, detail="unknown source")
         try:
@@ -717,7 +718,6 @@ def register(app: FastAPI) -> None:
         save_config(deps.cfg, request.app.state.config_path)
         return {"ok": True, "order": deps.cfg.scrapers.order}
 
-
     @router.get("/scrapers/{name}/excluded-categories")
     def get_excluded_categories(name: str, request: Request):
         deps = request.app.state.deps
@@ -776,6 +776,7 @@ def register(app: FastAPI) -> None:
             qs = [qs[i] for i in quick_idx if i < len(qs)]
         from endless_library.bench import load_corpus_tags, queries_for_scraper
         from endless_library.scrapers import registry
+
         strats = registry.enabled_order(deps.cfg.scrapers)
         # I5: load corpus_tags once -- not once per scraper inside the worker
         # (each call to run_bench(corpus_tags=None) would reload from disk).
@@ -787,9 +788,7 @@ def register(app: FastAPI) -> None:
         # I6: progress_total = actual query count per scraper (not len*len).
         # Each scraper runs only against its corpus-filtered subset; using
         # len(strats)*len(qs) overcounts and the progress bar never reaches 100%.
-        progress_total = sum(
-            len(queries_for_scraper(qs, s, corpus_tags)) for s in strats
-        )
+        progress_total = sum(len(queries_for_scraper(qs, s, corpus_tags)) for s in strats)
         job_id = deps.bench_jobs.create(mode=mode, progress_total=progress_total)
         asyncio.create_task(_bench_worker(deps, job_id, qs, strats, corpus_tags))
         return {"job_id": job_id}
@@ -802,27 +801,41 @@ def register(app: FastAPI) -> None:
         file on every call.
         """
         from functools import partial
+
         try:
             outcomes_so_far: list = []
             for s_name in strats:
                 if deps.bench_jobs.is_cancel_requested(job_id):
-                    deps.bench_jobs.finish(job_id, status="cancelled",
-                                           summary_json=json.dumps([asdict(o) for o in outcomes_so_far]))
+                    deps.bench_jobs.finish(
+                        job_id,
+                        status="cancelled",
+                        summary_json=json.dumps([asdict(o) for o in outcomes_so_far]),
+                    )
                     return
                 os_for_one = await asyncio.to_thread(
-                    partial(run_bench, deps.cfg, qs, repo=deps.bench, strategies=[s_name],
-                            corpus_tags=corpus_tags)
+                    partial(
+                        run_bench,
+                        deps.cfg,
+                        qs,
+                        repo=deps.bench,
+                        strategies=[s_name],
+                        corpus_tags=corpus_tags,
+                    )
                 )
                 outcomes_so_far.extend(os_for_one)
                 for _ in os_for_one:
                     deps.bench_jobs.increment_progress(job_id)
             deps.bench_jobs.finish(
-                job_id, status="done",
+                job_id,
+                status="done",
                 summary_json=json.dumps([asdict(o) for o in outcomes_so_far]),
             )
         except Exception as e:
-            deps.bench_jobs.finish(job_id, status="failed",
-                                   summary_json=json.dumps({"error": f"{type(e).__name__}: {e}"}))
+            deps.bench_jobs.finish(
+                job_id,
+                status="failed",
+                summary_json=json.dumps({"error": f"{type(e).__name__}: {e}"}),
+            )
 
     @router.get("/bench/jobs")
     def list_bench_jobs(request: Request, limit: int = 20):
@@ -872,13 +885,18 @@ def register(app: FastAPI) -> None:
                     yield "event: " + r.status + "\ndata: " + summary + "\n\n"
                     return
                 await asyncio.sleep(SSE_POLL_INTERVAL_SEC)
+
         return StreamingResponse(_events(), media_type="text/event-stream")
 
     def _job_row_to_dict(r):
         return {
-            "id": r.id, "started_at": r.started_at, "finished_at": r.finished_at,
-            "mode": r.mode, "status": r.status,
-            "progress_done": r.progress_done, "progress_total": r.progress_total,
+            "id": r.id,
+            "started_at": r.started_at,
+            "finished_at": r.finished_at,
+            "mode": r.mode,
+            "status": r.status,
+            "progress_done": r.progress_done,
+            "progress_total": r.progress_total,
             "summary_json": r.summary_json,
         }
 
@@ -938,14 +956,13 @@ def register(app: FastAPI) -> None:
         from functools import partial as _partial
 
         from endless_library.bench import BenchQuery as _BQ
-        from endless_library.bench import load_corpus_tags, run_bench as _run_bench
+        from endless_library.bench import load_corpus_tags
+        from endless_library.bench import run_bench as _run_bench
         from endless_library.scrapers import registry
 
         deps = request.app.state.deps
         query = _BQ("Pride and Prejudice", "Austen", "", "en", tags=("en", "pd"))
-        chain = registry.pd_aware_order(
-            deps.cfg.scrapers, query_title=query.title, is_pd=True
-        )
+        chain = registry.pd_aware_order(deps.cfg.scrapers, query_title=query.title, is_pd=True)
         corpus_tags = load_corpus_tags()
         outcomes = await asyncio.to_thread(
             _partial(
@@ -1259,20 +1276,33 @@ def register(app: FastAPI) -> None:
         # so a stalled BO can't slow healthz.
         try:
             _bo_cfg = getattr(deps.cfg, "bookorbit", None)
-            if _bo_cfg is not None and getattr(_bo_cfg, "enabled", False) and getattr(_bo_cfg, "url", ""):
-                import urllib.request as _urlreq
+            if (
+                _bo_cfg is not None
+                and getattr(_bo_cfg, "enabled", False)
+                and getattr(_bo_cfg, "url", "")
+            ):
                 import urllib.error as _urlerr
+                import urllib.request as _urlreq
+
                 _url = str(_bo_cfg.url).rstrip("/") + "/api/v1/health"
                 try:
                     with _urlreq.urlopen(_url, timeout=2.0) as _resp:
                         if 200 <= _resp.status < 300:
                             body["bookorbit"] = {"reachable": True, "url": _url}
                         else:
-                            body["bookorbit"] = {"reachable": False, "url": _url, "error": f"http {_resp.status}"}
+                            body["bookorbit"] = {
+                                "reachable": False,
+                                "url": _url,
+                                "error": f"http {_resp.status}",
+                            }
                             body["ok"] = False
                             ok = False
                 except (_urlerr.URLError, TimeoutError, OSError) as _e:
-                    body["bookorbit"] = {"reachable": False, "url": _url, "error": f"{type(_e).__name__}: {_e}"}
+                    body["bookorbit"] = {
+                        "reachable": False,
+                        "url": _url,
+                        "error": f"{type(_e).__name__}: {_e}",
+                    }
                     body["ok"] = False
                     ok = False
             else:
@@ -1649,10 +1679,12 @@ def register(app: FastAPI) -> None:
         is never left with new username + old password (ultrareview I13).
         """
         svc = _bookorbit_service(request)
-        svc.set_secret_values({
-            "mobilism.username": payload.username,
-            "mobilism.password": payload.password,
-        })
+        svc.set_secret_values(
+            {
+                "mobilism.username": payload.username,
+                "mobilism.password": payload.password,
+            }
+        )
         return {"ok": True}
 
     @router.delete("/scrapers/mobilism/creds")
@@ -1672,7 +1704,9 @@ def register(app: FastAPI) -> None:
         accidentally pick up a test-credential session (ultrareview I1).
         """
         from types import SimpleNamespace
+
         from endless_library.scrapers.mobilism import MobilismSession
+
         cfg_stub = SimpleNamespace(
             mobilism_username=payload.username,
             mobilism_password=payload.password,
@@ -1817,9 +1851,10 @@ def register(app: FastAPI) -> None:
             raise HTTPException(400, "missing target_version")
         try:
             from endless_library.bookorbit.upgrade import _validate_target_version
+
             _validate_target_version(target)
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise HTTPException(400, str(e))  # noqa: B904
 
         deps = request.app.state.deps
         svc = _bookorbit_service(request)
@@ -1879,9 +1914,10 @@ def register(app: FastAPI) -> None:
                 raise HTTPException(400, "missing target_version and/or token")
             try:
                 from endless_library.bookorbit.upgrade import _validate_target_version
+
                 _validate_target_version(target)
             except ValueError as e:
-                raise HTTPException(400, str(e))
+                raise HTTPException(400, str(e))  # noqa: B904
 
             state = _upgrade_state(request.app)
             expected_token = state.get("token", "")
@@ -1901,6 +1937,7 @@ def register(app: FastAPI) -> None:
                 # Dev/host fallback — the SPA might be running outside the
                 # container in pytest.
                 from endless_library import __file__ as pkg_root
+
                 repo_root = Path(pkg_root).resolve().parent.parent.parent
                 compose_path = repo_root / "deploy" / "compose.yml"
                 env_file = repo_root / ".env"
@@ -1933,13 +1970,21 @@ def register(app: FastAPI) -> None:
 
         return {"token": BookOrbitService.generate_setup_token()}
 
-
     # Kindle Send-to-Kindle (Phase STK 9) --------------------------------
 
     _KNOWN_AMAZON_DOMAINS = {
-        "amazon.com", "amazon.in", "amazon.co.uk", "amazon.de", "amazon.fr",
-        "amazon.it", "amazon.es", "amazon.co.jp", "amazon.com.au", "amazon.ca",
-        "amazon.com.br", "amazon.com.mx",
+        "amazon.com",
+        "amazon.in",
+        "amazon.co.uk",
+        "amazon.de",
+        "amazon.fr",
+        "amazon.it",
+        "amazon.es",
+        "amazon.co.jp",
+        "amazon.com.au",
+        "amazon.ca",
+        "amazon.com.br",
+        "amazon.com.mx",
     }
 
     @router.get("/kindle-stk/status")
@@ -1955,12 +2000,8 @@ def register(app: FastAPI) -> None:
             return {"configured": False, "amazon_domain": amazon_domain}
         return {
             "configured": True,
-            "customer_id": deps.bookorbit_service.get_secret_value(
-                "kindle_stk.amazon_customer_id"
-            ),
-            "registered_at": deps.bookorbit_service.get_secret_value(
-                "kindle_stk.registered_at"
-            ),
+            "customer_id": deps.bookorbit_service.get_secret_value("kindle_stk.amazon_customer_id"),
+            "registered_at": deps.bookorbit_service.get_secret_value("kindle_stk.registered_at"),
             "default_destination": deps.bookorbit_service.get_secret_value(
                 "kindle_stk.default_destination_name"
             ),
@@ -2038,7 +2079,8 @@ def register(app: FastAPI) -> None:
             "devices": [
                 {
                     "device_serial_number": d.device_serial_number,
-                    "device_type": getattr(d, "device_type", "") or _derive_device_type(getattr(d, "device_capabilities", {})),
+                    "device_type": getattr(d, "device_type", "")
+                    or _derive_device_type(getattr(d, "device_capabilities", {})),
                     "device_name": d.device_name,
                     # Expose raw capabilities so the SPA can do its own
                     # Kindle-for-Web detection without trusting our heuristic.
@@ -2070,24 +2112,18 @@ def register(app: FastAPI) -> None:
 
         deps = request.app.state.deps
         svc = KindleStkService(deps.bookorbit_service)
-        with tempfile.NamedTemporaryFile(
-            suffix=".txt", delete=False, mode="w"
-        ) as f:
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w") as f:
             f.write("biblichor connection test -- Phase STK 9.")
             tmp = Path(f.name)
         try:
-            result = svc.send_file(
-                tmp, format="TXT", title="biblichor test", author="biblichor"
-            )
+            result = svc.send_file(tmp, format="TXT", title="biblichor test", author="biblichor")
             return {"ok": True, "result": result}
         except KindleStkNotConfigured as e:
             raise HTTPException(400, str(e)) from e
         except KindleStkAuthExpired as e:
             raise HTTPException(401, str(e)) from e
         except KindleStkRateLimited as e:
-            raise HTTPException(
-                429, str(e), headers={"Retry-After": str(e.retry_after_sec)}
-            ) from e
+            raise HTTPException(429, str(e), headers={"Retry-After": str(e.retry_after_sec)}) from e
         except KindleStkUploadFailed as e:
             raise HTTPException(502, str(e)) from e
         finally:
@@ -2368,9 +2404,7 @@ def register(app: FastAPI) -> None:
             with contextlib.suppress(Exception):
                 await socket.close()
 
-
     _register_dashboard(app)
-
 
 
 # Dashboard aggregation (Phase dashboard-live)
@@ -2384,9 +2418,9 @@ DASHBOARD_INTERVAL_SEC: float = 3.0
 
 def compute_dashboard_snapshot(db_path) -> dict:
     """Pure aggregation - no FastAPI deps, testable standalone."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     cutoff_str = (now_utc - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
 
     with connect(db_path) as conn:
@@ -2432,8 +2466,9 @@ def compute_dashboard_snapshot(db_path) -> dict:
 
         for r in tp_rows:
             try:
-                from datetime import datetime as _dt2, timezone as _tz2
-                dt = _dt2.strptime(str(r["minute"]), "%Y-%m-%dT%H:%M:00Z").replace(tzinfo=_tz2.utc)
+                from datetime import datetime as _dt2
+
+                dt = _dt2.strptime(str(r["minute"]), "%Y-%m-%dT%H:%M:00Z").replace(tzinfo=UTC)
                 bucket = _bucket_label(dt)
             except Exception:
                 continue
@@ -2446,7 +2481,10 @@ def compute_dashboard_snapshot(db_path) -> dict:
             "bucket_minutes": bucket_minutes,
             "series": [
                 {"name": "stk", "points": [{"t": lbl, "v": stk_map.get(lbl, 0)} for lbl in labels]},
-                {"name": "smtp", "points": [{"t": lbl, "v": smtp_map.get(lbl, 0)} for lbl in labels]},
+                {
+                    "name": "smtp",
+                    "points": [{"t": lbl, "v": smtp_map.get(lbl, 0)} for lbl in labels],
+                },
             ],
         }
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import struct
 import zipfile
 from pathlib import Path
 
@@ -112,11 +111,12 @@ def test_safe_extract_rar_rejects_absolute_path_via_bsdtar(tmp_path: Path) -> No
             m.stderr = "unexpected"
         return m
 
-    with patch(
-        "subprocess.run", side_effect=fake_run
-    ), patch(
-        "shutil.which",
-        return_value="/usr/bin/bsdtar",
+    with (
+        patch("subprocess.run", side_effect=fake_run),
+        patch(
+            "shutil.which",
+            return_value="/usr/bin/bsdtar",
+        ),
     ):
         # No ebook ends up inside dest, so _extract_and_pick raises.
         # This is the expected safe outcome — the caller gets an error,

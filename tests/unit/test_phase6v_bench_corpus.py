@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 from endless_library.bench import (
@@ -19,7 +18,6 @@ from endless_library.bench import (
     load_queries,
     queries_for_scraper,
 )
-
 
 BENCH_FILE = Path(__file__).resolve().parent.parent.parent / "bench" / "queries.yaml"
 
@@ -102,9 +100,12 @@ def test_legacy_query_without_tags_treated_as_general(tmp_path: Path):
     # General-purpose scraper (not in corpus_tags) still gets it.
     assert len(queries_for_scraper(qs, "annas_curl", {})) == 1
     # Specialised scraper with no intersection (untagged) gets nothing.
-    assert queries_for_scraper(
-        qs, "kindlebangla_curl", {"kindlebangla_curl": frozenset({"kindlebangla"})}
-    ) == []
+    assert (
+        queries_for_scraper(
+            qs, "kindlebangla_curl", {"kindlebangla_curl": frozenset({"kindlebangla"})}
+        )
+        == []
+    )
 
 
 def test_load_corpus_tags_missing_section_is_empty(tmp_path: Path):
