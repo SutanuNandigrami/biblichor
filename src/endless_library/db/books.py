@@ -338,6 +338,35 @@ class BookRepo:
                 (book_id,),
             )
 
+    def reset_for_redownload(self, book_id: int) -> None:
+        """Narrow reset for re-downloading the SAME picked candidate.
+        Preserves picked_candidate_id, candidates, and searched_at.
+        Clears only download/convert/send state + attempts so the
+        pipeline re-attempts the existing target.
+
+        Use case: download failed due to transient upstream issue
+        (CDN drop, IPFS gateway 5xx). The user already chose the
+        right book; making them re-pick from a fresh search is
+        wasteful and risks auto-pick choosing a different MD5.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE books SET "
+                "  status = 'queued', "
+                "  attempts = 0, "
+                "  last_error = NULL, "
+                "  downloaded_at = NULL, "
+                "  converted_at = NULL, "
+                "  sent_at = NULL, "
+                "  file_path = NULL, "
+                "  md5 = NULL, "
+                "  format = NULL, "
+                "  file_size = NULL, "
+                "  updated_at = datetime('now') "
+                "WHERE id = ?",
+                (book_id,),
+            )
+
     def reset_zombies(self, *, stale_minutes: int) -> int:
         """Recover books stuck in mid-pipeline status (searching /
         downloading / converting / sending) for longer than

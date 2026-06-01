@@ -139,8 +139,9 @@ async function add() {
 
 async function retry(b: Book) {
   try {
-    await api(`/api/books/${b.id}/retry`, { method: 'POST' })
-    toast.success(`Re-queued: ${b.title}`)
+    const r: any = await api(`/api/books/${b.id}/retry-download`, { method: 'POST' })
+    const label = r?.mode === 'redownload' ? 'Retrying download' : 'Re-queued'
+    toast.success(`${label}: ${b.title}`)
     await fetchBooks()
   } catch (e: any) { toast.error('Retry failed', String(e?.message ?? e)) }
 }
