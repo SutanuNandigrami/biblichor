@@ -2280,18 +2280,39 @@ def register(app: FastAPI) -> None:
         ):
             augmented_title = f"{q_clean} {_LANG_NAME[effective_lang]}"
 
-        query = SearchQuery(
-            title=augmented_title,
-            author=None,
-            isbn13=None,
-            # Interactive search hits Anna's once. Pipeline-side scraper
-            # iterates the full format ladder (epub->azw3->mobi->pdf), each one
-            # an HTTP call -- fine for batch download where you want any format,
-            # ruinous for keystroke latency. Limit to the user's top choice;
-            # if no epub exists, the SPA can hint that explicitly later.
-            format_priority=((getattr(sc, "format_priority", None) or ["epub"])[0],),
-            language=effective_lang,
-        )
+        # Native-script rewrite for Latin queries on non-English langs.
+        # `kriya` + bn -> `ক্রিয়া`; Anna's full-text matches the catalog's
+        # native-script titles literally, so this is what actually finds
+        # native-language books. See search/transliteration.py for why.
+        from endless_library.search.transliteration import transliterate_query
+        transliterated_title: str | None = None
+        if (
+            user_picked_lang
+            and effective_lang != "en"
+            and not any(ord(ch) > 0x024F for ch in q_clean)
+        ):
+            transliterated_title = transliterate_query(q_clean, effective_lang)
+
+        def _mk_query(title: str) -> SearchQuery:
+            return SearchQuery(
+                title=title,
+                author=None,
+                isbn13=None,
+                # Interactive search hits Anna's once. Pipeline-side scraper
+                # iterates the full format ladder (epub->azw3->mobi->pdf), each one
+                # an HTTP call -- fine for batch download where you want any format,
+                # ruinous for keystroke latency. Limit to the user's top choice;
+                # if no epub exists, the SPA can hint that explicitly later.
+                format_priority=((getattr(sc, "format_priority", None) or ["epub"])[0],),
+                language=effective_lang,
+            )
+
+        # Run augmented + transliterated as two distinct Anna's queries.
+        # Dedup happens downstream by md5. If transliteration produced
+        # nothing useful, the dual call is a no-op (same query, deduped).
+        queries: list[SearchQuery] = [_mk_query(augmented_title)]
+        if transliterated_title and transliterated_title != augmented_title:
+            queries.append(_mk_query(transliterated_title))
 
         # Tight per-scraper budget. Anna's typically returns in <1s; 3s gives
         # slower sources a fair shake without blocking the UI.
@@ -2300,18 +2321,22 @@ def register(app: FastAPI) -> None:
         skipped: list[dict] = []
         merged: list = []
 
-        def _run_one(name: str):
+        def _run_one(name_q: tuple[str, SearchQuery]):
+            name, q = name_q
             try:
                 sc_inst = _reg.build(name, sc)
             except Exception as e:
                 return name, None, f"build failed: {type(e).__name__}: {e}"
             try:
-                return name, list(sc_inst.search(query)), None
+                return name, list(sc_inst.search(q)), None
             except Exception as e:
                 return name, None, f"{type(e).__name__}: {e}"
 
-        with _cf.ThreadPoolExecutor(max_workers=min(len(scraper_names), 6)) as ex:
-            futures = {ex.submit(_run_one, n): n for n in scraper_names}
+        # One job per (scraper, query) pair. For the common single-query case
+        # this collapses to the original N-scrapers-1-query fan-out.
+        jobs: list[tuple[str, SearchQuery]] = [(n, q) for n in scraper_names for q in queries]
+        with _cf.ThreadPoolExecutor(max_workers=min(len(jobs), 6)) as ex:
+            futures = {ex.submit(_run_one, j): j[0] for j in jobs}
             # NOTE: as_completed() itself raises TimeoutError when the outer
             # deadline expires with futures still pending. PR #6 only caught
             # exceptions inside the loop body, so a slow scraper exploded the
@@ -2442,14 +2467,20 @@ def register(app: FastAPI) -> None:
                     "in_library": in_lib.get(c.md5) if c.md5 else None,
                 }
             )
+        # Dedup sources_used — with dual queries the same scraper appears
+        # in `used` twice (one per query). Preserve first-seen order.
+        _seen_used: set[str] = set()
+        used_dedup = [n for n in used if not (n in _seen_used or _seen_used.add(n))]
         return {
             "query": q_clean,
             "lang": effective_lang,
             "language_filter_applied": language_filter_applied,
             "count": len(results_out),
             "results": results_out,
-            "sources_used": used,
+            "sources_used": used_dedup,
             "sources_skipped": skipped,
+            "augmented_query": augmented_title if augmented_title != q_clean else None,
+            "transliterated_query": transliterated_title,
         }
 
     @router.post("/books/from-search")
