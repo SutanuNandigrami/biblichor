@@ -363,11 +363,14 @@ def _fake_cand_bn(md5: str, *, title: str) -> Candidate:
     )
 
 
-def test_search_with_bengali_lang_augments_and_filters_by_script(tmp_path):
+def test_search_with_bengali_lang_runs_both_augmented_and_transliterated(tmp_path):
     """User picks Bengali AND types Latin 'kriya yoga'. Endpoint should
-    (a) augment the query to 'kriya yoga bengali' before hitting Annas,
-    (b) post-filter results so only Bengali-script titles or language=bn
-    entries survive."""
+    (a) augment one query to 'kriya yoga bengali' (catches English-titled
+        Bengali translations),
+    (b) ALSO run the transliterated query 'ক্রিয়া যোগ' (catches native-
+        script Bengali books — the actual goal),
+    (c) post-filter results to only Bengali-script / lang=bn entries.
+    """
     app, _, _ = _make_app(tmp_path)
     seen_query: list[str] = []
     fake = [
@@ -386,12 +389,15 @@ def test_search_with_bengali_lang_augments_and_filters_by_script(tmp_path):
 
     assert r.status_code == 200, r.text
     body = r.json()
-    # Augmentation: scraper saw the augmented form
-    assert seen_query == ["kriya yoga bengali"], seen_query
+    # Both queries fire (order may vary by thread scheduling)
+    assert set(seen_query) == {"kriya yoga bengali", "ক্রিয়া যোগ"}, seen_query
     # Post-filter: only the Bengali-script candidate made it through
     assert body["count"] == 1
     assert body["results"][0]["md5"] == "b" * 32
     assert body["language_filter_applied"] is True
+    # Response surfaces both for SPA introspection
+    assert body["augmented_query"] == "kriya yoga bengali"
+    assert body["transliterated_query"] == "ক্রিয়া যোগ"
 
 
 def test_search_with_lang_all_does_not_augment_or_filter(tmp_path):
@@ -428,3 +434,46 @@ def test_search_bengali_filter_falls_back_when_zero_matches(tmp_path):
     body = r.json()
     assert body["count"] == 1
     assert body["language_filter_applied"] is False
+
+def test_search_transliteration_does_not_fire_for_native_script_input(tmp_path):
+    """If the user already typed Bengali script, no transliteration —
+    the input IS the native form. Only one query goes to Anna's."""
+    app, _, _ = _make_app(tmp_path)
+    seen_query: list[str] = []
+    fake = [_fake_cand_bn("a" * 32, title="রবীন্দ্রনাথ")]
+
+    class _SpyScraper:
+        def search(self, query):
+            seen_query.append(query.title)
+            return fake
+
+    with patch("endless_library.scrapers.registry.build", return_value=_SpyScraper()):
+        r = TestClient(app).get("/api/search?q=%E0%A6%B0%E0%A6%AC%E0%A7%80%E0%A6%A8%E0%A7%8D%E0%A6%A6%E0%A7%8D%E0%A6%B0%E0%A6%A8%E0%A6%BE%E0%A6%A5&lang=bn")
+
+    assert r.status_code == 200
+    body = r.json()
+    # Exactly one query, unchanged
+    assert seen_query == ["রবীন্দ্রনাথ"]
+    assert body["augmented_query"] is None
+    assert body["transliterated_query"] is None
+
+
+def test_search_lang_all_does_not_transliterate(tmp_path):
+    """lang=all leaves the query untouched: no augmentation, no
+    transliteration, no script post-filter."""
+    app, _, _ = _make_app(tmp_path)
+    seen: list[str] = []
+    fake = [_fake_candidate("a" * 32, title="kriya yoga")]
+
+    class _SpyScraper:
+        def search(self, query):
+            seen.append(query.title)
+            return fake
+
+    with patch("endless_library.scrapers.registry.build", return_value=_SpyScraper()):
+        r = TestClient(app).get("/api/search?q=kriya%20yoga&lang=all")
+
+    assert seen == ["kriya yoga"]
+    body = r.json()
+    assert body["augmented_query"] is None
+    assert body["transliterated_query"] is None
