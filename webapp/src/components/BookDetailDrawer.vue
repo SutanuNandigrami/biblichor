@@ -76,9 +76,15 @@ async function load() {
 onMounted(load)
 watch(() => props.id, load)
 
-async function retry() {
+async function retryDownload() {
+  const r: any = await api(`/api/books/${props.id}/retry-download`, { method: 'POST' })
+  toast.success(r?.mode === 'redownload' ? 'Retrying download (same pick)' : 'Re-queued')
+  await load()
+}
+async function research() {
+  if (!confirm('Re-search will clear the current picked candidate and search again from scratch. Continue?')) return
   await api(`/api/books/${props.id}/retry`, { method: 'POST' })
-  toast.success('Re-queued')
+  toast.success('Re-queued (full re-search)')
   await load()
 }
 async function del() {
@@ -123,7 +129,8 @@ function size(b?: number | null) {
           {{ book.last_error }}
         </div>
         <div class="mt-4 flex gap-2">
-          <Button variant="subtle" size="sm" @click="retry">Retry</Button>
+          <Button variant="subtle" size="sm" @click="retryDownload">Retry download</Button>
+          <Button variant="ghost" size="sm" @click="research" title="Clear pick and search again from scratch">Re-search</Button>
           <Button variant="ghost" size="sm" @click="del">Delete</Button>
         </div>
       </section>

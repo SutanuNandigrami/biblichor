@@ -341,9 +341,11 @@ def register(app: FastAPI) -> None:
 
     @router.post("/books/{book_id}/retry")
     def retry(book_id: int, request: Request):
-        """Full reset → re-queued. Clears stage timestamps + on-disk
-        file reference + picked candidate so the next pipeline cycle
-        actually re-searches instead of resuming a stale download.
+        """Full re-search reset. Clears picked candidate + every
+        stage timestamp so the next pipeline cycle re-searches
+        from scratch. Use when the original pick was wrong.
+        For 'download failed, try the same file again', see
+        /retry-download which preserves the pick.
         """
         deps = request.app.state.deps
         if not deps.books.get(book_id):
@@ -351,9 +353,41 @@ def register(app: FastAPI) -> None:
         deps.books.reset_for_research(book_id)
         deps.cands.clear_for_book(book_id)
         deps.events.append(
-            book_id=book_id, kind="state_change", message="manually re-queued from dashboard"
+            book_id=book_id,
+            kind="state_change",
+            message="manually re-queued from dashboard (full re-search)",
         )
-        return {"ok": True}
+        return {"ok": True, "mode": "research"}
+
+    @router.post("/books/{book_id}/retry-download")
+    def retry_download(book_id: int, request: Request):
+        """Retry the download with the existing picked candidate.
+        Use when a previous download failed for a transient reason
+        (CDN drop, IPFS 5xx) and the picked candidate is still the
+        right book. Falls back to full re-search if there is no
+        picked candidate yet (so the button is never a no-op).
+        """
+        deps = request.app.state.deps
+        book = deps.books.get(book_id)
+        if not book:
+            raise HTTPException(404)
+        if book.picked_candidate_id is None:
+            deps.books.reset_for_research(book_id)
+            deps.cands.clear_for_book(book_id)
+            deps.events.append(
+                book_id=book_id,
+                kind="state_change",
+                message="manually re-queued from dashboard (no prior pick → re-search)",
+            )
+            return {"ok": True, "mode": "research"}
+        pcid = book.picked_candidate_id
+        deps.books.reset_for_redownload(book_id)
+        deps.events.append(
+            book_id=book_id,
+            kind="state_change",
+            message=f"manually re-queued from dashboard (retry download, pick #{pcid} preserved)",
+        )
+        return {"ok": True, "mode": "redownload", "picked_candidate_id": pcid}
 
     @router.post("/books/bulk_delete")
     def bulk_delete(payload: BulkDelete, request: Request):

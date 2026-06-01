@@ -136,3 +136,105 @@ def test_setup_status(client):
     body = r.json()
     assert "sources_count" in body
     assert "smtp_configured" in body
+
+def _insert_candidate(deps, bid: int, md5: str, title: str) -> int:
+    return deps.cands.insert(
+        book_id=bid,
+        provider="annas",
+        md5=md5,
+        title=title,
+        author=None,
+        language=None,
+        format="pdf",
+        filesize_bytes=120_000_000,
+        year=None,
+        publisher=None,
+        edition_hints="",
+        score=100.0,
+        detail_url=f"https://annas-archive.gl/md5/{md5}",
+        raw_json="{}",
+    )
+
+
+def test_retry_download_preserves_pick_and_candidates(client):
+    """retry-download must NOT clear picked_candidate_id or candidates
+    when a pick is already set — that was the bug the user hit on book
+    নেতাজি ফিরেছিলেন: dashboard 'Retry' wiped the pick and forced a
+    re-search instead of just re-attempting the download.
+    """
+    c, deps = client
+    bid = deps.books.upsert(
+        title="Netaji",
+        author=None,
+        isbn13=None,
+        source="manual",
+        source_id="m-netaji",
+    )
+    cid = _insert_candidate(deps, bid, "a" * 32, "Netaji Firechilen")
+    # Set picked via the API to mirror real flow
+    pr = c.post(f"/api/books/{bid}/pick/{cid}")
+    assert pr.status_code == 200
+    deps.books.set_status(bid, "searching")
+    deps.books.set_status(bid, "downloading")
+    deps.books.set_status(bid, "failed", error="HTTP 520 from welib gateway")
+
+    r = c.post(f"/api/books/{bid}/retry-download")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mode"] == "redownload"
+    assert body["picked_candidate_id"] == cid
+
+    book = deps.books.get(bid)
+    assert book.status == "queued"
+    assert book.last_error is None
+    assert book.attempts == 0
+    # The critical assertions — pick + candidates preserved
+    assert book.picked_candidate_id == cid
+    assert len(deps.cands.top_for_book(bid, limit=10)) == 1
+
+
+def test_retry_download_falls_back_to_research_when_no_pick(client):
+    """If no candidate has been picked yet, retry-download falls back to
+    full re-search so the button is never a no-op."""
+    c, deps = client
+    bid = deps.books.upsert(
+        title="No Pick Yet",
+        author=None,
+        isbn13=None,
+        source="manual",
+        source_id="m-nopick",
+    )
+    deps.books.set_status(bid, "searching")
+    deps.books.set_status(bid, "failed", error="nothing found")
+
+    r = c.post(f"/api/books/{bid}/retry-download")
+    assert r.status_code == 200, r.text
+    assert r.json()["mode"] == "research"
+    assert deps.books.get(bid).status == "queued"
+
+
+def test_retry_keeps_full_research_semantics(client):
+    """The original /retry endpoint must still clear pick + candidates
+    (used by the 'Re-search' button when the user thinks the pick was
+    wrong)."""
+    c, deps = client
+    bid = deps.books.upsert(
+        title="Re-search Me",
+        author=None,
+        isbn13=None,
+        source="manual",
+        source_id="m-research",
+    )
+    cid = _insert_candidate(deps, bid, "b" * 32, "Wrong Pick")
+    pr = c.post(f"/api/books/{bid}/pick/{cid}")
+    assert pr.status_code == 200
+    assert deps.books.get(bid).picked_candidate_id == cid
+
+    r = c.post(f"/api/books/{bid}/retry")
+    assert r.status_code == 200, r.text
+    assert r.json()["mode"] == "research"
+
+    book = deps.books.get(bid)
+    assert book.status == "queued"
+    assert book.picked_candidate_id is None
+    assert deps.cands.top_for_book(bid, limit=10) == []
