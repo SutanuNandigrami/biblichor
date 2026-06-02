@@ -423,7 +423,9 @@ const stkQuota = ref<{
 }>({ configured: false })
 
 const showStkModal = ref(false)
-const stkModalStep = ref<'authorize' | 'paste' | 'devices' | 'done'>('authorize')
+const stkModalStep = ref<'authorize' | 'paste' | 'devices' | 'manual' | 'done'>('authorize')
+const stkManualSn = ref<string>('')
+const stkManualName = ref<string>('')
 const stkAuthorizeUrl = ref<string>('')
 const stkRedirectUrl = ref<string>('')
 const stkDevices = ref<Array<{ device_serial_number: string; device_type?: string; device_name: string }>>([])
@@ -471,13 +473,29 @@ async function openStkSetup(): Promise<void> {
     // "Change device" flow.
     const status = await api<{ configured: boolean }>('/api/kindle-stk/status')
     if (status.configured) {
-      const devs = await api<{ devices: any[] }>('/api/kindle-stk/devices')
-      stkDevices.value = devs.devices || []
-      // Preserve the user's current default so the radio is pre-selected.
-      stkSelectedSn.value = (status as any).default_destination_sn
-        || _pickRecommendedDevice(stkDevices.value)
-        || (stkDevices.value[0]?.device_serial_number ?? '')
-      stkModalStep.value = 'devices'
+      try {
+        const devs = await api<{ devices: any[] }>('/api/kindle-stk/devices')
+        stkDevices.value = devs.devices || []
+        // Preserve the user's current default so the radio is pre-selected.
+        stkSelectedSn.value = (status as any).default_destination_sn
+          || _pickRecommendedDevice(stkDevices.value)
+          || (stkDevices.value[0]?.device_serial_number ?? '')
+        stkModalStep.value = 'devices'
+      } catch (e: any) {
+        // Amazon's GetListOfOwnedDevices endpoint has been intermittently
+        // 503-ing for hours (CloudFront stale-cached error). Fall back to
+        // manual device serial entry — the user looks it up on amazon.com
+        // and pastes it in. Send/upload endpoints work even when this list
+        // call doesn't.
+        const msg = e?.message || String(e)
+        if (/503|temporarily unavailable|Amazon STK/i.test(msg)) {
+          stkManualSn.value = (status as any).default_destination_sn || ''
+          stkManualName.value = (status as any).default_destination_name || ''
+          stkModalStep.value = 'manual'
+        } else {
+          throw e
+        }
+      }
       return
     }
     // Fresh setup: start a new OAuth flow.
@@ -520,14 +538,24 @@ async function completeStkOauth(): Promise<void> {
       stkLoading.value = false
       return
     }
-    const devs = await api<{ devices: Array<{ device_serial_number: string; device_type?: string; device_name: string }> }>('/api/kindle-stk/devices')
-    stkDevices.value = devs.devices || []
-    // Pre-select Kindle for Web by name (primary), then by device_type if present
-    const webDev = stkDevices.value.find(
-      d => d.device_name.toLowerCase().includes('web') || (d.device_type && d.device_type === 'FionaWebApp')
-    )
-    stkSelectedSn.value = webDev?.device_serial_number || stkDevices.value[0]?.device_serial_number || ''
-    stkModalStep.value = 'devices'
+    try {
+      const devs = await api<{ devices: Array<{ device_serial_number: string; device_type?: string; device_name: string }> }>('/api/kindle-stk/devices')
+      stkDevices.value = devs.devices || []
+      // Pre-select Kindle for Web by name (primary), then by device_type if present
+      const webDev = stkDevices.value.find(
+        d => d.device_name.toLowerCase().includes('web') || (d.device_type && d.device_type === 'FionaWebApp')
+      )
+      stkSelectedSn.value = webDev?.device_serial_number || stkDevices.value[0]?.device_serial_number || ''
+      stkModalStep.value = 'devices'
+    } catch (e: any) {
+      // Same 503 fallback as openStkSetup — manual device entry.
+      const msg = e?.message || String(e)
+      if (/503|temporarily unavailable|Amazon STK/i.test(msg)) {
+        stkModalStep.value = 'manual'
+      } else {
+        throw e
+      }
+    }
   } catch (e: any) {
     const msg = e?.message || String(e)
     // Auto-recover from "verifier missing" — the PKCE session expired
@@ -546,6 +574,30 @@ async function completeStkOauth(): Promise<void> {
     } else {
       stkError.value = msg
     }
+  } finally {
+    stkLoading.value = false
+  }
+}
+
+async function saveStkDestinationManual(): Promise<void> {
+  // Workaround path: Amazon's GetListOfOwnedDevices is unreachable, so the
+  // user pastes their device serial directly from amazon.com/hz/mycd/myx.
+  stkLoading.value = true
+  stkError.value = ''
+  try {
+    await api<any>('/api/kindle-stk/default-destination/manual', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_sn: stkManualSn.value.trim(),
+        device_name: stkManualName.value.trim(),
+      }),
+    })
+    showStkModal.value = false
+    await loadStkStatus()
+    toast.success('Device saved')
+  } catch (e: any) {
+    stkError.value = e?.message || String(e)
   } finally {
     stkLoading.value = false
   }
@@ -974,6 +1026,36 @@ async function sendStkTest(): Promise<void> {
           <div class="flex gap-2">
             <Button :disabled="!stkSelectedSn || stkLoading" :loading="stkLoading" @click="saveStkDestination">
               Save
+            </Button>
+            <Button variant="outline" @click="showStkModal = false">Cancel</Button>
+          </div>
+        </div>
+
+        <!-- Step: manual device entry (fallback when Amazon's device list endpoint is down) -->
+        <div v-else-if="stkModalStep === 'manual'" class="space-y-4">
+          <Badge variant="success">✓ Connected to Amazon</Badge>
+          <div class="rounded bg-amber-500/10 border border-amber-500/30 text-amber-200 p-3 text-sm space-y-2">
+            <p><strong>Amazon's device-list service is unavailable right now.</strong></p>
+            <p class="text-xs">Send-to-Kindle uploads still work — biblichor just can't fetch your device list automatically. Enter your Kindle's serial number manually below.</p>
+          </div>
+          <ol class="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+            <li>
+              Open <a href="https://www.amazon.com/hz/mycd/myx" target="_blank" rel="noopener" class="text-primary underline">amazon.com/hz/mycd/myx</a> → <strong>Devices</strong> tab
+            </li>
+            <li>Click your Kindle (or "Kindle for Web") to expand</li>
+            <li>Copy the <strong>Serial Number</strong> shown</li>
+          </ol>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">Device serial number</label>
+            <Input v-model="stkManualSn" placeholder="e.g. G090G10551070LE3" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">Display name <span class="text-xs text-muted-foreground">(optional)</span></label>
+            <Input v-model="stkManualName" placeholder="e.g. Kindle for Web" />
+          </div>
+          <div class="flex gap-2">
+            <Button :disabled="!stkManualSn.trim() || stkLoading" :loading="stkLoading" @click="saveStkDestinationManual">
+              Save device
             </Button>
             <Button variant="outline" @click="showStkModal = false">Cancel</Button>
           </div>
