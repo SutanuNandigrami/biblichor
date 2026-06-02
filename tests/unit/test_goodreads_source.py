@@ -114,3 +114,141 @@ def test_list_to_read_plain_id_defaults_to_to_read():
     src = GoodreadsRSS(fetch=lambda u: (seen_url.append(u), "<rss></rss>")[1])
     list(src.list_to_read(identifier="69278726", token=None))
     assert seen_url[0].endswith("?shelf=to-read")
+
+
+# ============ ISBN backfill from detail page (PR #28) ============
+
+
+_FAKE_HTML_WITH_ISBN = """
+<html>
+  <head>
+    <script type="application/ld+json">
+      { "@type": "Book", "name": "Foo", "isbn": "9780063356580" }
+    </script>
+  </head>
+  <body>Goodreads book page</body>
+</html>
+"""
+
+_FAKE_HTML_NO_ISBN = """
+<html><head><title>Book without ISBN</title></head>
+<body>Goodreads page without ISBN metadata</body></html>
+"""
+
+
+def test_fetch_isbn_finds_isbn_in_jsonld(monkeypatch):
+    seen = []
+    def _fake(url):
+        seen.append(url)
+        return _FAKE_HTML_WITH_ISBN
+    src = GoodreadsRSS(fetch=_fake)
+    assert src.fetch_isbn("199534613") == "9780063356580"
+    assert seen == ["https://www.goodreads.com/book/show/199534613"]
+
+
+def test_fetch_isbn_returns_none_when_jsonld_missing():
+    src = GoodreadsRSS(fetch=lambda u: _FAKE_HTML_NO_ISBN)
+    assert src.fetch_isbn("12345") is None
+
+
+def test_fetch_isbn_swallows_fetch_errors():
+    def boom(url):
+        raise RuntimeError("network down")
+    src = GoodreadsRSS(fetch=boom)
+    # Should not raise — best-effort, fall back to None
+    assert src.fetch_isbn("12345") is None
+
+
+def test_list_to_read_backfills_isbn_when_rss_missing_it():
+    """The whole point of this feature: a real Goodreads RSS without
+    `isbn` should produce a BookRef with isbn13 populated from the
+    detail page."""
+    rss_xml = """<?xml version="1.0"?>
+    <rss><channel>
+      <item>
+        <title>Margo's Got Money Troubles</title>
+        <author>Rufi Thorpe</author>
+        <book_id>199534613</book_id>
+        <isbn></isbn>
+      </item>
+    </channel></rss>
+    """
+
+    def _fake(url: str) -> str:
+        if "list_rss" in url:
+            return rss_xml
+        if "/book/show/" in url:
+            return _FAKE_HTML_WITH_ISBN
+        raise ValueError(f"unexpected url: {url}")
+
+    src = GoodreadsRSS(fetch=_fake, fetch_isbn=True)
+    refs = list(src.list_to_read(identifier="99999", token=None))
+    assert len(refs) == 1
+    assert refs[0].isbn13 == "9780063356580"
+
+
+def test_list_to_read_keeps_rss_isbn_when_present_and_skips_detail_fetch():
+    """If RSS already has an ISBN, we don't waste an HTTP call on the
+    detail page."""
+    rss_xml = """<?xml version="1.0"?>
+    <rss><channel>
+      <item>
+        <title>Some Book</title>
+        <book_id>123</book_id>
+        <isbn>9780063356580</isbn>
+      </item>
+    </channel></rss>
+    """
+    fetches = []
+    def _fake(url):
+        fetches.append(url)
+        if "list_rss" in url:
+            return rss_xml
+        raise AssertionError(f"unexpected detail-page fetch: {url}")
+    src = GoodreadsRSS(fetch=_fake, fetch_isbn=True)
+    refs = list(src.list_to_read(identifier="99999", token=None))
+    assert refs[0].isbn13 == "9780063356580"
+    # Only the RSS URL was fetched; no detail-page call happened.
+    assert len(fetches) == 1
+    assert "list_rss" in fetches[0]
+
+
+def test_list_to_read_with_fetch_isbn_disabled_skips_detail_fetch():
+    """fetch_isbn=False (e.g. for tests or polite-mode polling) skips
+    the per-book detail fetch even when RSS isbn is empty."""
+    rss_xml = """<?xml version="1.0"?>
+    <rss><channel>
+      <item>
+        <title>X</title>
+        <book_id>123</book_id>
+      </item>
+    </channel></rss>
+    """
+    fetches = []
+    src = GoodreadsRSS(
+        fetch=lambda u: (fetches.append(u), rss_xml)[1] if "list_rss" in u else (_ for _ in ()).throw(AssertionError("should not fetch detail page")),
+        fetch_isbn=False,
+    )
+    refs = list(src.list_to_read(identifier="99999", token=None))
+    assert refs[0].isbn13 is None
+
+
+def test_list_to_read_skips_isbn_fetch_for_non_numeric_book_ids():
+    """Some entries fall back to using the entry title as source_id
+    (no numeric book_id). Don't try to fetch ISBN with a title-as-id."""
+    rss_xml = """<?xml version="1.0"?>
+    <rss><channel>
+      <item>
+        <title>some-title-only-entry</title>
+      </item>
+    </channel></rss>
+    """
+    fetches = []
+    def _fake(url):
+        fetches.append(url)
+        return rss_xml if "list_rss" in url else ""
+    src = GoodreadsRSS(fetch=_fake, fetch_isbn=True)
+    refs = list(src.list_to_read(identifier="99999", token=None))
+    # source_id is the title (not numeric) -> no detail-page fetch.
+    assert refs[0].isbn13 is None
+    assert len(fetches) == 1
