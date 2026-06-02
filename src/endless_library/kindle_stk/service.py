@@ -228,6 +228,30 @@ class KindleStkService:
 
     # ---- Send (single file) ----
 
+    def _build_destinations(self) -> list:
+        """Build the destinations list passed to the vendored send path.
+
+        Empty list = library-only delivery: Amazon drops the file in the
+        user's Personal Documents library and every device of theirs
+        pulls it down via cloud sync. No auto-push to any specific
+        device. Verified live on 2026-06-02 that POST /SendToKindle with
+        `targetDevices: []` returns HTTP 200 + a sku.
+
+        If a `default_destination_sn` IS set, pass a synthetic destination
+        with just the serial. We deliberately skip validating it against
+        list_devices() because that endpoint (/GetListOfOwnedDevices) has
+        been intermittently 503-ing for hours from CloudFront. If the
+        serial is stale Amazon will error at send-time with a clear
+        message — same failure mode as a stale cached list.
+        """
+        from types import SimpleNamespace
+
+        sn = self._svc.get_secret_value("kindle_stk.default_destination_sn")
+        if not sn:
+            return []
+        name = self._svc.get_secret_value("kindle_stk.default_destination_name") or sn
+        return [SimpleNamespace(device_serial_number=sn, device_name=name)]
+
     def send_file(
         self,
         file_path: Path,
@@ -242,24 +266,16 @@ class KindleStkService:
         Raises KindleStkNotConfigured if no cert or no default device.
         """
         self._require_configured()
-        dest_sn = self._svc.get_secret_value("kindle_stk.default_destination_sn")
-        if not dest_sn:
-            raise KindleStkNotConfigured(
-                "No default destination device. Complete setup wizard first."
-            )
-
-        devices = self.list_devices()
-        dest = next((d for d in devices if d.device_serial_number == dest_sn), None)
-        if not dest:
-            raise KindleStkNotConfigured(
-                f"Default device {dest_sn!r} is no longer registered. Re-pick a device."
-            )
+        # Library-only by default. If a destination is configured we still
+        # pass it through (with auto-sync, all devices see the book either
+        # way). See _build_destinations for the full rationale.
+        destinations = self._build_destinations()
 
         client = self._build_client()
         try:
             return client.send_file(
                 file_path,
-                destinations=[dest],
+                destinations=destinations,
                 format=format,
                 title=title,
                 author=author,
@@ -301,18 +317,9 @@ class KindleStkService:
             KindleStkAuthExpired, KindleStkRateLimited, KindleStkUploadFailed.
         """
         self._require_configured()
-        dest_sn = self._svc.get_secret_value("kindle_stk.default_destination_sn")
-        if not dest_sn:
-            raise KindleStkNotConfigured(
-                "No default destination device. Complete setup wizard first."
-            )
-
-        devices = self.list_devices()
-        dest = next((d for d in devices if d.device_serial_number == dest_sn), None)
-        if not dest:
-            raise KindleStkNotConfigured(
-                f"Default device {dest_sn!r} is no longer registered. Re-pick a device."
-            )
+        # Same library-only default as send_file. The destinations list is
+        # built once and reused across the whole signed session.
+        destinations = self._build_destinations()
 
         # --- Pre-flight size checks ---
         total = 0
@@ -346,7 +353,7 @@ class KindleStkService:
             try:
                 ret = client.send_file(
                     fe.path,
-                    destinations=[dest],
+                    destinations=destinations,
                     format=fe.format,
                     title=fe.title,
                     author=fe.author,

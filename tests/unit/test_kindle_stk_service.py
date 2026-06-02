@@ -304,3 +304,131 @@ def test_create_oauth_url_always_returns_amazon_com_for_uk():
     assert "www.amazon.com/ap/signin" in url, (
         f"URL base must be www.amazon.com/ap/signin, got: {url}"
     )
+
+
+# ============ library-only delivery (PR #25) ============
+
+def test_send_file_with_no_default_destination_uses_empty_targetDevices(
+    fake_bookorbit_svc, monkeypatch, tmp_path
+):
+    """No default_destination_sn -> destinations list passed to the
+    vendored client is EMPTY. Amazon treats this as library-only
+    delivery; all devices sync from Personal Documents."""
+    fake, _ = register_fake(monkeypatch)
+    fake_bookorbit_svc.set_secret_value("kindle_stk.device_cert.pem", "PEM")
+    fake_bookorbit_svc.set_secret_value("kindle_stk.adp_token", "ADP")
+    # Deliberately NOT setting default_destination_sn.
+    f = tmp_path / "x.epub"
+    f.write_bytes(b"x")
+
+    from endless_library.kindle_stk.service import KindleStkService
+
+    svc = KindleStkService(fake_bookorbit_svc)
+    svc.send_file(f, format="EPUB", title="t", author="a")
+
+    assert len(fake.send_calls) == 1
+    assert fake.send_calls[0]["destinations"] == [], (
+        "library-only mode: vendored client should receive empty destinations"
+    )
+
+
+def test_send_file_with_configured_default_passes_synthetic_destination(
+    fake_bookorbit_svc, monkeypatch, tmp_path
+):
+    """default_destination_sn is set -> destination passed through
+    WITHOUT consulting list_devices() (which is broken on Amazon's side).
+    Synthetic destination object carries just the serial."""
+    fake, _ = register_fake(monkeypatch)
+    fake_bookorbit_svc.set_secret_value("kindle_stk.device_cert.pem", "PEM")
+    fake_bookorbit_svc.set_secret_value("kindle_stk.adp_token", "ADP")
+    fake_bookorbit_svc.set_secret_value("kindle_stk.default_destination_sn", "G0WEB1")
+    fake_bookorbit_svc.set_secret_value("kindle_stk.default_destination_name", "Kindle for Web")
+    f = tmp_path / "x.epub"
+    f.write_bytes(b"x")
+
+    from endless_library.kindle_stk.service import KindleStkService
+
+    svc = KindleStkService(fake_bookorbit_svc)
+    svc.send_file(f, format="EPUB", title="t", author="a")
+
+    assert len(fake.send_calls) == 1
+    assert fake.send_calls[0]["destinations"] == ["G0WEB1"]
+
+
+def test_send_file_does_not_call_list_devices_anymore(
+    fake_bookorbit_svc, monkeypatch, tmp_path
+):
+    """list_devices() endpoint has been 503-ing for hours from CloudFront.
+    Send path must not invoke it — the synthetic destination bypasses
+    the validation entirely."""
+    fake = FakeVendoredClient()
+
+    def boom():
+        raise AssertionError("list_devices was called — send path should not depend on it")
+
+    fake.get_owned_devices = boom  # type: ignore[assignment]
+    monkeypatch.setattr(
+        "endless_library.kindle_stk._vendored.Client",
+        lambda *a, **kw: fake,
+    )
+    monkeypatch.setattr(
+        "endless_library.kindle_stk._vendored.OAuth2",
+        FakeOAuth2,
+    )
+
+    fake_bookorbit_svc.set_secret_value("kindle_stk.device_cert.pem", "PEM")
+    fake_bookorbit_svc.set_secret_value("kindle_stk.adp_token", "ADP")
+    fake_bookorbit_svc.set_secret_value("kindle_stk.default_destination_sn", "MYSN1234567")
+    f = tmp_path / "x.epub"
+    f.write_bytes(b"x")
+
+    from endless_library.kindle_stk.service import KindleStkService
+
+    svc = KindleStkService(fake_bookorbit_svc)
+    svc.send_file(f, format="EPUB", title="t", author="a")
+
+    # Send went through without touching list_devices.
+    assert fake.send_calls[0]["destinations"] == ["MYSN1234567"]
+
+
+def test_send_files_with_no_default_uses_empty_destinations(
+    fake_bookorbit_svc, monkeypatch, tmp_path
+):
+    """Batch send mirrors single-send: empty destinations when no default."""
+    fake, _ = register_fake(monkeypatch)
+    fake_bookorbit_svc.set_secret_value("kindle_stk.device_cert.pem", "PEM")
+    fake_bookorbit_svc.set_secret_value("kindle_stk.adp_token", "ADP")
+    # No default_destination_sn.
+
+    from endless_library.kindle_stk.service import FileEntry, KindleStkService
+
+    f1 = tmp_path / "a.epub"
+    f1.write_bytes(b"a")
+    f2 = tmp_path / "b.epub"
+    f2.write_bytes(b"b")
+    entries = [
+        FileEntry(path=f1, title="a", author="x", format="EPUB"),
+        FileEntry(path=f2, title="b", author="x", format="EPUB"),
+    ]
+
+    svc = KindleStkService(fake_bookorbit_svc)
+    svc.send_files(entries)
+
+    assert len(fake.send_calls) == 2
+    for call in fake.send_calls:
+        assert call["destinations"] == [], "library-only mode for the whole batch"
+
+
+def test_send_file_still_raises_when_no_cert(fake_bookorbit_svc, monkeypatch, tmp_path):
+    """Library-only relaxation does NOT relax the cert requirement.
+    Without device_cert + adp_token we still cannot authenticate."""
+    register_fake(monkeypatch)
+    f = tmp_path / "x.epub"
+    f.write_bytes(b"x")
+
+    from endless_library.kindle_stk.exceptions import KindleStkNotConfigured
+    from endless_library.kindle_stk.service import KindleStkService
+
+    svc = KindleStkService(fake_bookorbit_svc)
+    with pytest.raises(KindleStkNotConfigured):
+        svc.send_file(f, format="EPUB", title="t", author="a")
