@@ -515,6 +515,25 @@ def _search_fail_or_skip(deps: PipelineDeps, book: BookRow, error: str) -> str:
     return "failed"
 
 
+def _compute_deliverable_cap(deps) -> int:
+    """Largest candidate filesize the active delivery path can handle.
+
+    SMTP-only: SMTP attachment cap divided by ~1.4 to account for base64
+    inflation. STK configured: Amazon's 200MB per-file limit (raw —
+    stkclient PUTs directly to S3, no base64 wrapper). When both paths
+    are available, returns the larger so the picker doesn't hard-skip
+    candidates that STK could deliver just because SMTP can't.
+    """
+    smtp_cap = int(deps.cfg.smtp.max_attachment_mb * 1024 * 1024 / 1.4)
+    try:
+        from endless_library.kindle_stk import KindleStkService
+
+        if KindleStkService(deps.bookorbit_service).is_configured():
+            return max(smtp_cap, deps.cfg.stk.max_batch_bytes)
+    except Exception:
+        pass
+    return smtp_cap
+
 def process_one(deps: PipelineDeps, book: BookRow) -> str:
     """Run the full pipeline on a single book. Returns final status.
 
@@ -611,12 +630,13 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
     if not candidates:
         return _search_fail_or_skip(deps, book, "no candidates from any scraper")
     # Set a dynamic deliverable cap on the scoring config so candidates
-    # that can't possibly be SMTPed get hard-skipped at score time
-    # rather than wasted a download + convert cycle. We use 1/1.4 of
-    # the raw cap to account for base64 overhead (Gmail caps the
-    # *encoded* message size).
-    smtp_cap = int(deps.cfg.smtp.max_attachment_mb * 1024 * 1024 / 1.4)
-    deps.cfg.scoring.deliverable_max_bytes = smtp_cap
+    # that can't possibly be delivered get hard-skipped at score time
+    # rather than wasting a download + convert cycle. The cap depends
+    # on which delivery path is available:
+    #   - SMTP-only: max_attachment_mb / 1.4 (Gmail caps encoded size)
+    #   - STK configured: Amazon's 200MB per-file limit (raw, no base64
+    #     overhead since stkclient uploads directly to S3).
+    deps.cfg.scoring.deliverable_max_bytes = _compute_deliverable_cap(deps)
     scored = _score_and_persist(deps, book, candidates)
     if not scored:
         return _search_fail_or_skip(deps, book, "all candidates hard-skipped (audio?)")
