@@ -232,10 +232,21 @@ class BookRepo:
         """Mark a book as successfully delivered to Kindle.
 
         method: 'stk' or 'smtp' (Phase STK 7); leave None for legacy callers.
+
+        Also stamps sent_at if it's still NULL — STK delivery jumps
+        status straight from 'sending' to 'kindled' without passing
+        through 'sent', so the set_status('sent') branch that normally
+        sets sent_at never fires. Dashboard method_breakdown filters
+        on sent_at, so leaving it NULL hides STK sends from the chart.
         """
         with self._connect() as conn:
             conn.execute(
-                "UPDATE books SET status = 'kindled', sent_method = ?, updated_at = datetime('now') WHERE id = ?",
+                "UPDATE books SET "
+                "  status = 'kindled', "
+                "  sent_method = ?, "
+                "  sent_at = COALESCE(sent_at, datetime('now')), "
+                "  updated_at = datetime('now') "
+                "WHERE id = ?",
                 (method, book_id),
             )
 

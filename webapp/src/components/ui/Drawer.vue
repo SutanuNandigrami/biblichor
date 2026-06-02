@@ -78,30 +78,35 @@ onBeforeUnmount(_onUp)
       <aside v-if="props.open"
         :style="style"
         :class="[
-          'fixed top-0 right-0 h-screen w-full bg-card border-l border-border z-50 overflow-y-auto',
+          'fixed top-0 right-0 h-screen w-full bg-card border-l border-border z-50 flex',
           dragging ? 'select-none' : '',
         ]">
-        <!-- Drag handle: hidden on mobile (full-width drawer there) -->
+        <!-- Drag handle: full viewport-height because it sits OUTSIDE the
+             scrollable content area. Hidden on mobile (drawer is full-width). -->
         <div
-          class="hidden sm:block absolute top-0 left-0 h-full w-1.5 -ml-0.5 cursor-col-resize group z-[60]"
+          class="hidden sm:flex shrink-0 w-1.5 h-screen cursor-col-resize group relative z-[60]"
           :class="dragging ? 'bg-primary/60' : 'hover:bg-primary/40'"
           aria-label="Drag to resize"
           @mousedown="startDrag"
           @touchstart="startDrag"
         >
-          <!-- Hover/drag visual indicator: a slim vertical bar -->
+          <!-- Visual indicator: slim vertical bar centered on the handle -->
           <div
             class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-12 rounded-full transition-colors"
             :class="dragging ? 'bg-primary' : 'bg-border group-hover:bg-primary'"
           />
         </div>
 
-        <header class="sticky top-0 bg-card border-b border-border h-14 px-4 flex items-center justify-between z-10">
-          <h2 class="font-semibold">{{ title }}</h2>
-          <button class="p-1 rounded hover:bg-accent" @click="emit('close')"><X class="w-4 h-4" /></button>
-        </header>
-        <div class="p-4">
-          <slot />
+        <!-- Scrollable content column. Sibling to the handle so scrolling
+             inside the drawer doesn't move the drag bar. -->
+        <div class="flex-1 min-w-0 h-screen overflow-y-auto">
+          <header class="sticky top-0 bg-card border-b border-border h-14 px-4 flex items-center justify-between z-10">
+            <h2 class="font-semibold">{{ title }}</h2>
+            <button class="p-1 rounded hover:bg-accent" @click="emit('close')"><X class="w-4 h-4" /></button>
+          </header>
+          <div class="p-4">
+            <slot />
+          </div>
         </div>
       </aside>
     </transition>
