@@ -2119,6 +2119,16 @@ def register(app: FastAPI) -> None:
             devs = svc.list_devices()
         except KindleStkNotConfigured as e:
             raise HTTPException(400, str(e)) from e
+        except KindleStkUploadFailed as e:
+            # Amazon-side failure (503, 5xx, cert revoked, etc.) — surface
+            # as 502 with the actual upstream error so the SPA can show
+            # something useful instead of a bare 500.
+            msg = str(e)
+            if "503" in msg or "Service Unavailable" in msg:
+                raise HTTPException(503, "Amazon STK service is temporarily unavailable. Try again in a few minutes.") from e
+            raise HTTPException(502, f"Amazon STK API error: {msg[:300]}") from e
+        except Exception as e:
+            raise HTTPException(502, f"{type(e).__name__}: {str(e)[:300]}") from e
         return {
             "devices": [
                 {
