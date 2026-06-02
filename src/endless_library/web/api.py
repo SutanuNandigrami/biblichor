@@ -285,11 +285,15 @@ def register(app: FastAPI) -> None:
         without persisting them in the candidates table."""
         from endless_library.domain.models import Candidate, SearchQuery
         from endless_library.domain.scoring import score_candidate
+        from endless_library.pipeline import _compute_deliverable_cap
 
         deps = request.app.state.deps
         book = deps.books.get(book_id)
         if not book:
             raise HTTPException(404)
+        # Sync the deliverable cap so the recomputed score_breakdown
+        # reflects the actual delivery path (STK -> 200MB, else SMTP cap).
+        deps.cfg.scoring.deliverable_max_bytes = _compute_deliverable_cap(deps)
         # Reusable SearchQuery for breakdown recomputation
         sq = SearchQuery(
             title=book.title,
@@ -1546,6 +1550,12 @@ def register(app: FastAPI) -> None:
             if k in base:
                 base[k] = v
         scoring_cfg = ScoringCfg(**base)
+        # If the user didn't override the cap explicitly, fill it from the
+        # STK-aware computation so the preview matches what the pipeline
+        # would actually use.
+        if scoring_cfg.deliverable_max_bytes is None:
+            from endless_library.pipeline import _compute_deliverable_cap as _cap
+            scoring_cfg = scoring_cfg.model_copy(update={"deliverable_max_bytes": _cap(deps)})
         q = SearchQuery(
             title=book.title,
             author=book.author,
