@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import pytest
 
 from endless_library.db.schema import connect, init_db
+from datetime import UTC
 from endless_library.web.api import compute_dashboard_snapshot
 
 # Counter for unique goodreads_id values
@@ -201,3 +202,141 @@ def test_snapshot_source_funnel_derives_stages(db: Path):
     assert kb["discovered"] == 2
     assert kb["downloaded"] == 1
     assert kb["sent"] == 1
+
+
+# ============ window_hours param (PR #27) ============
+
+
+def test_snapshot_accepts_window_hours_24(db: Path):
+    """Default window: 24h with 5-min buckets => 289 labels (inclusive)."""
+    snap = compute_dashboard_snapshot(db, window_hours=24)
+    assert snap["window_hours"] == 24
+    assert snap["throughput"]["bucket_minutes"] == 5
+    assert len(snap["throughput"]["series"][0]["points"]) == 289
+
+
+def test_snapshot_accepts_window_hours_168_uses_30min_buckets(db: Path):
+    snap = compute_dashboard_snapshot(db, window_hours=168)
+    assert snap["window_hours"] == 168
+    assert snap["throughput"]["bucket_minutes"] == 30
+    assert len(snap["throughput"]["series"][0]["points"]) == (168 * 60 // 30) + 1
+
+
+def test_snapshot_accepts_window_hours_720_uses_2h_buckets(db: Path):
+    snap = compute_dashboard_snapshot(db, window_hours=720)
+    assert snap["window_hours"] == 720
+    assert snap["throughput"]["bucket_minutes"] == 120
+    assert len(snap["throughput"]["series"][0]["points"]) == (720 * 60 // 120) + 1
+
+
+def test_snapshot_invalid_window_falls_back_to_24h(db: Path):
+    snap = compute_dashboard_snapshot(db, window_hours=999)
+    assert snap["window_hours"] == 24
+
+
+# ============ kpis block (PR #27) ============
+
+
+def test_kpis_queue_depth_counts_queued_books(db: Path):
+    with connect(db) as conn:
+        _seed_book(conn, status="queued")
+        _seed_book(conn, status="queued")
+        _seed_book(conn, status="kindled", sent_at="2026-06-01 00:00:00")
+    snap = compute_dashboard_snapshot(db)
+    assert snap["kpis"]["queue_depth"] == 2
+
+
+def test_kpis_in_flight_counts_searching_through_sending(db: Path):
+    with connect(db) as conn:
+        for s in ("searching", "downloading", "converting", "sending", "queued", "kindled"):
+            _seed_book(conn, status=s)
+    snap = compute_dashboard_snapshot(db)
+    # 4 in-flight: searching + downloading + converting + sending
+    assert snap["kpis"]["in_flight"] == 4
+
+
+def test_kpis_today_sent_counts_books_sent_today_utc(db: Path):
+    from datetime import datetime, timedelta
+    today = datetime.now(UTC).replace(hour=12, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S")
+    yesterday = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    with connect(db) as conn:
+        _seed_book(conn, status="kindled", sent_method="stk", sent_at=today)
+        _seed_book(conn, status="kindled", sent_method="stk", sent_at=today)
+        _seed_book(conn, status="kindled", sent_method="stk", sent_at=yesterday)
+    snap = compute_dashboard_snapshot(db)
+    assert snap["kpis"]["today_sent"] == 2
+
+
+# ============ recent_events (PR #27) ============
+
+
+def test_recent_events_returns_events_with_book_title(db: Path):
+    with connect(db) as conn:
+        _seed_book(conn, status="queued")
+        # Insert an event referencing the book
+        bid = conn.execute("SELECT id FROM books LIMIT 1").fetchone()["id"]
+        conn.execute(
+            """INSERT INTO events (book_id, kind, scraper, message, ts)
+               VALUES (?, ?, ?, ?, datetime('now'))""",
+            (bid, "state_change", "", "manually re-queued"),
+        )
+    snap = compute_dashboard_snapshot(db)
+    ev = snap["recent_events"]
+    assert len(ev) >= 1
+    assert ev[0]["kind"] == "state_change"
+    assert ev[0]["book_id"] == bid
+    assert ev[0]["book_title"]  # joined from books table
+
+
+def test_recent_events_caps_at_30(db: Path):
+    with connect(db) as conn:
+        _seed_book(conn, status="queued")
+        bid = conn.execute("SELECT id FROM books LIMIT 1").fetchone()["id"]
+        for i in range(40):
+            conn.execute(
+                """INSERT INTO events (book_id, kind, scraper, message, ts)
+                   VALUES (?, 'state_change', '', ?, datetime('now'))""",
+                (bid, f"msg {i}"),
+            )
+    snap = compute_dashboard_snapshot(db)
+    assert len(snap["recent_events"]) == 30
+
+
+# ============ stage_timings (PR #27) ============
+
+
+def test_stage_timings_returns_zero_count_on_empty_db(db: Path):
+    snap = compute_dashboard_snapshot(db)
+    st = snap["stage_timings"]
+    assert st["search_to_downloaded_seconds"]["count"] == 0
+    assert st["search_to_downloaded_seconds"]["p50"] is None
+
+
+def test_stage_timings_computes_percentiles_from_book_stamps(db: Path):
+    from datetime import datetime, timedelta
+    now = datetime.now(UTC)
+    with connect(db) as conn:
+        # 3 books with known stage durations:
+        #   search->dl   = 10s, 20s, 60s
+        #   dl->sent     = 5s,  15s, 100s
+        for sec_dl, sec_sent in ((10, 5), (20, 15), (60, 100)):
+            t_search = (now - timedelta(seconds=200))
+            t_dl = t_search + timedelta(seconds=sec_dl)
+            t_sent = t_dl + timedelta(seconds=sec_sent)
+            conn.execute(
+                """INSERT INTO books (title, source, status, searched_at, downloaded_at, sent_at)
+                   VALUES (?, 'manual', 'kindled', ?, ?, ?)""",
+                (
+                    f"x-{sec_dl}",
+                    t_search.strftime("%Y-%m-%d %H:%M:%S"),
+                    t_dl.strftime("%Y-%m-%d %H:%M:%S"),
+                    t_sent.strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+    snap = compute_dashboard_snapshot(db)
+    sd = snap["stage_timings"]["search_to_downloaded_seconds"]
+    assert sd["count"] == 3
+    assert sd["p50"] == 20  # middle value
+    ds = snap["stage_timings"]["downloaded_to_sent_seconds"]
+    assert ds["count"] == 3
+    assert ds["p50"] == 15

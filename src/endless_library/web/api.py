@@ -2673,21 +2673,82 @@ DASHBOARD_INTERVAL_SEC: float = 3.0
 """
 
 
-def compute_dashboard_snapshot(db_path) -> dict:
-    """Pure aggregation - no FastAPI deps, testable standalone."""
+def _percentile(values: list[float], pct: float) -> float | None:
+    """Linear-interp percentile. Empty list -> None."""
+    if not values:
+        return None
+    s = sorted(values)
+    k = (len(s) - 1) * (pct / 100.0)
+    f = int(k)
+    c = min(f + 1, len(s) - 1)
+    if f == c:
+        return float(s[f])
+    return float(s[f] + (s[c] - s[f]) * (k - f))
+
+
+def _stage_stats(values: list[float]) -> dict:
+    """Histogram-ish summary for stage latencies (seconds)."""
+    return {
+        "count": len(values),
+        "p50": _percentile(values, 50),
+        "p90": _percentile(values, 90),
+        "p99": _percentile(values, 99),
+    }
+
+
+def compute_dashboard_snapshot(db_path, window_hours: int = 24) -> dict:
+    """Pure aggregation - no FastAPI deps, testable standalone.
+
+    window_hours: 24 (default), 168 (7d), or 720 (30d). Bucket size
+    auto-scales so each chart has ~280-340 points regardless of window.
+    """
     from datetime import datetime, timedelta
 
+    # Clamp to known windows + auto-pick bucket size.
+    if window_hours not in (24, 168, 720):
+        window_hours = 24
+    if window_hours == 24:
+        bucket_minutes = 5      # 288 buckets
+    elif window_hours == 168:
+        bucket_minutes = 30     # 336 buckets
+    else:  # 720h / 30d
+        bucket_minutes = 120    # 360 buckets
+
     now_utc = datetime.now(UTC)
-    cutoff_str = (now_utc - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff_dt = now_utc - timedelta(hours=window_hours)
+    cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start_str = today_start.strftime("%Y-%m-%d %H:%M:%S")
+    failures_cutoff = (now_utc - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
 
     with connect(db_path) as conn:
-        # 1. Status counts
+        # ---- 1. Status counts (all-time, unchanged) ----
         rows = conn.execute("SELECT status, COUNT(*) AS n FROM books GROUP BY status").fetchall()
-        status_counts: dict = {}
-        for r in rows:
-            status_counts[str(r["status"])] = int(r["n"])
+        status_counts: dict = {str(r["status"]): int(r["n"]) for r in rows}
 
-        # 2. Throughput bucketed to 5-min windows over last 24h
+        # ---- KPI block ----
+        IN_FLIGHT_STATES = ("searching", "downloading", "converting", "sending")
+        kpis = {
+            "queue_depth": int(status_counts.get("queued", 0)),
+            "in_flight": sum(status_counts.get(s, 0) for s in IN_FLIGHT_STATES),
+            "today_sent": int(
+                conn.execute(
+                    "SELECT COUNT(*) AS n FROM books WHERE sent_at >= ?",
+                    (today_start_str,),
+                ).fetchone()["n"]
+            ),
+            "recent_failures": int(
+                conn.execute(
+                    """SELECT COUNT(*) AS n FROM books
+                       WHERE status IN ('failed', 'needs_review')
+                         AND last_error IS NOT NULL
+                         AND updated_at >= ?""",
+                    (failures_cutoff,),
+                ).fetchone()["n"]
+            ),
+        }
+
+        # ---- 2. Throughput bucketed across the window ----
         tp_rows = conn.execute(
             """
             SELECT strftime('%Y-%m-%dT%H:%M:00Z', ts) AS minute, kind, COUNT(*) AS n
@@ -2698,8 +2759,7 @@ def compute_dashboard_snapshot(db_path) -> dict:
             (cutoff_str,),
         ).fetchall()
 
-        bucket_minutes = 5
-        num_buckets = (24 * 60) // bucket_minutes
+        num_buckets = (window_hours * 60) // bucket_minutes
 
         def _bucket_label(dt):
             floored = dt.replace(
@@ -2709,7 +2769,7 @@ def compute_dashboard_snapshot(db_path) -> dict:
             )
             return floored.strftime("%Y-%m-%dT%H:%M:00Z")
 
-        oldest_bucket = (now_utc - timedelta(hours=24)).replace(second=0, microsecond=0)
+        oldest_bucket = cutoff_dt.replace(second=0, microsecond=0)
         oldest_bucket = oldest_bucket.replace(
             minute=(oldest_bucket.minute // bucket_minutes) * bucket_minutes
         )
@@ -2734,7 +2794,8 @@ def compute_dashboard_snapshot(db_path) -> dict:
             else:
                 smtp_map[bucket] = smtp_map.get(bucket, 0) + int(r["n"])
 
-        throughput_24h = {
+        throughput = {
+            "window_hours": window_hours,
             "bucket_minutes": bucket_minutes,
             "series": [
                 {"name": "stk", "points": [{"t": lbl, "v": stk_map.get(lbl, 0)} for lbl in labels]},
@@ -2745,7 +2806,7 @@ def compute_dashboard_snapshot(db_path) -> dict:
             ],
         }
 
-        # 3. Method breakdown: kindled books in last 24h by sent_method
+        # ---- 3. Method breakdown over window ----
         mb_rows = conn.execute(
             """
             SELECT sent_method, COUNT(*) AS n
@@ -2756,12 +2817,13 @@ def compute_dashboard_snapshot(db_path) -> dict:
             (cutoff_str,),
         ).fetchall()
         raw_mb: dict = {str(r["sent_method"]): int(r["n"]) for r in mb_rows}
-        method_breakdown_24h = {
+        method_breakdown = {
+            "window_hours": window_hours,
             "stk": raw_mb.get("stk", raw_mb.get("send-stk", 0)),
             "smtp": raw_mb.get("smtp", raw_mb.get("send", 0)),
         }
 
-        # 4. Source funnel
+        # ---- 4. Source funnel (all-time, unchanged) ----
         sf_rows = conn.execute(
             """
             SELECT source,
@@ -2783,13 +2845,93 @@ def compute_dashboard_snapshot(db_path) -> dict:
             for r in sf_rows
         ]
 
-    return {
+        # ---- 5. Recent activity (last 30 user-meaningful events) ----
+        rev_rows = conn.execute(
+            """
+            SELECT e.ts, e.kind, e.scraper, e.message, e.book_id, b.title AS book_title
+            FROM events e
+            LEFT JOIN books b ON b.id = e.book_id
+            WHERE e.kind IN ('state_change', 'error', 'send-stk', 'send',
+                              'download', 'oversize-routed-stk')
+            ORDER BY e.id DESC
+            LIMIT 30
+            """
+        ).fetchall()
+        recent_events = [
+            {
+                "ts": str(r["ts"]),
+                "kind": str(r["kind"]),
+                "scraper": str(r["scraper"] or ""),
+                "message": str(r["message"] or "")[:240],
+                "book_id": int(r["book_id"]) if r["book_id"] else None,
+                "book_title": str(r["book_title"] or "") if r["book_title"] else None,
+            }
+            for r in rev_rows
+        ]
+
+        # ---- 6. Stage timing distributions (last 7d) ----
+        # search_to_pick = picked_candidate_id set time approximated by
+        #   searched_at -> first download event; pick_to_downloaded =
+        #   searched_at -> downloaded_at; downloaded_to_sent =
+        #   downloaded_at -> sent_at. Cap to last 7d so a one-off legacy
+        #   row doesn't skew percentiles.
+        stage_cutoff = (now_utc - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        stage_rows = conn.execute(
+            """SELECT searched_at, downloaded_at, sent_at
+               FROM books
+               WHERE sent_at >= ? AND searched_at IS NOT NULL""",
+            (stage_cutoff,),
+        ).fetchall()
+        search_dl_durs: list[float] = []
+        dl_sent_durs: list[float] = []
+        e2e_durs: list[float] = []
+        from datetime import datetime as _ddt
+
+        def _parse(s):
+            if not s:
+                return None
+            try:
+                return _ddt.fromisoformat(str(s).replace("Z", "+00:00"))
+            except Exception:
+                try:
+                    return _ddt.strptime(str(s), "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+                except Exception:
+                    return None
+
+        for r in stage_rows:
+            t_search = _parse(r["searched_at"])
+            t_dl = _parse(r["downloaded_at"])
+            t_sent = _parse(r["sent_at"])
+            if t_search and t_dl and t_dl > t_search:
+                search_dl_durs.append((t_dl - t_search).total_seconds())
+            if t_dl and t_sent and t_sent > t_dl:
+                dl_sent_durs.append((t_sent - t_dl).total_seconds())
+            if t_search and t_sent and t_sent > t_search:
+                e2e_durs.append((t_sent - t_search).total_seconds())
+
+        stage_timings = {
+            "window_hours": 168,  # always 7d for stable percentiles
+            "search_to_downloaded_seconds": _stage_stats(search_dl_durs),
+            "downloaded_to_sent_seconds": _stage_stats(dl_sent_durs),
+            "search_to_sent_seconds": _stage_stats(e2e_durs),
+        }
+
+    out = {
         "ts": now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "window_hours": window_hours,
+        "kpis": kpis,
         "status_counts": status_counts,
-        "throughput_24h": throughput_24h,
-        "method_breakdown_24h": method_breakdown_24h,
+        "throughput": throughput,
+        "method_breakdown": method_breakdown,
         "source_funnel": source_funnel,
+        "recent_events": recent_events,
+        "stage_timings": stage_timings,
     }
+    # Back-compat fields so the old SPA build keeps working
+    # Back-compat: old SPA expects window_hours-naked dicts under these keys
+    out["throughput_24h"] = throughput
+    out["method_breakdown_24h"] = {"stk": method_breakdown["stk"], "smtp": method_breakdown["smtp"]}
+    return out
 
 
 def _register_dashboard(app) -> None:
@@ -2797,18 +2939,18 @@ def _register_dashboard(app) -> None:
     _router = APIRouter(prefix="/api")
 
     @_router.get("/dashboard/snapshot")
-    def dashboard_snapshot(request: Request):
+    def dashboard_snapshot(request: Request, window_hours: int = 24):
         deps = request.app.state.deps
-        return compute_dashboard_snapshot(deps.db_path)
+        return compute_dashboard_snapshot(deps.db_path, window_hours=window_hours)
 
     @_router.get("/dashboard/stream")
-    async def dashboard_stream(request: Request):
+    async def dashboard_stream(request: Request, window_hours: int = 24):
         deps = request.app.state.deps
 
         async def _gen():
             try:
                 while True:
-                    snapshot = compute_dashboard_snapshot(deps.db_path)
+                    snapshot = compute_dashboard_snapshot(deps.db_path, window_hours=window_hours)
                     yield "data: " + json.dumps(snapshot) + chr(10) + chr(10)
                     await asyncio.sleep(DASHBOARD_INTERVAL_SEC)
                     if await request.is_disconnected():

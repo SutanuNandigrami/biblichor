@@ -1,0 +1,60 @@
+<script setup lang="ts">
+/**
+ * KpiCards.vue — Top-row summary tiles for the dashboard.
+ * Shows queue depth, in-flight, today's sends, recent failures.
+ */
+import { Inbox, Activity, Send, AlertTriangle } from "lucide-vue-next"
+import type { Kpis } from "@/composables/useDashboardStream"
+
+defineProps<{ kpis: Kpis }>()
+</script>
+
+<template>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="bg-card border border-border rounded-xl p-4 shadow-sm">
+      <div class="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+        <Inbox class="w-3.5 h-3.5" />
+        <span>Queue</span>
+      </div>
+      <div class="text-2xl font-bold tabular-nums">{{ kpis.queue_depth.toLocaleString() }}</div>
+      <div class="text-[10px] text-muted-foreground mt-1">waiting to process</div>
+    </div>
+
+    <div class="bg-card border border-border rounded-xl p-4 shadow-sm">
+      <div class="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+        <Activity class="w-3.5 h-3.5" />
+        <span>In flight</span>
+      </div>
+      <div class="text-2xl font-bold tabular-nums">
+        {{ kpis.in_flight.toLocaleString() }}
+        <span v-if="kpis.in_flight > 0" class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 align-middle ml-1 animate-pulse" />
+      </div>
+      <div class="text-[10px] text-muted-foreground mt-1">searching / downloading / sending</div>
+    </div>
+
+    <div class="bg-card border border-border rounded-xl p-4 shadow-sm">
+      <div class="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+        <Send class="w-3.5 h-3.5" />
+        <span>Sent today</span>
+      </div>
+      <div class="text-2xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+        {{ kpis.today_sent.toLocaleString() }}
+      </div>
+      <div class="text-[10px] text-muted-foreground mt-1">since 00:00 UTC</div>
+    </div>
+
+    <div class="bg-card border border-border rounded-xl p-4 shadow-sm">
+      <div class="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+        <AlertTriangle class="w-3.5 h-3.5" />
+        <span>Failures (24h)</span>
+      </div>
+      <div
+        class="text-2xl font-bold tabular-nums"
+        :class="kpis.recent_failures > 0 ? 'text-amber-600 dark:text-amber-400' : ''"
+      >
+        {{ kpis.recent_failures.toLocaleString() }}
+      </div>
+      <div class="text-[10px] text-muted-foreground mt-1">failed or needs review</div>
+    </div>
+  </div>
+</template>
