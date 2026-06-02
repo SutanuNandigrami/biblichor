@@ -30,11 +30,22 @@ class APIError(ValueError):
     def __init__(self, msg: str, body: bytes | None):
         """Construct an APIError with a given message and response body."""
         if body is not None:
+            # Body may be JSON, plain text, or non-UTF-8 (e.g. binary blob
+            # from a misbehaving proxy). Try JSON; on any parse failure
+            # fall back to a safe repr so the error never explodes.
+            parsed: object
             try:
-                body = json.loads(body)
-            except json.JSONDecodeError:
-                body = body
-            msg += f" {json.dumps(body)}"
+                parsed = json.loads(body)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                try:
+                    parsed = body.decode("utf-8", errors="replace")
+                except Exception:
+                    parsed = repr(body[:500])
+            try:
+                rendered = json.dumps(parsed)
+            except Exception:
+                rendered = repr(parsed)[:1000]
+            msg += f" {rendered}"
         super().__init__(msg)
 
 
@@ -301,6 +312,30 @@ def _request(path: str, signer: Signer, body: Mapping[str, Any]) -> Mapping[str,
 
 def _text(e: urllib.error.HTTPError) -> bytes | None:
     try:
-        return e.read()
+        raw = e.read()
     except AttributeError:
         return None
+    if not raw:
+        return raw
+    # Amazon honors our Accept-Encoding header on error bodies too.
+    enc = ""
+    try:
+        enc = (e.headers.get("Content-Encoding") or "").lower()
+    except Exception:
+        enc = ""
+    if "gzip" in enc:
+        import gzip
+        try:
+            return gzip.decompress(raw)
+        except Exception:
+            return raw
+    if "deflate" in enc:
+        import zlib
+        try:
+            return zlib.decompress(raw)
+        except zlib.error:
+            try:
+                return zlib.decompress(raw, -zlib.MAX_WBITS)
+            except Exception:
+                return raw
+    return raw
