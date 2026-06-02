@@ -426,6 +426,14 @@ const showStkModal = ref(false)
 const stkModalStep = ref<'authorize' | 'paste' | 'devices' | 'manual' | 'done'>('authorize')
 const stkManualSn = ref<string>('')
 const stkManualName = ref<string>('')
+// Build a regional Manage Your Content & Devices link from the stored
+// amazon_domain (so amazon.in users don't get pointed at amazon.com).
+const stkManageDevicesUrl = computed(() => {
+  const dom = stkStatus.value.amazon_domain || stkAmazonDomain.value || 'amazon.com'
+  // amazon.in serves it at /hz/mycd (no /myx suffix); amazon.com works with either.
+  // /hz/mycd works on every regional Amazon, so prefer it.
+  return `https://www.${dom}/hz/mycd`
+})
 const stkAuthorizeUrl = ref<string>('')
 const stkRedirectUrl = ref<string>('')
 const stkDevices = ref<Array<{ device_serial_number: string; device_type?: string; device_name: string }>>([])
@@ -1040,10 +1048,10 @@ async function sendStkTest(): Promise<void> {
           </div>
           <ol class="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
             <li>
-              Open <a href="https://www.amazon.com/hz/mycd/myx" target="_blank" rel="noopener" class="text-primary underline">amazon.com/hz/mycd/myx</a> → <strong>Devices</strong> tab
+              Open <a :href="stkManageDevicesUrl" target="_blank" rel="noopener" class="text-primary underline">{{ stkManageDevicesUrl.replace(/^https?:\/\//, '') }}</a> → <strong>Devices</strong> tab
             </li>
-            <li>Click your Kindle (or "Kindle for Web") to expand</li>
-            <li>Copy the <strong>Serial Number</strong> shown</li>
+            <li>Click your Kindle row (or "Kindle for Web") to expand its details</li>
+            <li>Copy the <strong>Serial Number</strong> — it's a 16-char alphanumeric string. For Kindle for Web it may be labelled "Device serial number" inside the expanded row.</li>
           </ol>
           <div class="space-y-2">
             <label class="text-sm font-medium">Device serial number</label>
