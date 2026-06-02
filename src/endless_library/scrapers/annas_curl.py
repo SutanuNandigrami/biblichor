@@ -65,6 +65,8 @@ class AnnasArchiveCurl:
             }
             if not _query_is_non_latin(query.title or ""):
                 params["lang"] = query.language
+            if query.page > 1:
+                params["page"] = str(query.page)
             qs = "&".join(f"{k}={quote_plus(str(v))}" for k, v in params.items())
             url = f"{self.mirrors.current}/search?{qs}"
             html = self._get(url)
