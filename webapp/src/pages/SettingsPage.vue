@@ -529,7 +529,23 @@ async function completeStkOauth(): Promise<void> {
     stkSelectedSn.value = webDev?.device_serial_number || stkDevices.value[0]?.device_serial_number || ''
     stkModalStep.value = 'devices'
   } catch (e: any) {
-    stkError.value = e?.message || String(e)
+    const msg = e?.message || String(e)
+    // Auto-recover from "verifier missing" — the PKCE session expired
+    // (cert wiped between Start and Complete, or stale paste UI). Get
+    // a fresh verifier + authorize URL so the next Amazon click works.
+    if (/code_verifier|start_oauth must run/i.test(msg)) {
+      try {
+        const fresh = await api<{ authorize_url: string }>('/api/kindle-stk/oauth/start', { method: 'POST' })
+        stkAuthorizeUrl.value = fresh.authorize_url
+        stkRedirectUrl.value = ''
+        stkError.value = 'Your authorization session expired. Click "Open Amazon authorize page" below again, sign in, then paste the new redirect URL.'
+        stkModalStep.value = 'paste'
+      } catch (e2: any) {
+        stkError.value = 'Could not refresh authorization session: ' + (e2?.message ?? e2)
+      }
+    } else {
+      stkError.value = msg
+    }
   } finally {
     stkLoading.value = false
   }
