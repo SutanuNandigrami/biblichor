@@ -2159,6 +2159,28 @@ def register(app: FastAPI) -> None:
             raise HTTPException(400, str(e)) from e
         return {"ok": True}
 
+    @router.put("/kindle-stk/default-destination/manual")
+    def kindle_stk_set_destination_manual(payload: dict, request: Request) -> dict:
+        """Set default destination WITHOUT consulting GetListOfOwnedDevices.
+
+        Use when Amazon's device list endpoint is unavailable (it has
+        been 503-ing for hours at a time via CloudFront). The user finds
+        their device_sn at amazon.com/hz/mycd/myx and pastes it here.
+        """
+        deps = request.app.state.deps
+        sn = (payload or {}).get("device_sn", "").strip()
+        name = (payload or {}).get("device_name", "").strip()
+        if not sn:
+            raise HTTPException(400, "device_sn is required")
+        svc = KindleStkService(deps.bookorbit_service)
+        try:
+            svc.set_default_destination_unchecked(sn, name or None)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except KindleStkNotConfigured as e:
+            raise HTTPException(400, str(e)) from e
+        return {"ok": True}
+
     @router.post("/kindle-stk/test-send")
     def kindle_stk_test_send(request: Request) -> dict:
         """Send a tiny test file to verify the configured device works."""

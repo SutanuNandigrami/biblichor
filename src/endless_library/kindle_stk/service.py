@@ -207,6 +207,25 @@ class KindleStkService:
             }
         )
 
+    def set_default_destination_unchecked(self, device_sn: str, device_name: str | None = None) -> None:
+        """Persist the destination WITHOUT validating against list_devices.
+
+        Used when Amazon's GetListOfOwnedDevices endpoint is unavailable
+        (CloudFront has returned 503 for that path for hours at a time).
+        The user supplies the device_sn from amazon.com/hz/mycd/myx and
+        we trust it. Send-to-Kindle will fail at send-time with a clear
+        Amazon error if the serial is wrong, which is the same failure
+        mode as a stale cached list anyway.
+        """
+        if not device_sn or not device_sn.strip():
+            raise ValueError("device_sn cannot be empty")
+        self._svc.set_secret_values(
+            {
+                "kindle_stk.default_destination_sn": device_sn.strip(),
+                "kindle_stk.default_destination_name": (device_name or device_sn).strip(),
+            }
+        )
+
     # ---- Send (single file) ----
 
     def send_file(
