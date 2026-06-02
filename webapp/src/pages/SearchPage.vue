@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { Search, Loader2, Plus, CheckCircle2, AlertCircle, BookOpen } from 'lucide-vue-next'
+import { ref, watch, computed } from 'vue'
+import { Search, Loader2, Plus, CheckCircle2, AlertCircle, BookOpen, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { api, ApiError } from '@/composables/useApi'
 import { useToast } from '@/composables/useToast'
 import Button from '@/components/ui/Button.vue'
@@ -16,6 +16,8 @@ type SearchResponse = {
   results: Result[]
   sources_used: string[]
   sources_skipped: { name: string; reason: string }[]
+  page?: number
+  has_next?: boolean
 }
 
 type Result = {
@@ -41,9 +43,12 @@ type Result = {
 const MIN_QUERY_LEN = 3
 // Debounce window. Longer than typing-pause but short enough to feel live.
 const DEBOUNCE_MS = 500
-// Cache last N queries in memory so backtracking ("eddie" -> "eddi") is
-// instant. Keyed by the trimmed-lowered query string.
-const CACHE_LIMIT = 20
+// Cache last N (query, lang, page) tuples in memory so paging back and
+// re-running the same query is instant. Keyed by `${lang}|${q}|p${page}`.
+const CACHE_LIMIT = 60
+// Pagination: how many results per page, and max page depth.
+const PAGE_SIZE = 25
+const MAX_PAGE = 10
 
 const query = ref('')
 const lang = ref<string>('all')  // 'all' = use cfg default (no override)
@@ -64,6 +69,17 @@ const error = ref<string | null>(null)
 const lastQuery = ref('')
 const queuing = ref<Set<string>>(new Set())
 const toast = useToast()
+// Pagination state.
+const currentPage = ref(1)
+// Per-(q,lang,page) record of whether the server said "more pages exist".
+// Used to disable Next at the depth boundary even if cache replay is showing.
+const hasNextByKey = new Map<string, boolean>()
+const canGoPrev = computed(() => currentPage.value > 1)
+const canGoNext = computed(() => {
+  if (currentPage.value >= MAX_PAGE) return false
+  const k = `${lang.value}|${query.value.trim().toLowerCase()}|p${currentPage.value}`
+  return hasNextByKey.get(k) === true
+})
 
 // AbortController for the in-flight request. When the user types another
 // letter, we cancel the previous fetch so its (now-stale) response can't
@@ -77,13 +93,17 @@ const cache = new Map<string, Result[]>()
 
 let debounceTimer: number | null = null
 // Also re-run when lang changes (fires immediately, no debounce — the
-// user explicitly picked the language).
+// user explicitly picked the language). Reset page to 1.
 watch(lang, () => {
+  currentPage.value = 1
   const q = query.value.trim()
   if (q.length >= MIN_QUERY_LEN) runSearch(q)
 })
 watch(query, (v) => {
   if (debounceTimer) window.clearTimeout(debounceTimer)
+
+  // Any query edit resets paging.
+  currentPage.value = 1
 
   const q = v.trim()
 
@@ -109,9 +129,8 @@ watch(query, (v) => {
     return
   }
 
-  // Cache hit: render instantly, no network. Still records as the "current"
-  // query for the result header.
-  const key = `${lang.value}|${q.toLowerCase()}`
+  // Cache hit (page 1 of this q+lang): render instantly, no network.
+  const key = `${lang.value}|${q.toLowerCase()}|p1`
   const cached = cache.get(key)
   if (cached) {
     if (inflightCtrl) inflightCtrl.abort()
@@ -128,7 +147,7 @@ watch(query, (v) => {
   }, DEBOUNCE_MS)
 })
 
-async function runSearch(q: string) {
+async function runSearch(q: string, page: number = currentPage.value) {
   // Cancel any earlier in-flight request. Critical for keystroke-by-keystroke
   // typing: without this, a slow request for "ed" returning AFTER "eddie"
   // would clobber the eddie results with two-letter junk.
@@ -140,7 +159,7 @@ async function runSearch(q: string) {
   error.value = null
   try {
     const r = await api<SearchResponse>(
-      `/api/search?q=${encodeURIComponent(q)}&limit=30` + (lang.value && lang.value !== 'all' ? `&lang=${encodeURIComponent(lang.value)}` : ''),
+      `/api/search?q=${encodeURIComponent(q)}&limit=${PAGE_SIZE}&page=${page}` + (lang.value && lang.value !== 'all' ? `&lang=${encodeURIComponent(lang.value)}` : ''),
       { signal: ctrl.signal },
     )
     // Ignore if a newer request started while we were waiting.
@@ -149,11 +168,16 @@ async function runSearch(q: string) {
     lastQuery.value = r.query
     sourcesUsed.value = r.sources_used || []
     sourcesSkipped.value = r.sources_skipped || []
-    // Cache (with LRU-ish eviction).
-    cache.set(`${lang.value}|${q.toLowerCase()}`, r.results)
+    // Cache by (lang, query, page). LRU-ish eviction.
+    const key = `${lang.value}|${q.toLowerCase()}|p${page}`
+    cache.set(key, r.results)
+    hasNextByKey.set(key, Boolean(r.has_next))
     if (cache.size > CACHE_LIMIT) {
       const oldest = cache.keys().next().value
-      if (oldest !== undefined) cache.delete(oldest)
+      if (oldest !== undefined) {
+        cache.delete(oldest)
+        hasNextByKey.delete(oldest)
+      }
     }
   } catch (e: unknown) {
     // Aborted requests are not errors — we cancelled them on purpose.
@@ -170,6 +194,27 @@ async function runSearch(q: string) {
       inflightCtrl = null
     }
   }
+}
+
+function goToPage(target: number) {
+  if (target < 1 || target > MAX_PAGE) return
+  const q = query.value.trim()
+  if (q.length < MIN_QUERY_LEN) return
+  currentPage.value = target
+  const key = `${lang.value}|${q.toLowerCase()}|p${target}`
+  const cached = cache.get(key)
+  if (cached) {
+    // Instant: previously fetched page, render from cache.
+    if (inflightCtrl) inflightCtrl.abort()
+    inflightCtrl = null
+    results.value = cached
+    lastQuery.value = q
+    error.value = null
+    loading.value = false
+    return
+  }
+  // Not cached: fetch this page from the server.
+  runSearch(q, target)
 }
 
 async function addToQueue(r: Result) {
@@ -201,7 +246,7 @@ async function addToQueue(r: Result) {
     }
     // Update cache entry too so backtracking to this query shows the new state.
     if (lastQuery.value) {
-      const key = lastQuery.value.toLowerCase()
+      const key = `${lang.value}|${lastQuery.value.toLowerCase()}|p${currentPage.value}`
       if (cache.has(key)) cache.set(key, [...results.value])
     }
     if (resp.created) toast.success(`Queued "${r.title}" (book #${resp.book_id})`)
@@ -354,5 +399,33 @@ function statusTone(status: string): 'success' | 'warning' | 'danger' | 'default
         </div>
       </article>
     </div>
+
+    <nav
+      v-if="lastQuery && (canGoPrev || canGoNext)"
+      class="mt-6 flex items-center justify-center gap-3"
+      aria-label="Search pagination"
+    >
+      <Button
+        size="sm"
+        variant="outline"
+        :disabled="!canGoPrev || loading"
+        @click="goToPage(currentPage - 1)"
+      >
+        <ChevronLeft class="w-3.5 h-3.5 mr-1" />
+        Previous
+      </Button>
+      <span class="text-sm text-muted-foreground tabular-nums">
+        Page {{ currentPage }}<span v-if="!canGoNext"> (end)</span>
+      </span>
+      <Button
+        size="sm"
+        variant="outline"
+        :disabled="!canGoNext || loading"
+        @click="goToPage(currentPage + 1)"
+      >
+        Next
+        <ChevronRight class="w-3.5 h-3.5 ml-1" />
+      </Button>
+    </nav>
   </div>
 </template>

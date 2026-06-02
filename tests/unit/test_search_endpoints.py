@@ -477,3 +477,87 @@ def test_search_lang_all_does_not_transliterate(tmp_path):
     body = r.json()
     assert body["augmented_query"] is None
     assert body["transliterated_query"] is None
+
+def test_search_page_param_threads_to_scraper(tmp_path):
+    """The `?page=N` query param must reach the scraper as query.page."""
+    app, _, _ = _make_app(tmp_path)
+    seen_pages: list[int] = []
+    fake = [_fake_candidate("a" * 32, title="X")]
+
+    class _SpyScraper:
+        def search(self, query):
+            seen_pages.append(query.page)
+            return fake
+
+    with patch("endless_library.scrapers.registry.build", return_value=_SpyScraper()):
+        r = TestClient(app).get("/api/search?q=anything&page=3")
+
+    assert r.status_code == 200
+    assert seen_pages == [3]
+    body = r.json()
+    assert body["page"] == 3
+
+
+def test_search_page_clamped_to_max_10(tmp_path):
+    """page > 10 is clamped to 10 (10-page depth cap)."""
+    app, _, _ = _make_app(tmp_path)
+    seen_pages: list[int] = []
+
+    class _SpyScraper:
+        def search(self, query):
+            seen_pages.append(query.page)
+            return []
+
+    with patch("endless_library.scrapers.registry.build", return_value=_SpyScraper()):
+        r = TestClient(app).get("/api/search?q=anything&page=99")
+
+    assert r.status_code == 200
+    assert seen_pages == [10]
+    assert r.json()["page"] == 10
+
+
+def test_search_page_floored_to_1(tmp_path):
+    """page < 1 floors to 1."""
+    app, _, _ = _make_app(tmp_path)
+    seen_pages: list[int] = []
+
+    class _SpyScraper:
+        def search(self, query):
+            seen_pages.append(query.page)
+            return []
+
+    with patch("endless_library.scrapers.registry.build", return_value=_SpyScraper()):
+        r = TestClient(app).get("/api/search?q=anything&page=0")
+
+    assert r.status_code == 200
+    assert seen_pages == [1]
+
+
+def test_search_has_next_true_when_page_is_full(tmp_path):
+    """When the scraper returns enough candidates to fill a page,
+    has_next must be True (more results likely on next page)."""
+    app, _, _ = _make_app(tmp_path)
+    # Return 30 candidates — more than the default 25 page size.
+    fake = [_fake_candidate(f"{i:032x}", title=f"book {i}") for i in range(30)]
+    with patch(
+        "endless_library.scrapers.registry.build",
+        return_value=MagicMock(search=lambda q: fake),
+    ):
+        r = TestClient(app).get("/api/search?q=anything&limit=25&page=1")
+    body = r.json()
+    assert body["count"] == 25
+    assert body["has_next"] is True
+
+
+def test_search_has_next_false_at_page_10_boundary(tmp_path):
+    """Even with full results, has_next is False at the 10-page depth."""
+    app, _, _ = _make_app(tmp_path)
+    fake = [_fake_candidate(f"{i:032x}", title=f"book {i}") for i in range(30)]
+    with patch(
+        "endless_library.scrapers.registry.build",
+        return_value=MagicMock(search=lambda q: fake),
+    ):
+        r = TestClient(app).get("/api/search?q=anything&limit=25&page=10")
+    body = r.json()
+    assert body["page"] == 10
+    assert body["has_next"] is False

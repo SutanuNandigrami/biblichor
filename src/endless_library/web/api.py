@@ -2173,7 +2173,7 @@ def register(app: FastAPI) -> None:
     # ---------- search ----------
 
     @router.get("/search")
-    def search(request: Request, q: str, limit: int = 20, lang: str = "", sources: str = ""):
+    def search(request: Request, q: str, limit: int = 25, lang: str = "", sources: str = "", page: int = 1):
         """Multi-scraper fan-out search.
 
         Query params:
@@ -2280,6 +2280,11 @@ def register(app: FastAPI) -> None:
         ):
             augmented_title = f"{q_clean} {_LANG_NAME[effective_lang]}"
 
+        # Pagination: cap at 10 pages deep, floor at 1. Annas natively
+        # returns ~50 entries per page; biblichor slices to `limit` (default
+        # 25) after dedup + script-filter.
+        page = max(1, min(int(page), 10))
+
         # Native-script rewrite for Latin queries on non-English langs.
         # `kriya` + bn -> `ক্রিয়া`; Anna's full-text matches the catalog's
         # native-script titles literally, so this is what actually finds
@@ -2305,6 +2310,7 @@ def register(app: FastAPI) -> None:
                 # if no epub exists, the SPA can hint that explicitly later.
                 format_priority=((getattr(sc, "format_priority", None) or ["epub"])[0],),
                 language=effective_lang,
+                page=page,
             )
 
         # Run augmented + transliterated as two distinct Anna's queries.
@@ -2433,6 +2439,9 @@ def register(app: FastAPI) -> None:
                 language_filter_applied = True
             # else: leave deduped as-is so user sees something + SPA hint.
 
+        # Capture pre-slice length so has_next can detect 'more results
+        # exist on next page' even when filter dropped many on this one.
+        total_before_slice = len(deduped)
         deduped = deduped[: max(1, min(int(limit), 50))]
 
         # biblichor books-table cross-ref.
@@ -2471,6 +2480,17 @@ def register(app: FastAPI) -> None:
         # in `used` twice (one per query). Preserve first-seen order.
         _seen_used: set[str] = set()
         used_dedup = [n for n in used if not (n in _seen_used or _seen_used.add(n))]
+        # has_next: heuristic — if we got at least `limit` results, assume
+        # more pages exist (Annas doesn't expose a definitive total cheaply).
+        # Capped by the 10-page depth limit.
+        limit_eff = max(1, min(int(limit), 50))
+        # has_next: more results likely exist on next page if THIS page
+        # was Annas-full (>= limit before slice) OR returned a healthy
+        # number of results after filter. Capped by 10-page depth.
+        has_next = (
+            (total_before_slice > limit_eff or len(results_out) >= max(1, limit_eff // 2))
+            and page < 10
+        )
         return {
             "query": q_clean,
             "lang": effective_lang,
@@ -2481,6 +2501,8 @@ def register(app: FastAPI) -> None:
             "sources_skipped": skipped,
             "augmented_query": augmented_title if augmented_title != q_clean else None,
             "transliterated_query": transliterated_title,
+            "page": page,
+            "has_next": has_next,
         }
 
     @router.post("/books/from-search")

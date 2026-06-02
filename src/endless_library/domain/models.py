@@ -32,6 +32,7 @@ class SearchQuery:
     isbn13: str | None
     format_priority: tuple[str, ...]
     language: str
+    page: int = 1
 
 
 @dataclass(frozen=True, slots=True)
