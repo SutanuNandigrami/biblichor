@@ -671,6 +671,21 @@ def register(app: FastAPI) -> None:
         added = await asyncio.to_thread(poll_sources, deps)
         return {"ok": True, "added": added}
 
+    @router.post("/sources/goodreads/backfill-isbn")
+    async def goodreads_backfill_isbn(request: Request):
+        """One-shot: scan every book with goodreads_id but no isbn13,
+        scrape ISBN from the Goodreads detail page, patch the row.
+
+        Throttled (~0.4s per book). For a backlog of ~100 books expect
+        ~40 seconds. Runs in a worker thread so the request stays
+        snappy if you wire a progress poller later.
+        """
+        from endless_library.sources.goodreads import backfill_isbns
+
+        deps = request.app.state.deps
+        result = await asyncio.to_thread(backfill_isbns, deps.db_path)
+        return {"ok": True, **result}
+
     @router.post("/sources/{sid}/toggle")
     def toggle_source(sid: int, request: Request):
         deps = request.app.state.deps
