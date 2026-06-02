@@ -58,8 +58,13 @@ class AnnasArchiveCurl:
             # If the query title is non-Latin (Bengali/CJK/Devanagari/...),
             # drop the lang hint so Anna's doesn't pad results with English
             # fallbacks.
+            # Include ISBN as an extra search token when biblichor has one.
+            # Anna's full-text matcher uses it to surface the EXACT edition
+            # whose Identifier line carries that ISBN — our parser extracts
+            # it from row_text and the scorer fires its 35-point match.
+            q_parts = [query.title, query.author or "", query.isbn13 or ""]
             params: dict[str, str] = {
-                "q": f"{query.title} {query.author or ''}".strip(),
+                "q": " ".join(p for p in q_parts if p).strip(),
                 "ext": fmt,
                 "sort": "",
             }
