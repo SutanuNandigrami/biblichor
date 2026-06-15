@@ -423,7 +423,20 @@ def _resolve_and_download(
             )
             continue
         if not handle:
-            last_error = f"{s_name} returned no CDN handle"
+            # Diagnostic: prior to this event we couldn't see which
+            # scrapers in the chain returned None silently. Log it.
+            deps.events.append(
+                book_id=book.id,
+                kind="scrape",
+                scraper=s_name,
+                message="resolve_cdn returned no handle",
+            )
+            # Only overwrite last_error if we don't yet have a more
+            # specific failure (download error, unpack rejected, etc.).
+            # Otherwise the final 'no handle' from the chain trailer
+            # clobbers the actual root cause from earlier scrapers.
+            if not last_error or "returned no CDN handle" in last_error:
+                last_error = f"{s_name} returned no CDN handle"
             continue
         deps.events.append(
             book_id=book.id,

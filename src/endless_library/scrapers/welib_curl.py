@@ -221,14 +221,40 @@ class WelibCurl:
             return None
         return r.text
 
-    def _ipfs_reachable(self, url: str, *, timeout: float = 8.0) -> bool:
-        """HEAD-probe an IPFS URL. Returns True only on 2xx response."""
+    def _ipfs_reachable(self, url: str, *, timeout: float = 10.0) -> bool:
+        """Verify an IPFS gateway can actually serve THIS content.
+
+        HEAD-only probing is a trap: ipfs.io's CloudFront returns 200 on
+        HEAD (cheap routing check) but 504s on the real GET because the
+        gateway can't fetch the CID from the IPFS network within its
+        timeout. A small range-GET (~1 KB) forces the gateway to actually
+        resolve the CID, so 504/timeout shows up here and the caller's
+        loop can fall through to the next of the ~30 listed gateways.
+
+        We also accept 206 Partial Content as success (HTTP-spec correct
+        response to a Range request).
+        """
         try:
             c = make_client(timeout=timeout)
-            r = c.head(url, allow_redirects=True, verify=False)
-            return 200 <= r.status_code < 300
+            r = c.get(
+                url,
+                headers={"Range": "bytes=0-1023"},
+                allow_redirects=True,
+                verify=False,
+                stream=True,
+            )
+            ok = r.status_code in (200, 206)
+            # Drain the small body so the connection can be reused/closed cleanly.
+            try:
+                next(r.iter_content(chunk_size=1024), None)
+            except Exception:
+                pass
+            r.close()
+            if not ok:
+                log.info("welib IPFS GET %s -> HTTP %d, skipping gateway", url[:80], r.status_code)
+            return ok
         except Exception as e:
-            log.info("welib IPFS HEAD failed for %s: %s", url[:80], e)
+            log.info("welib IPFS probe failed for %s: %s", url[:80], e)
             return False
 
     def _poll_slow_download(self, url: str) -> DownloadHandle | None:
