@@ -156,6 +156,19 @@ services:
       - bypass
     container_name: biblichor-cf-bypass
     restart: unless-stopped
+    # Override the upstream CMD: skip xvfb-run (it hangs polling for
+    # Xvfb readiness on this image) and run old_server.py directly.
+    # old_server.py starts its own pyvirtualdisplay when DOCKERMODE=true.
+    # Manual verification confirmed it works without the xvfb-run wrapper.
+    command: ["/app/venv/bin/python3", "old_server.py"]
+    environment:
+      DOCKERMODE: "true"
+    # Bump file-descriptor ulimit so DrissionPage's Chromium sessions
+    # don't trip 'Errno 24: too many open files' after sustained use.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/openapi.json"]
       interval: 30s
