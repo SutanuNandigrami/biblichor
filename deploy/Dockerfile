@@ -102,6 +102,13 @@ COPY src/ ./src/
 COPY bench/ ./bench/
 RUN pip install --no-cache-dir -e .
 
+# Patchright (stealth Playwright fork, used by annas_patchright scraper)
+# needs a Chromium binary. We use --with-deps to also apt-install the
+# system libraries Chromium needs to launch headless. ~146 MiB binary +
+# ~80 MiB libs. Worth it: this is what bypasses DDoS-Guard on annas-
+# archive.gl's slow_download endpoint where FlareSolverr/cf-bypass fail.
+RUN patchright install --with-deps chromium
+
 # Bring in the built SPA from the build stage
 COPY --from=webapp-build /webapp/dist /app/webapp/dist
 
@@ -113,7 +120,10 @@ RUN mkdir -p ${BIBLICHOR_DATA_DIR}
 # the shared library bind-mount has one consistent owner.
 RUN groupadd -g 1000 biblichor 2>/dev/null || true \
     && useradd -u 1000 -g 1000 -m -s /bin/false biblichor 2>/dev/null || true \
-    && chown -R 1000:1000 /app ${BIBLICHOR_DATA_DIR}
+    && chown -R 1000:1000 /app ${BIBLICHOR_DATA_DIR} \
+    && mkdir -p /home/biblichor/.cache \
+    && cp -r /root/.cache/ms-playwright /home/biblichor/.cache/ms-playwright 2>/dev/null || true \
+    && chown -R 1000:1000 /home/biblichor
 USER 1000:1000
 
 EXPOSE 8090
