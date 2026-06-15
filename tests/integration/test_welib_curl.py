@@ -117,6 +117,7 @@ class _FakeResp:
     def __init__(self, status_code: int, body: bytes = b""):
         self.status_code = status_code
         self._body = body
+        self.headers = {}
     def iter_content(self, chunk_size: int = 1024):
         yield self._body
     def close(self):
@@ -185,3 +186,130 @@ def test_ipfs_reachable_treats_exception_as_unreachable(monkeypatch):
 
     monkeypatch.setattr("endless_library.scrapers.welib_curl.make_client", lambda *a, **kw: _C())
     assert s._ipfs_reachable("https://gateway.example/ipfs/x") is False
+
+
+# ============ denylist + HTML rejection (PR #33 root cause L1) ============
+
+
+def test_ipfs_reachable_rejects_html_wrapper(monkeypatch):
+    """ipfs.io now returns an HTML loader page (HTTP 200, text/html)
+    instead of book bytes. Probe must reject this so the gateway loop
+    moves on to the next of the ~30 listed gateways."""
+    s = WelibCurl(_cfg())
+
+    class _C:
+        def get(self, url, *, headers=None, allow_redirects=False, verify=False, stream=False):
+            r = _FakeResp(200, body=b"<!DOCTYPE html><html><head><title>IPFS Service Worker</title></head>")
+            r.headers = {"Content-Type": "text/html; charset=utf-8"}
+            return r
+
+    monkeypatch.setattr("endless_library.scrapers.welib_curl.make_client", lambda *a, **kw: _C())
+    # Patch FakeResp to expose headers attribute the new probe reads
+    assert s._ipfs_reachable("https://anywhere.example/ipfs/x") is False
+
+
+def test_ipfs_reachable_rejects_html_by_body_signature(monkeypatch):
+    """Gateways that lie about Content-Type but still serve HTML must
+    still be rejected based on body content."""
+    s = WelibCurl(_cfg())
+
+    class _C:
+        def get(self, url, *, headers=None, allow_redirects=False, verify=False, stream=False):
+            r = _FakeResp(200, body=b"<html><body>not a book</body></html>")
+            # Deliberately lie about Content-Type
+            r.headers = {"Content-Type": "application/octet-stream"}
+            return r
+
+    monkeypatch.setattr("endless_library.scrapers.welib_curl.make_client", lambda *a, **kw: _C())
+    assert s._ipfs_reachable("https://liar.example/ipfs/x") is False
+
+
+def test_ipfs_reachable_accepts_real_epub_payload(monkeypatch):
+    """A gateway serving real ebook bytes (ZIP signature = PK\x03\x04
+    for epubs) must still pass."""
+    s = WelibCurl(_cfg())
+
+    class _C:
+        def get(self, url, *, headers=None, allow_redirects=False, verify=False, stream=False):
+            r = _FakeResp(206, body=b"PK\x03\x04...some real epub bytes here")
+            r.headers = {"Content-Type": "application/epub+zip"}
+            return r
+
+    monkeypatch.setattr("endless_library.scrapers.welib_curl.make_client", lambda *a, **kw: _C())
+    assert s._ipfs_reachable("https://goodgw.example/ipfs/x") is True
+
+
+def test_resolve_skips_ipfs_io_even_when_listed(monkeypatch):
+    """ipfs.io is in _DEAD_GATEWAYS — must be filtered out of the gateway
+    list even when welib includes it in /ipfs_downloads/md5: response.
+    The next listed (non-ipfs.io) gateway should be probed instead."""
+    from endless_library.scrapers.welib_curl import WelibCurl as _WC
+    s = _WC(_cfg())
+
+    # Synthesize a /ipfs_downloads listing with ipfs.io first + a working
+    # alternative second.
+    listing_html = """
+    <a href="https://ipfs.io/ipfs/bafy123/book.epub">ipfs.io</a>
+    <a href="https://dweb.link/ipfs/bafy123/book.epub">dweb.link</a>
+    <a href="https://ipfs.eth.aragon.network/ipfs/bafy123/book.epub">aragon</a>
+    """
+
+    probed: list[str] = []
+    def _fake_get(url, *, headers=None):
+        return (200, listing_html) if "/ipfs_downloads/md5:" in url else (404, "")
+
+    s2 = _WC(_cfg(), http_get=_fake_get)
+    def _reach(self, url, *, timeout=10.0):
+        probed.append(url)
+        # Pretend the first non-denylisted gateway is reachable.
+        return True
+    monkeypatch.setattr(_WC, "_ipfs_reachable", _reach)
+    monkeypatch.setattr("time.sleep", lambda *_: None)
+
+    candidate = Candidate(
+        provider="welib",
+        md5="a" * 32,
+        title="x",
+        author=None,
+        language="en",
+        format="epub",
+        filesize_bytes=None,
+        year=None,
+        publisher=None,
+        edition_hints="",
+        detail_url="https://welib.org/md5/" + "a" * 32,
+        raw={},
+    )
+    handle = s2.resolve_cdn(candidate)
+    # The handle's URL must be one of the non-ipfs.io alternatives.
+    assert handle is not None
+    assert "ipfs.io" not in handle.url, f"ipfs.io leaked through denylist: {handle.url}"
+    # And ipfs.io was never even probed
+    assert not any("ipfs.io" in u for u in probed), f"ipfs.io probed despite denylist: {probed}"
+
+
+def test_meta_refresh_skipped_when_url_is_ipfs_io(monkeypatch):
+    """Even on the meta-refresh fallback path (when /ipfs_downloads/md5
+    returns nothing), if the meta-refresh URL points at ipfs.io we
+    must not return it."""
+    from endless_library.scrapers.welib_curl import WelibCurl as _WC
+    detail_html = """
+    <meta http-equiv="refresh" content="0;url=https://ipfs.io/ipfs/bafy999/book.epub">
+    """
+    def _fake_get(url, *, headers=None):
+        if "/ipfs_downloads/md5:" in url:
+            return (404, "")
+        if "/md5/" in url:
+            return (200, detail_html)
+        return (200, "")
+    s = _WC(_cfg(), http_get=_fake_get)
+    monkeypatch.setattr("time.sleep", lambda *_: None)
+    candidate = Candidate(
+        provider="welib", md5="b" * 32, title="x", author=None, language="en",
+        format="epub", filesize_bytes=None, year=None, publisher=None,
+        edition_hints="", detail_url="https://welib.org/md5/" + "b" * 32, raw={},
+    )
+    handle = s.resolve_cdn(candidate)
+    # We expect None because the only path led to an ipfs.io URL that the
+    # denylist rejected. We don't want to silently return that URL.
+    assert handle is None or "ipfs.io" not in handle.url

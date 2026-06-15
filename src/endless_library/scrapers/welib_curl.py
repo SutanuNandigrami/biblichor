@@ -34,6 +34,29 @@ log = logging.getLogger(__name__)
 WELIB_BASE = "https://welib.org"
 
 # Anything that looks like a publicly-fetchable book payload.
+# Gateways known to be unusable from our IP.
+# ipfs.io migrated to a JavaScript service-worker gateway that
+# returns an HTML loader page (Content-Type: text/html, ~10KB JS)
+# instead of raw bytes for non-browser clients. HEAD/range-GET
+# accept the 200 status; the actual download then either receives
+# the HTML wrapper or 504s under rate limit. Skip it entirely.
+# Add other dead gateways here as they're identified (e.g. via
+# resolve_cdn returns + downloaded HTML body diagnostics).
+_DEAD_GATEWAYS = frozenset({
+    "ipfs.io",
+    # add hosts here as we burn them
+})
+
+
+def _gateway_host(url: str) -> str:
+    """Pull the bare host from an IPFS gateway URL for denylist checks."""
+    from urllib.parse import urlparse as _urlparse
+    try:
+        return (_urlparse(url).hostname or "").lower()
+    except Exception:
+        return ""
+
+
 _IPFS_RE = re.compile(
     r'https?://[^"\'\s<>]*?(?:ipfs(?:[.-][a-z0-9-]+)*\.[a-z]+|ipfs\.io)'
     r'/ipfs/[a-z0-9]+[^"\'\s<>]*',
@@ -169,11 +192,14 @@ class WelibCurl:
         listing = self._get(f"{WELIB_BASE}/ipfs_downloads/md5:{candidate.md5}")
         if listing:
             urls = list(dict.fromkeys(_IPFS_RE.findall(listing)))
-            log.info("welib: probing %d IPFS gateways", len(urls))
+            # Filter known-dead gateways before logging the probe count
+            # so the log accurately reflects what we'll actually try.
+            urls = [u for u in urls if _gateway_host(u) not in _DEAD_GATEWAYS]
+            log.info("welib: probing %d IPFS gateways (after denylist)", len(urls))
             for url in urls[:30]:
                 if not _is_book_payload_url(url):
                     continue
-                if self._ipfs_reachable(url, timeout=6.0):
+                if self._ipfs_reachable(url, timeout=10.0):
                     log.info("welib: picked IPFS gateway: %s", url[:80])
                     return DownloadHandle(url=url, headers={}, expected_filename=None)
 
@@ -183,7 +209,7 @@ class WelibCurl:
         if not html:
             return None
         m = _META_REFRESH_RE.search(html)
-        if m and _is_book_payload_url(m.group(1)):
+        if m and _is_book_payload_url(m.group(1)) and _gateway_host(m.group(1)) not in _DEAD_GATEWAYS:
             log.info("welib: picked meta-refresh URL")
             return DownloadHandle(url=m.group(1), headers={}, expected_filename=None)
         for cm in _WELIB_CDN_RE.finditer(html):
@@ -244,12 +270,32 @@ class WelibCurl:
                 stream=True,
             )
             ok = r.status_code in (200, 206)
-            # Drain the small body so the connection can be reused/closed cleanly.
+            ctype = (r.headers.get("Content-Type") or "").lower()
+            # Drain a small sample so we can inspect the first bytes AND
+            # the connection can be cleanly closed.
+            sample: bytes = b""
             try:
-                next(r.iter_content(chunk_size=1024), None)
+                for chunk in r.iter_content(chunk_size=1024):
+                    sample = chunk or b""
+                    break
             except Exception:
                 pass
             r.close()
+            # Reject HTML wrapper responses even when HTTP 200. ipfs.io's
+            # service-worker gateway returns text/html + a JS loader page;
+            # accepting it would let download() try to save 10KB of HTML
+            # as a book.
+            looks_like_html = (
+                "text/html" in ctype
+                or sample[:1] == b"<"
+                or sample[:15].lower().startswith(b"<!doctype html")
+            )
+            if ok and looks_like_html:
+                log.info(
+                    "welib IPFS %s served HTML wrapper (ct=%s), skipping gateway",
+                    url[:80], ctype,
+                )
+                ok = False
             if not ok:
                 log.info("welib IPFS GET %s -> HTTP %d, skipping gateway", url[:80], r.status_code)
             return ok
