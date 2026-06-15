@@ -6,6 +6,7 @@ from endless_library.config import ScrapersCfg
 from endless_library.scrapers.annas_cloakbrowser import AnnasArchiveCloakBrowser
 from endless_library.scrapers.annas_curl import AnnasArchiveCurl
 from endless_library.scrapers.annas_flaresolverr import AnnasArchiveFlareSolverr
+from endless_library.scrapers.annas_patchright import AnnasArchivePatchright
 from endless_library.scrapers.annas_playwright import AnnasArchivePlaywright
 from endless_library.scrapers.archive_curl import ArchiveOrgCurl
 
@@ -34,6 +35,7 @@ _REGISTRY = {
     "annas_curl": AnnasArchiveCurl,
     "annas_flaresolverr": AnnasArchiveFlareSolverr,
     "annas_playwright": AnnasArchivePlaywright,
+    "annas_patchright": AnnasArchivePatchright,
     "annas_cloakbrowser": AnnasArchiveCloakBrowser,
     "welib_curl": WelibCurl,
     "welib_playwright": WelibPlaywright,
@@ -71,6 +73,7 @@ SCRAPER_TO_OPEN_SLUM_SITE: dict[str, str] = {
     "annas_curl": "annas_archive",
     "annas_flaresolverr": "annas_archive",
     "annas_playwright": "annas_archive",
+    "annas_patchright": "annas_archive",
     "annas_cloakbrowser": "annas_archive",
     "libgen_curl": "libgen",
     "zlib_singlelogin": "zlibrary",
