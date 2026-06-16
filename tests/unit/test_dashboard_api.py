@@ -11,10 +11,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
+from datetime import UTC
+
 import pytest
 
 from endless_library.db.schema import connect, init_db
-from datetime import UTC
 from endless_library.web.api import compute_dashboard_snapshot
 
 # Counter for unique goodreads_id values

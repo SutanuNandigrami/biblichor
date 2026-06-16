@@ -92,10 +92,12 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
         try:
             from patchright.sync_api import (
                 Error as PWError,
-                sync_playwright,
             )
             from patchright.sync_api import (
                 TimeoutError as PWTimeout,
+            )
+            from patchright.sync_api import (
+                sync_playwright,
             )
         except ImportError:
             log.warning("annas_patchright: patchright not installed; skipping")

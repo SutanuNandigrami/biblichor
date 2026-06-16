@@ -244,7 +244,6 @@ def test_resolve_skips_ipfs_io_even_when_listed(monkeypatch):
     list even when welib includes it in /ipfs_downloads/md5: response.
     The next listed (non-ipfs.io) gateway should be probed instead."""
     from endless_library.scrapers.welib_curl import WelibCurl as _WC
-    s = _WC(_cfg())
 
     # Synthesize a /ipfs_downloads listing with ipfs.io first + a working
     # alternative second.

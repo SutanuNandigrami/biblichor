@@ -122,7 +122,13 @@ RUN groupadd -g 1000 biblichor 2>/dev/null || true \
     && useradd -u 1000 -g 1000 -m -s /bin/false biblichor 2>/dev/null || true \
     && chown -R 1000:1000 /app ${BIBLICHOR_DATA_DIR} \
     && mkdir -p /home/biblichor/.cache \
-    && cp -r /root/.cache/ms-playwright /home/biblichor/.cache/ms-playwright 2>/dev/null || true \
+    # Move (not copy) the Playwright cache so we don't end up with
+    # ~150 MiB of Chromium duplicated under /root AND /home/biblichor.
+    # The image's final user is biblichor (UID 1000), so the /root copy
+    # is unreachable at runtime — keeping it wastes layer space.
+    && if [ -d /root/.cache/ms-playwright ]; then \
+         mv /root/.cache/ms-playwright /home/biblichor/.cache/ms-playwright; \
+       fi \
     && chown -R 1000:1000 /home/biblichor
 USER 1000:1000
 
