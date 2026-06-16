@@ -91,6 +91,12 @@ scrapers:
   flaresolverr_url: http://flaresolverr:8191/v1
   # Route Anna's onion fallback through the Tor sidecar. Enable via
   # `docker compose --profile tor up -d` and flip tor_enabled to true.
+  # NOTE (2026-06-16 probe): Anna's currently only advertises a *torrents*
+  # onion (c5tbehd6apsmqyf5p4cfgky2njxd3tz37nrpt7qur6p7rczsuakqxkqd.onion)
+  # and that host was unreachable through the Tor sidecar (DDG/sanity onion
+  # responded fine, so tor itself is healthy). No main-site onion exists at
+  # the moment, so flipping this on does nothing useful. The plumbing stays
+  # in place for if/when Anna's brings one back up.
   tor_enabled: false
   tor_proxy_url: socks5h://tor:9050
   annas_mirrors:
