@@ -127,35 +127,56 @@ def cmd_run(args: argparse.Namespace) -> None:
         for line in Path(args.md5_file).read_text().splitlines()
         if line.strip() and not line.startswith("#")
     ]
+    # `--repeat N` walks the md5 list N times. PR #40 introduced the
+    # md5 -> partner URL cache; pass after the first round of the same
+    # fixture should be sub-ms per resolve. Aggregate is grouped per
+    # pass so the cache impact is visible.
     print(
-        f"# bench label={args.label}  n={len(md5s)}  fetch_bytes={args.fetch_bytes}",
+        f"# bench label={args.label}  n={len(md5s)}  "
+        f"fetch_bytes={args.fetch_bytes}  repeat={args.repeat}",
         file=sys.stderr,
     )
     cfg = Config()
     scraper = AnnasArchivePatchright(cfg.scrapers, headless=True)
-    results: list[dict] = []
+    passes: list[dict] = []
     t0 = time.monotonic()
-    for i, md5 in enumerate(md5s, 1):
-        print(f"[{i}/{len(md5s)}] {md5} ... ", end="", flush=True, file=sys.stderr)
-        r = bench_one(scraper, md5, fetch_bytes=args.fetch_bytes)
-        tag = "OK" if r["ok"] else f"FAIL({r['error']})"
-        rms = r["resolve_ms"] or 0
-        fms = r["fetch_ms"] or 0
-        print(
-            f"{tag}  resolve={rms}ms  fetch={fms}ms  bytes={r['bytes']}",
-            file=sys.stderr,
+    for pass_idx in range(args.repeat):
+        if args.repeat > 1:
+            print(f"== pass {pass_idx + 1}/{args.repeat} ==", file=sys.stderr)
+        pass_results: list[dict] = []
+        for i, md5 in enumerate(md5s, 1):
+            print(f"[{i}/{len(md5s)}] {md5} ... ", end="", flush=True, file=sys.stderr)
+            r = bench_one(scraper, md5, fetch_bytes=args.fetch_bytes)
+            tag = "OK" if r["ok"] else f"FAIL({r['error']})"
+            rms = r["resolve_ms"] or 0
+            fms = r["fetch_ms"] or 0
+            print(
+                f"{tag}  resolve={rms}ms  fetch={fms}ms  bytes={r['bytes']}",
+                file=sys.stderr,
+            )
+            pass_results.append(r)
+        passes.append(
+            {"pass": pass_idx + 1, "results": pass_results, "aggregate": aggregate(pass_results)}
         )
-        results.append(r)
+    all_results = [r for p in passes for r in p["results"]]
     out = {
         "label": args.label,
         "md5_file": str(args.md5_file),
         "fetch_bytes": args.fetch_bytes,
+        "repeat": args.repeat,
         "wallclock_seconds": int(time.monotonic() - t0),
-        "results": results,
-        "aggregate": aggregate(results),
+        "passes": passes,
+        "results": all_results,
+        "aggregate": aggregate(all_results),
     }
     Path(args.out).write_text(json.dumps(out, indent=2))
     print(f"# wrote {args.out}", file=sys.stderr)
+    if args.repeat > 1:
+        for p in passes:
+            agg = p["aggregate"]
+            rs = agg.get("resolve_ms")
+            mean = rs["mean"] if rs else "n/a"
+            print(f"# pass {p['pass']} aggregate: mean_resolve_ms={mean}")
     print(json.dumps(out["aggregate"], indent=2))
 
 
@@ -202,6 +223,12 @@ def main() -> None:
         type=int,
         default=0,
         help="fetch first N bytes of resolved URL (0 = skip fetch step)",
+    )
+    r.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help="iterate the md5 list N times (used to exercise the URL cache)",
     )
     r.set_defaults(func=cmd_run)
     c = sub.add_parser("compare", help="compare two bench json files")
