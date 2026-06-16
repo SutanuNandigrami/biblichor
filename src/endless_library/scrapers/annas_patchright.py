@@ -41,6 +41,7 @@ from endless_library.domain.models import Candidate, DownloadHandle
 from endless_library.scrapers.annas_browser_pool import BrowserPool, get_default_pool
 from endless_library.scrapers.annas_curl import AnnasArchiveCurl
 from endless_library.scrapers.annas_ddg_cookies import DDGCookieCache
+from endless_library.scrapers.annas_url_cache import PartnerURLCache
 
 log = logging.getLogger(__name__)
 
@@ -59,10 +60,12 @@ _DDG_COOKIE_PREFIX = "__ddg"
 # bind-mounted volume that already hosts library.db, so it survives
 # container restarts and is writable by the biblichor user.
 _DEFAULT_COOKIE_CACHE_PATH = Path("/data/annas_ddg_cookies.json")
+_DEFAULT_URL_CACHE_PATH = Path("/data/annas_partner_urls.json")
 
-# Process-wide cache singleton. Lazy-init so unit tests don't touch
+# Process-wide cache singletons. Lazy-init so unit tests don't touch
 # /data on import.
 _cookie_cache_singleton: DDGCookieCache | None = None
+_url_cache_singleton: PartnerURLCache | None = None
 
 
 def _default_cookie_cache() -> DDGCookieCache:
@@ -71,6 +74,14 @@ def _default_cookie_cache() -> DDGCookieCache:
         path = _DEFAULT_COOKIE_CACHE_PATH if _DEFAULT_COOKIE_CACHE_PATH.parent.is_dir() else None
         _cookie_cache_singleton = DDGCookieCache(path=path)
     return _cookie_cache_singleton
+
+
+def _default_url_cache() -> PartnerURLCache:
+    global _url_cache_singleton
+    if _url_cache_singleton is None:
+        path = _DEFAULT_URL_CACHE_PATH if _DEFAULT_URL_CACHE_PATH.parent.is_dir() else None
+        _url_cache_singleton = PartnerURLCache(path=path)
+    return _url_cache_singleton
 
 
 # Direct partner CDN URLs annas embeds on the slow_download page. The
@@ -112,6 +123,7 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
         headless: bool = True,
         cookie_cache: DDGCookieCache | None = None,
         browser_pool: BrowserPool | None = None,
+        url_cache: PartnerURLCache | None = None,
     ) -> None:
         super().__init__(cfg)
         self.headless = headless
@@ -126,6 +138,15 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
         # Persistent Chromium pool. Reuses one browser across resolves
         # (~5 s/book saved on launch). Tests inject a mock pool.
         self._browser_pool = browser_pool or get_default_pool()
+        # md5 -> partner CDN URL cache. Sub-ms hit on repeat md5 within
+        # the TTL window. invalidate_md5() exposed for the download
+        # caller to call on 4xx from the partner.
+        self._url_cache = url_cache or _default_url_cache()
+
+    def invalidate_md5(self, md5: str) -> None:
+        """The download caller observed a 4xx from the partner URL;
+        evict it so the next resolve_cdn walks the full path again."""
+        self._url_cache.invalidate(md5)
 
     def _try_cookie_replay(self, slow_url: str) -> DownloadHandle | None:
         """Plain httpx GET of /slow_download/... with cached DDG cookies.
@@ -182,6 +203,18 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
         if not md5:
             return None
 
+        # FASTEST PATH: if we resolved this same md5 within the URL
+        # cache TTL window, return the saved partner URL immediately.
+        # Sub-ms hit; no annas round-trip at all.
+        cached_url = self._url_cache.get(md5)
+        if cached_url is not None:
+            log.info(
+                "annas_patchright: url_cache HIT for %s (%s)",
+                md5,
+                cached_url.url[:80],
+            )
+            return DownloadHandle(url=cached_url.url, headers={}, expected_filename=None)
+
         # Light token-bucket pressure: patchright is heavy. We share the
         # parent's bucket so it counts against the same Annas rate
         # budget as curl/FS variants.
@@ -198,6 +231,7 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
         handle = self._try_cookie_replay(slow_url)
         if handle is not None:
             log.info("annas_patchright: cookie_replay HIT (%s)", handle.url[:80])
+            self._url_cache.set(md5, handle.url)
             return handle
 
         try:
@@ -321,6 +355,7 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
                         "annas_patchright: picked download anchor: %s",
                         cdn_url[:80],
                     )
+                    self._url_cache.set(md5, cdn_url)
                     return DownloadHandle(url=cdn_url, headers={}, expected_filename=None)
                 m2 = _PARTNER_CDN_RE.search(html)
                 if m2:
@@ -329,6 +364,7 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
                         "annas_patchright: picked first partner /d3/: %s",
                         cdn_url[:80],
                     )
+                    self._url_cache.set(md5, cdn_url)
                     return DownloadHandle(url=cdn_url, headers={}, expected_filename=None)
 
                 log.warning("annas_patchright: no CDN URL found on resolved page")
