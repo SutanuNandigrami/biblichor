@@ -36,6 +36,16 @@ top of patchright is risky (both touch the same Playwright internals);
 the realistic swap is rebrowser-patches + vanilla Playwright in place
 of patchright. PR #44 probe (2026-06-16) deferred this because
 patchright still clears DDG in 5-10 s -- no escalation to react to.
+
+If THAT also fails (DDG fingerprints all Chromium-derived browsers
+the same way): camoufox (https://github.com/daijro/camoufox) is a
+Firefox-based stealth browser with a fundamentally different engine
++ fingerprint surface. Adding it would push the deploy image +150 MB
+(custom Firefox build) and require a second resolve path in the
+scraper chain. PR #45 probe (2026-06-16) deferred this for the same
+reason as rebrowser-patches: nothing to react to yet. Code path stays
+documented here so a future engineer can wire it in if patchright
+loses to DDG.
 """
 
 from __future__ import annotations
@@ -80,11 +90,7 @@ _url_cache_singleton: PartnerURLCache | None = None
 def _default_cookie_cache() -> DDGCookieCache:
     global _cookie_cache_singleton
     if _cookie_cache_singleton is None:
-        path = (
-            _DEFAULT_COOKIE_CACHE_PATH
-            if _DEFAULT_COOKIE_CACHE_PATH.parent.is_dir()
-            else None
-        )
+        path = _DEFAULT_COOKIE_CACHE_PATH if _DEFAULT_COOKIE_CACHE_PATH.parent.is_dir() else None
         _cookie_cache_singleton = DDGCookieCache(path=path)
     return _cookie_cache_singleton
 
@@ -92,11 +98,7 @@ def _default_cookie_cache() -> DDGCookieCache:
 def _default_url_cache() -> PartnerURLCache:
     global _url_cache_singleton
     if _url_cache_singleton is None:
-        path = (
-            _DEFAULT_URL_CACHE_PATH
-            if _DEFAULT_URL_CACHE_PATH.parent.is_dir()
-            else None
-        )
+        path = _DEFAULT_URL_CACHE_PATH if _DEFAULT_URL_CACHE_PATH.parent.is_dir() else None
         _url_cache_singleton = PartnerURLCache(path=path)
     return _url_cache_singleton
 
@@ -115,14 +117,14 @@ _PARTNER_CDN_RE = re.compile(
 # Annas inserts \n in the rendered anchor body.
 _DOWNLOAD_ANCHOR_RE = re.compile(
     r'<a[^>]+href="(https?://[^"]+)"[^>]*>'
-    r'(?:[^<]|<[^a/])*?'
-    r'(?:Download now|Download with short)',
+    r"(?:[^<]|<[^a/])*?"
+    r"(?:Download now|Download with short)",
     re.IGNORECASE | re.DOTALL,
 )
 # DDoS-Guard interstitial title.
 _DDG_TITLE = re.compile(r"ddos-guard", re.IGNORECASE)
 # Slow-download countdown indicator (free-tier wait).
-_COUNTDOWN_RE = re.compile(r'js-partner-countdown[^>]*>\s*(\d+)')
+_COUNTDOWN_RE = re.compile(r"js-partner-countdown[^>]*>\s*(\d+)")
 
 
 class AnnasArchivePatchright(AnnasArchiveCurl):
@@ -190,9 +192,7 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
             ) as c:
                 r = c.get(slow_url)
         except Exception as e:
-            log.info(
-                "annas_patchright cookie_replay: fetch error: %s; invalidating", e
-            )
+            log.info("annas_patchright cookie_replay: fetch error: %s; invalidating", e)
             self._cookie_cache.invalidate(self.mirrors.current)
             return None
         if r.status_code != 200:
@@ -232,9 +232,7 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
                 md5,
                 cached_url.url[:80],
             )
-            return DownloadHandle(
-                url=cached_url.url, headers={}, expected_filename=None
-            )
+            return DownloadHandle(url=cached_url.url, headers={}, expected_filename=None)
 
         # Light token-bucket pressure: patchright is heavy. We share the
         # parent's bucket so it counts against the same Annas rate
@@ -328,9 +326,7 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
                         if c.get("name", "").startswith(_DDG_COOKIE_PREFIX)
                     }
                     if ddg_cookies:
-                        self._cookie_cache.set(
-                            self.mirrors.current, ddg_cookies, _CHROMIUM_UA
-                        )
+                        self._cookie_cache.set(self.mirrors.current, ddg_cookies, _CHROMIUM_UA)
                         log.info(
                             "annas_patchright: cached %d DDG cookies for %s",
                             len(ddg_cookies),
@@ -379,9 +375,7 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
                         cdn_url[:80],
                     )
                     self._url_cache.set(md5, cdn_url)
-                    return DownloadHandle(
-                        url=cdn_url, headers={}, expected_filename=None
-                    )
+                    return DownloadHandle(url=cdn_url, headers={}, expected_filename=None)
                 m2 = _PARTNER_CDN_RE.search(html)
                 if m2:
                     cdn_url = m2.group(0)
@@ -390,9 +384,7 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
                         cdn_url[:80],
                     )
                     self._url_cache.set(md5, cdn_url)
-                    return DownloadHandle(
-                        url=cdn_url, headers={}, expected_filename=None
-                    )
+                    return DownloadHandle(url=cdn_url, headers={}, expected_filename=None)
 
                 log.warning("annas_patchright: no CDN URL found on resolved page")
                 return None
