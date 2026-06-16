@@ -137,6 +137,7 @@ def test_setup_status(client):
     assert "sources_count" in body
     assert "smtp_configured" in body
 
+
 def _insert_candidate(deps, bid: int, md5: str, title: str) -> int:
     return deps.cands.insert(
         book_id=bid,
@@ -318,7 +319,9 @@ def test_bulk_retry_download_falls_back_to_research_when_no_pick(client):
     """If a selected book has no pick yet, bulk_retry_download falls back
     to full re-search so the button is never a no-op for the user."""
     c, deps = client
-    bid = deps.books.upsert(title="NoPick", author=None, isbn13=None, source="manual", source_id="m-np")
+    bid = deps.books.upsert(
+        title="NoPick", author=None, isbn13=None, source="manual", source_id="m-np"
+    )
     deps.books.set_status(bid, "failed", error="nothing found")
 
     r = c.post("/api/books/bulk_retry_download", json={"ids": [bid]})

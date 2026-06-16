@@ -9,6 +9,7 @@ oversize-routed-stk path being available.
 
 The cap calculation now considers BOTH paths and returns the larger.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -96,13 +97,16 @@ def test_stk_check_failure_falls_back_to_smtp_cap():
     assert cap == int(24 * 1024 * 1024 / 1.4)
 
 
-@pytest.mark.parametrize("size_mb,expected_skip", [
-    (10, False),     # well under either cap
-    (15, False),     # under SMTP cap
-    (50, True),      # over SMTP cap; would skip without STK
-    (111, True),     # the user's actual case
-    (199, True),     # just under STK cap
-])
+@pytest.mark.parametrize(
+    "size_mb,expected_skip",
+    [
+        (10, False),  # well under either cap
+        (15, False),  # under SMTP cap
+        (50, True),  # over SMTP cap; would skip without STK
+        (111, True),  # the user's actual case
+        (199, True),  # just under STK cap
+    ],
+)
 def test_documents_thresholds(size_mb, expected_skip):
     """Document the matrix: what gets hard-skipped without STK vs with.
     `expected_skip` is for the SMTP-only world (regression baseline)."""

@@ -435,6 +435,7 @@ def test_search_bengali_filter_falls_back_when_zero_matches(tmp_path):
     assert body["count"] == 1
     assert body["language_filter_applied"] is False
 
+
 def test_search_transliteration_does_not_fire_for_native_script_input(tmp_path):
     """If the user already typed Bengali script, no transliteration —
     the input IS the native form. Only one query goes to Anna's."""
@@ -448,7 +449,9 @@ def test_search_transliteration_does_not_fire_for_native_script_input(tmp_path):
             return fake
 
     with patch("endless_library.scrapers.registry.build", return_value=_SpyScraper()):
-        r = TestClient(app).get("/api/search?q=%E0%A6%B0%E0%A6%AC%E0%A7%80%E0%A6%A8%E0%A7%8D%E0%A6%A6%E0%A7%8D%E0%A6%B0%E0%A6%A8%E0%A6%BE%E0%A6%A5&lang=bn")
+        r = TestClient(app).get(
+            "/api/search?q=%E0%A6%B0%E0%A6%AC%E0%A7%80%E0%A6%A8%E0%A7%8D%E0%A6%A6%E0%A7%8D%E0%A6%B0%E0%A6%A8%E0%A6%BE%E0%A6%A5&lang=bn"
+        )
 
     assert r.status_code == 200
     body = r.json()
@@ -477,6 +480,7 @@ def test_search_lang_all_does_not_transliterate(tmp_path):
     body = r.json()
     assert body["augmented_query"] is None
     assert body["transliterated_query"] is None
+
 
 def test_search_page_param_threads_to_scraper(tmp_path):
     """The `?page=N` query param must reach the scraper as query.page."""

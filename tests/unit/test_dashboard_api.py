@@ -258,6 +258,7 @@ def test_kpis_in_flight_counts_searching_through_sending(db: Path):
 
 def test_kpis_today_sent_counts_books_sent_today_utc(db: Path):
     from datetime import datetime, timedelta
+
     today = datetime.now(UTC).replace(hour=12, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S")
     yesterday = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
     with connect(db) as conn:
@@ -315,13 +316,14 @@ def test_stage_timings_returns_zero_count_on_empty_db(db: Path):
 
 def test_stage_timings_computes_percentiles_from_book_stamps(db: Path):
     from datetime import datetime, timedelta
+
     now = datetime.now(UTC)
     with connect(db) as conn:
         # 3 books with known stage durations:
         #   search->dl   = 10s, 20s, 60s
         #   dl->sent     = 5s,  15s, 100s
         for sec_dl, sec_sent in ((10, 5), (20, 15), (60, 100)):
-            t_search = (now - timedelta(seconds=200))
+            t_search = now - timedelta(seconds=200)
             t_dl = t_search + timedelta(seconds=sec_dl)
             t_sent = t_dl + timedelta(seconds=sec_sent)
             conn.execute(

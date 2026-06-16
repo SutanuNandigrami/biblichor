@@ -14,6 +14,7 @@ The map only contains entries whose native form returned ≥1 Bengali-
 script result in live testing. Anything that returned zero (e.g.
 naive `ঠাকুর` alone, `রামায়ণ`) is omitted so we don't ship dead-ends.
 """
+
 from __future__ import annotations
 
 # Latin token / phrase → native script.
@@ -64,9 +65,7 @@ _MAPS: dict[str, dict[str, str]] = {
 
 def _substitute_phrases(q: str, lang_map: dict[str, str]) -> tuple[str, int]:
     """Greedy longest-match phrase substitution. Returns (rewritten, hits)."""
-    phrases = sorted(
-        (k for k in lang_map if " " in k), key=lambda p: -len(p)
-    )
+    phrases = sorted((k for k in lang_map if " " in k), key=lambda p: -len(p))
     out = q
     hits = 0
     for p in phrases:

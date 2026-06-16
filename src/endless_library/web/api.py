@@ -462,9 +462,7 @@ def register(app: FastAPI) -> None:
             raise HTTPException(400, detail="must provide at least one filter")
         clause = " AND ".join(where)
         with connect(deps.db_path) as conn:
-            rows = conn.execute(
-                f"SELECT id FROM books WHERE {clause}", args
-            ).fetchall()
+            rows = conn.execute(f"SELECT id FROM books WHERE {clause}", args).fetchall()
         return [int(r["id"]) for r in rows]
 
     @router.post("/books/bulk_retry")
@@ -521,10 +519,7 @@ def register(app: FastAPI) -> None:
                 deps.events.append(
                     book_id=bid,
                     kind="state_change",
-                    message=(
-                        "bulk re-queued from dashboard "
-                        "(no prior pick → re-search)"
-                    ),
+                    message=("bulk re-queued from dashboard (no prior pick → re-search)"),
                 )
                 research_fallback += 1
             else:
@@ -534,8 +529,7 @@ def register(app: FastAPI) -> None:
                     book_id=bid,
                     kind="state_change",
                     message=(
-                        f"bulk re-queued from dashboard "
-                        f"(retry download, pick #{pcid} preserved)"
+                        f"bulk re-queued from dashboard (retry download, pick #{pcid} preserved)"
                     ),
                 )
                 redownload += 1
@@ -1723,6 +1717,7 @@ def register(app: FastAPI) -> None:
         # would actually use.
         if scoring_cfg.deliverable_max_bytes is None:
             from endless_library.pipeline import _compute_deliverable_cap as _cap
+
             scoring_cfg = scoring_cfg.model_copy(update={"deliverable_max_bytes": _cap(deps)})
         q = SearchQuery(
             title=book.title,
@@ -2293,7 +2288,10 @@ def register(app: FastAPI) -> None:
             # something useful instead of a bare 500.
             msg = str(e)
             if "503" in msg or "Service Unavailable" in msg:
-                raise HTTPException(503, "Amazon STK service is temporarily unavailable. Try again in a few minutes.") from e
+                raise HTTPException(
+                    503,
+                    "Amazon STK service is temporarily unavailable. Try again in a few minutes.",
+                ) from e
             raise HTTPException(502, f"Amazon STK API error: {msg[:300]}") from e
         except Exception as e:
             raise HTTPException(502, f"{type(e).__name__}: {str(e)[:300]}") from e
@@ -2383,7 +2381,9 @@ def register(app: FastAPI) -> None:
     # ---------- search ----------
 
     @router.get("/search")
-    def search(request: Request, q: str, limit: int = 25, lang: str = "", sources: str = "", page: int = 1):
+    def search(
+        request: Request, q: str, limit: int = 25, lang: str = "", sources: str = "", page: int = 1
+    ):
         """Multi-scraper fan-out search.
 
         Query params:
@@ -2500,6 +2500,7 @@ def register(app: FastAPI) -> None:
         # native-script titles literally, so this is what actually finds
         # native-language books. See search/transliteration.py for why.
         from endless_library.search.transliteration import transliterate_query
+
         transliterated_title: str | None = None
         if (
             user_picked_lang
@@ -2571,19 +2572,23 @@ def register(app: FastAPI) -> None:
                     try:
                         n, cands, err = fut.result(timeout=0.1)
                     except (_cf.TimeoutError, Exception) as e:
-                        skipped.append({
-                            "name": name,
-                            "query": getattr(query_obj, "title", ""),
-                            "reason": f"{type(e).__name__}",
-                        })
+                        skipped.append(
+                            {
+                                "name": name,
+                                "query": getattr(query_obj, "title", ""),
+                                "reason": f"{type(e).__name__}",
+                            }
+                        )
                         errored_futures.add(fut)
                         continue
                     if err is not None or cands is None:
-                        skipped.append({
-                            "name": n,
-                            "query": getattr(query_obj, "title", ""),
-                            "reason": err or "no results",
-                        })
+                        skipped.append(
+                            {
+                                "name": n,
+                                "query": getattr(query_obj, "title", ""),
+                                "reason": err or "no results",
+                            }
+                        )
                         errored_futures.add(fut)
                         continue
                     used.append(n)
@@ -2604,23 +2609,29 @@ def register(app: FastAPI) -> None:
                                 used.append(n)
                                 merged.extend(cands)
                             else:
-                                skipped.append({
-                                    "name": n,
-                                    "query": getattr(query_obj, "title", ""),
-                                    "reason": err or "no results",
-                                })
+                                skipped.append(
+                                    {
+                                        "name": n,
+                                        "query": getattr(query_obj, "title", ""),
+                                        "reason": err or "no results",
+                                    }
+                                )
                         except Exception as e:
-                            skipped.append({
+                            skipped.append(
+                                {
+                                    "name": name,
+                                    "query": getattr(query_obj, "title", ""),
+                                    "reason": f"{type(e).__name__}",
+                                }
+                            )
+                    else:
+                        skipped.append(
+                            {
                                 "name": name,
                                 "query": getattr(query_obj, "title", ""),
-                                "reason": f"{type(e).__name__}",
-                            })
-                    else:
-                        skipped.append({
-                            "name": name,
-                            "query": getattr(query_obj, "title", ""),
-                            "reason": "timeout",
-                        })
+                                "reason": "timeout",
+                            }
+                        )
                         fut.cancel()
 
         # Dedup by md5 (first hit wins); non-md5 candidates keyed by
@@ -2733,9 +2744,8 @@ def register(app: FastAPI) -> None:
         # was Annas-full (>= limit before slice) OR returned a healthy
         # number of results after filter. Capped by 10-page depth.
         has_next = (
-            (total_before_slice > limit_eff or len(results_out) >= max(1, limit_eff // 2))
-            and page < 10
-        )
+            total_before_slice > limit_eff or len(results_out) >= max(1, limit_eff // 2)
+        ) and page < 10
         return {
             "query": q_clean,
             "lang": effective_lang,
@@ -2911,11 +2921,11 @@ def compute_dashboard_snapshot(db_path, window_hours: int = 24) -> dict:
     if window_hours not in (24, 168, 720):
         window_hours = 24
     if window_hours == 24:
-        bucket_minutes = 5      # 288 buckets
+        bucket_minutes = 5  # 288 buckets
     elif window_hours == 168:
-        bucket_minutes = 30     # 336 buckets
+        bucket_minutes = 30  # 336 buckets
     else:  # 720h / 30d
-        bucket_minutes = 120    # 360 buckets
+        bucket_minutes = 120  # 360 buckets
 
     now_utc = datetime.now(UTC)
     cutoff_dt = now_utc - timedelta(hours=window_hours)

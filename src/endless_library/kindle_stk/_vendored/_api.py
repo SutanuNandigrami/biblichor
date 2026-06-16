@@ -335,12 +335,14 @@ def _text(e: urllib.error.HTTPError) -> bytes | None:
         enc = ""
     if "gzip" in enc:
         import gzip
+
         try:
             return gzip.decompress(raw)
         except Exception:
             return raw
     if "deflate" in enc:
         import zlib
+
         try:
             return zlib.decompress(raw)
         except zlib.error:

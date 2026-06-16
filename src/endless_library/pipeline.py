@@ -586,6 +586,7 @@ def _compute_deliverable_cap(deps: PipelineDeps) -> int:
         )
     return smtp_cap
 
+
 def process_one(deps: PipelineDeps, book: BookRow) -> str:
     """Run the full pipeline on a single book. Returns final status.
 

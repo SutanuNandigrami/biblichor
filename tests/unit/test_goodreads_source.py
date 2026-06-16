@@ -8,6 +8,7 @@ into the Sources form produced a 404 with this URL:
 Two bugs: (1) URL form not recognized, (2) shelf forced to to-read
 on top of the user's choice. This test suite locks down both.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -50,16 +51,18 @@ def test_parser_full_url_without_scheme():
 
 
 def test_parser_url_without_shelf_query_defaults_to_to_read():
-    assert _parse_goodreads_identifier(
-        "https://www.goodreads.com/review/list/69278726"
-    ) == ("69278726", "to-read")
+    assert _parse_goodreads_identifier("https://www.goodreads.com/review/list/69278726") == (
+        "69278726",
+        "to-read",
+    )
 
 
 def test_parser_user_show_url_form():
     """User profile URL form: /user/show/{id}"""
-    assert _parse_goodreads_identifier(
-        "https://www.goodreads.com/user/show/69278726-sutanu"
-    ) == ("69278726", "to-read")
+    assert _parse_goodreads_identifier("https://www.goodreads.com/user/show/69278726-sutanu") == (
+        "69278726",
+        "to-read",
+    )
 
 
 def test_parser_strips_whitespace():
@@ -93,10 +96,12 @@ def test_parser_rejects_non_goodreads_host_even_when_path_ends_in_digits():
 def test_parser_accepts_goodreads_subdomains():
     """`www.goodreads.com` and `m.goodreads.com` must still be accepted."""
     assert _parse_goodreads_identifier("https://www.goodreads.com/review/list/69278726") == (
-        "69278726", "to-read",
+        "69278726",
+        "to-read",
     )
     assert _parse_goodreads_identifier("https://m.goodreads.com/review/list/69278726") == (
-        "69278726", "to-read",
+        "69278726",
+        "to-read",
     )
 
 
@@ -114,10 +119,12 @@ def test_list_to_read_builds_correct_url_for_url_identifier():
         return "<rss></rss>"  # empty feed; parser yields nothing
 
     src = GoodreadsRSS(fetch=_fake_fetch)
-    list(src.list_to_read(
-        identifier="goodreads.com/review/list/69278726?shelf=books-movie-english",
-        token=None,
-    ))
+    list(
+        src.list_to_read(
+            identifier="goodreads.com/review/list/69278726?shelf=books-movie-english",
+            token=None,
+        )
+    )
     assert seen_url == [GOODREADS_RSS.format(user_id="69278726", shelf="books-movie-english")]
     # Specifically: NOT the broken `?shelf=...?shelf=to-read` form
     assert "?shelf=to-read" not in seen_url[0]
@@ -160,9 +167,11 @@ _FAKE_HTML_NO_ISBN = """
 
 def test_fetch_isbn_finds_isbn_in_jsonld(monkeypatch):
     seen = []
+
     def _fake(url):
         seen.append(url)
         return _FAKE_HTML_WITH_ISBN
+
     src = GoodreadsRSS(fetch=_fake)
     assert src.fetch_isbn("199534613") == "9780063356580"
     assert seen == ["https://www.goodreads.com/book/show/199534613"]
@@ -176,6 +185,7 @@ def test_fetch_isbn_returns_none_when_jsonld_missing():
 def test_fetch_isbn_swallows_fetch_errors():
     def boom(url):
         raise RuntimeError("network down")
+
     src = GoodreadsRSS(fetch=boom)
     # Should not raise — best-effort, fall back to None
     assert src.fetch_isbn("12345") is None
@@ -222,11 +232,13 @@ def test_list_to_read_keeps_rss_isbn_when_present_and_skips_detail_fetch():
     </channel></rss>
     """
     fetches = []
+
     def _fake(url):
         fetches.append(url)
         if "list_rss" in url:
             return rss_xml
         raise AssertionError(f"unexpected detail-page fetch: {url}")
+
     src = GoodreadsRSS(fetch=_fake, fetch_isbn=True)
     refs = list(src.list_to_read(identifier="99999", token=None))
     assert refs[0].isbn13 == "9780063356580"
@@ -248,7 +260,11 @@ def test_list_to_read_with_fetch_isbn_disabled_skips_detail_fetch():
     """
     fetches = []
     src = GoodreadsRSS(
-        fetch=lambda u: (fetches.append(u), rss_xml)[1] if "list_rss" in u else (_ for _ in ()).throw(AssertionError("should not fetch detail page")),
+        fetch=lambda u: (
+            (fetches.append(u), rss_xml)[1]
+            if "list_rss" in u
+            else (_ for _ in ()).throw(AssertionError("should not fetch detail page"))
+        ),
         fetch_isbn=False,
     )
     refs = list(src.list_to_read(identifier="99999", token=None))
@@ -266,9 +282,11 @@ def test_list_to_read_skips_isbn_fetch_for_non_numeric_book_ids():
     </channel></rss>
     """
     fetches = []
+
     def _fake(url):
         fetches.append(url)
         return rss_xml if "list_rss" in url else ""
+
     src = GoodreadsRSS(fetch=_fake, fetch_isbn=True)
     refs = list(src.list_to_read(identifier="99999", token=None))
     # source_id is the title (not numeric) -> no detail-page fetch.

@@ -207,7 +207,9 @@ class KindleStkService:
             }
         )
 
-    def set_default_destination_unchecked(self, device_sn: str, device_name: str | None = None) -> None:
+    def set_default_destination_unchecked(
+        self, device_sn: str, device_name: str | None = None
+    ) -> None:
         """Persist the destination WITHOUT validating against list_devices.
 
         Used when Amazon's GetListOfOwnedDevices endpoint is unavailable

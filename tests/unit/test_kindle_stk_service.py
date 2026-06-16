@@ -308,6 +308,7 @@ def test_create_oauth_url_always_returns_amazon_com_for_uk():
 
 # ============ library-only delivery (PR #25) ============
 
+
 def test_send_file_with_no_default_destination_uses_empty_targetDevices(
     fake_bookorbit_svc, monkeypatch, tmp_path
 ):
@@ -355,9 +356,7 @@ def test_send_file_with_configured_default_passes_synthetic_destination(
     assert fake.send_calls[0]["destinations"] == ["G0WEB1"]
 
 
-def test_send_file_does_not_call_list_devices_anymore(
-    fake_bookorbit_svc, monkeypatch, tmp_path
-):
+def test_send_file_does_not_call_list_devices_anymore(fake_bookorbit_svc, monkeypatch, tmp_path):
     """list_devices() endpoint has been 503-ing for hours from CloudFront.
     Send path must not invoke it — the synthetic destination bypasses
     the validation entirely."""

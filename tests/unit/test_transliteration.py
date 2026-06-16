@@ -11,6 +11,7 @@ The curated map itself was ground-truthed against live Anna's results
 (2026-06-02) — those liveness checks live in the PR description, not in
 tests, because they'd flake on Anna's catalog churn.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -112,9 +113,7 @@ def test_fallback_not_called_when_curated_hits(monkeypatch):
         sentinel["called"] = True
         return "WRONG"
 
-    monkeypatch.setattr(
-        "endless_library.search.transliteration._fallback_transliteration", _fake
-    )
+    monkeypatch.setattr("endless_library.search.transliteration._fallback_transliteration", _fake)
     out = transliterate_query("yoga", "bn")
     assert out == "যোগ"
     assert sentinel["called"] is False

@@ -42,15 +42,18 @@ WELIB_BASE = "https://welib.org"
 # the HTML wrapper or 504s under rate limit. Skip it entirely.
 # Add other dead gateways here as they're identified (e.g. via
 # resolve_cdn returns + downloaded HTML body diagnostics).
-_DEAD_GATEWAYS = frozenset({
-    "ipfs.io",
-    # add hosts here as we burn them
-})
+_DEAD_GATEWAYS = frozenset(
+    {
+        "ipfs.io",
+        # add hosts here as we burn them
+    }
+)
 
 
 def _gateway_host(url: str) -> str:
     """Pull the bare host from an IPFS gateway URL for denylist checks."""
     from urllib.parse import urlparse as _urlparse
+
     try:
         return (_urlparse(url).hostname or "").lower()
     except Exception:
@@ -209,7 +212,11 @@ class WelibCurl:
         if not html:
             return None
         m = _META_REFRESH_RE.search(html)
-        if m and _is_book_payload_url(m.group(1)) and _gateway_host(m.group(1)) not in _DEAD_GATEWAYS:
+        if (
+            m
+            and _is_book_payload_url(m.group(1))
+            and _gateway_host(m.group(1)) not in _DEAD_GATEWAYS
+        ):
             log.info("welib: picked meta-refresh URL")
             return DownloadHandle(url=m.group(1), headers={}, expected_filename=None)
         for cm in _WELIB_CDN_RE.finditer(html):
@@ -289,9 +296,8 @@ class WelibCurl:
             # signature is specifically `<!doctype html`, `<html`, or
             # `text/html` Content-Type.
             stripped = sample.lstrip()[:80]
-            is_xml_ebook = (
-                stripped[:5].lower() == b"<?xml"
-                or stripped[:12].lower().startswith(b"<fictionbook")
+            is_xml_ebook = stripped[:5].lower() == b"<?xml" or stripped[:12].lower().startswith(
+                b"<fictionbook"
             )
             looks_like_html = (
                 "text/html" in ctype
@@ -301,7 +307,8 @@ class WelibCurl:
             if ok and looks_like_html and not is_xml_ebook:
                 log.info(
                     "welib IPFS %s served HTML wrapper (ct=%s), skipping gateway",
-                    url[:80], ctype,
+                    url[:80],
+                    ctype,
                 )
                 ok = False
             if not ok:

@@ -55,14 +55,14 @@ _PARTNER_CDN_RE = re.compile(
 # Annas inserts \n in the rendered anchor body.
 _DOWNLOAD_ANCHOR_RE = re.compile(
     r'<a[^>]+href="(https?://[^"]+)"[^>]*>'
-    r'(?:[^<]|<[^a/])*?'
-    r'(?:Download now|Download with short)',
+    r"(?:[^<]|<[^a/])*?"
+    r"(?:Download now|Download with short)",
     re.IGNORECASE | re.DOTALL,
 )
 # DDoS-Guard interstitial title.
 _DDG_TITLE = re.compile(r"ddos-guard", re.IGNORECASE)
 # Slow-download countdown indicator (free-tier wait).
-_COUNTDOWN_RE = re.compile(r'js-partner-countdown[^>]*>\s*(\d+)')
+_COUNTDOWN_RE = re.compile(r"js-partner-countdown[^>]*>\s*(\d+)")
 
 
 class AnnasArchivePatchright(AnnasArchiveCurl):
@@ -208,9 +208,7 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
                             "annas_patchright: picked download anchor: %s",
                             cdn_url[:80],
                         )
-                        return DownloadHandle(
-                            url=cdn_url, headers={}, expected_filename=None
-                        )
+                        return DownloadHandle(url=cdn_url, headers={}, expected_filename=None)
                     m2 = _PARTNER_CDN_RE.search(html)
                     if m2:
                         cdn_url = m2.group(0)
@@ -218,13 +216,9 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
                             "annas_patchright: picked first partner /d3/: %s",
                             cdn_url[:80],
                         )
-                        return DownloadHandle(
-                            url=cdn_url, headers={}, expected_filename=None
-                        )
+                        return DownloadHandle(url=cdn_url, headers={}, expected_filename=None)
 
-                    log.warning(
-                        "annas_patchright: no CDN URL found on resolved page"
-                    )
+                    log.warning("annas_patchright: no CDN URL found on resolved page")
                     return None
                 finally:
                     try:

@@ -114,12 +114,15 @@ def test_resolve_cdn_returns_none_when_only_covers(monkeypatch):
 
 class _FakeResp:
     """Minimal stand-in for httpx.Response so we can simulate gateway behavior."""
+
     def __init__(self, status_code: int, body: bytes = b""):
         self.status_code = status_code
         self._body = body
         self.headers = {}
+
     def iter_content(self, chunk_size: int = 1024):
         yield self._body
+
     def close(self):
         pass
 
@@ -131,12 +134,14 @@ def test_ipfs_reachable_treats_504_as_unreachable(monkeypatch):
     s = WelibCurl(_cfg())
 
     captured: dict = {}
+
     class _C:
         def get(self, url, *, headers=None, allow_redirects=False, verify=False, stream=False):
             captured["url"] = url
             captured["headers"] = headers
             captured["method"] = "GET"
             return _FakeResp(504, body=b"<html>gateway timeout</html>")
+
         def head(self, *a, **kw):
             captured["method"] = "HEAD"  # MUST NOT be called now
             return _FakeResp(200)
@@ -199,7 +204,9 @@ def test_ipfs_reachable_rejects_html_wrapper(monkeypatch):
 
     class _C:
         def get(self, url, *, headers=None, allow_redirects=False, verify=False, stream=False):
-            r = _FakeResp(200, body=b"<!DOCTYPE html><html><head><title>IPFS Service Worker</title></head>")
+            r = _FakeResp(
+                200, body=b"<!DOCTYPE html><html><head><title>IPFS Service Worker</title></head>"
+            )
             r.headers = {"Content-Type": "text/html; charset=utf-8"}
             return r
 
@@ -254,14 +261,17 @@ def test_resolve_skips_ipfs_io_even_when_listed(monkeypatch):
     """
 
     probed: list[str] = []
+
     def _fake_get(url, *, headers=None):
         return (200, listing_html) if "/ipfs_downloads/md5:" in url else (404, "")
 
     s2 = _WC(_cfg(), http_get=_fake_get)
+
     def _reach(self, url, *, timeout=10.0):
         probed.append(url)
         # Pretend the first non-denylisted gateway is reachable.
         return True
+
     monkeypatch.setattr(_WC, "_ipfs_reachable", _reach)
     monkeypatch.setattr("time.sleep", lambda *_: None)
 
@@ -292,21 +302,33 @@ def test_meta_refresh_skipped_when_url_is_ipfs_io(monkeypatch):
     returns nothing), if the meta-refresh URL points at ipfs.io we
     must not return it."""
     from endless_library.scrapers.welib_curl import WelibCurl as _WC
+
     detail_html = """
     <meta http-equiv="refresh" content="0;url=https://ipfs.io/ipfs/bafy999/book.epub">
     """
+
     def _fake_get(url, *, headers=None):
         if "/ipfs_downloads/md5:" in url:
             return (404, "")
         if "/md5/" in url:
             return (200, detail_html)
         return (200, "")
+
     s = _WC(_cfg(), http_get=_fake_get)
     monkeypatch.setattr("time.sleep", lambda *_: None)
     candidate = Candidate(
-        provider="welib", md5="b" * 32, title="x", author=None, language="en",
-        format="epub", filesize_bytes=None, year=None, publisher=None,
-        edition_hints="", detail_url="https://welib.org/md5/" + "b" * 32, raw={},
+        provider="welib",
+        md5="b" * 32,
+        title="x",
+        author=None,
+        language="en",
+        format="epub",
+        filesize_bytes=None,
+        year=None,
+        publisher=None,
+        edition_hints="",
+        detail_url="https://welib.org/md5/" + "b" * 32,
+        raw={},
     )
     handle = s.resolve_cdn(candidate)
     # We expect None because the only path led to an ipfs.io URL that the
