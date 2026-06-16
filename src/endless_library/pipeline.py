@@ -135,14 +135,19 @@ def poll_source_account(deps: PipelineDeps, account_id: int) -> int:
             if "seen_source_ids" in sig_params:
                 from endless_library.db.schema import connect as _connect
 
+                # books has per-source id columns (goodreads_id /
+                # hardcover_id), not a generic source_id. Pick the
+                # column to project the same way BookRepo.upsert
+                # picks the column to insert into.
+                _col = "hardcover_id" if acct.source == "hardcover" else "goodreads_id"
                 with _connect(deps.db_path) as _conn:
                     kwargs["seen_source_ids"] = {
-                        str(row["source_id"])
+                        str(row[_col])
                         for row in _conn.execute(
-                            "SELECT source_id FROM books WHERE source = ?",
+                            f"SELECT {_col} FROM books WHERE source = ?",
                             (acct.source,),
                         )
-                        if row["source_id"] is not None
+                        if row[_col] is not None
                     }
         except (ValueError, TypeError):
             pass  # signature unavailable (C-impl or built-in); call as-is
