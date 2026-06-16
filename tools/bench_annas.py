@@ -27,6 +27,7 @@ import statistics
 import sys
 import time
 import urllib.request
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 # Make src/ importable without `pip install -e .`
@@ -121,6 +122,16 @@ def aggregate(results: list[dict]) -> dict:
     }
 
 
+def _worker_resolve(payload: tuple[str, int]) -> dict:
+    """Top-level so ProcessPoolExecutor can pickle it. Each subprocess
+    builds its own scraper (and thus its own Chromium); the file-backed
+    URL/cookie caches at /data are shared via atomic tmp+rename."""
+    md5, fetch_bytes = payload
+    cfg = Config()
+    scraper = AnnasArchivePatchright(cfg.scrapers, headless=True)
+    return bench_one(scraper, md5, fetch_bytes=fetch_bytes)
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     md5s = [
         line.strip()
@@ -131,32 +142,75 @@ def cmd_run(args: argparse.Namespace) -> None:
     # md5 -> partner URL cache; pass after the first round of the same
     # fixture should be sub-ms per resolve. Aggregate is grouped per
     # pass so the cache impact is visible.
+    # `--workers N` runs N resolves concurrently per pass via
+    # ProcessPoolExecutor (each subprocess has its own browser; caches
+    # are shared via /data files). Used in PR #41 to measure whether
+    # annas tolerates concurrent slow_download requests from one IP.
     print(
         f"# bench label={args.label}  n={len(md5s)}  "
-        f"fetch_bytes={args.fetch_bytes}  repeat={args.repeat}",
+        f"fetch_bytes={args.fetch_bytes}  repeat={args.repeat}  "
+        f"workers={args.workers}",
         file=sys.stderr,
     )
-    cfg = Config()
-    scraper = AnnasArchivePatchright(cfg.scrapers, headless=True)
     passes: list[dict] = []
     t0 = time.monotonic()
+    if args.workers == 1:
+        cfg = Config()
+        scraper = AnnasArchivePatchright(cfg.scrapers, headless=True)
     for pass_idx in range(args.repeat):
         if args.repeat > 1:
             print(f"== pass {pass_idx + 1}/{args.repeat} ==", file=sys.stderr)
         pass_results: list[dict] = []
-        for i, md5 in enumerate(md5s, 1):
-            print(f"[{i}/{len(md5s)}] {md5} ... ", end="", flush=True, file=sys.stderr)
-            r = bench_one(scraper, md5, fetch_bytes=args.fetch_bytes)
-            tag = "OK" if r["ok"] else f"FAIL({r['error']})"
-            rms = r["resolve_ms"] or 0
-            fms = r["fetch_ms"] or 0
+        if args.workers == 1:
+            for i, md5 in enumerate(md5s, 1):
+                print(f"[{i}/{len(md5s)}] {md5} ... ", end="", flush=True, file=sys.stderr)
+                r = bench_one(scraper, md5, fetch_bytes=args.fetch_bytes)
+                tag = "OK" if r["ok"] else f"FAIL({r['error']})"
+                rms = r["resolve_ms"] or 0
+                fms = r["fetch_ms"] or 0
+                print(
+                    f"{tag}  resolve={rms}ms  fetch={fms}ms  bytes={r['bytes']}",
+                    file=sys.stderr,
+                )
+                pass_results.append(r)
+        else:
             print(
-                f"{tag}  resolve={rms}ms  fetch={fms}ms  bytes={r['bytes']}",
+                f"[parallel {args.workers}w] dispatching {len(md5s)} resolves...",
                 file=sys.stderr,
             )
-            pass_results.append(r)
+            pass_t0 = time.monotonic()
+            with ProcessPoolExecutor(max_workers=args.workers) as ex:
+                payloads = [(m, args.fetch_bytes) for m in md5s]
+                futures = {ex.submit(_worker_resolve, p): p[0] for p in payloads}
+                for fut in as_completed(futures):
+                    md5 = futures[fut]
+                    try:
+                        r = fut.result()
+                    except Exception as e:
+                        r = {
+                            "md5": md5,
+                            "ok": False,
+                            "resolve_ms": None,
+                            "fetch_ms": None,
+                            "bytes": 0,
+                            "error": f"worker died: {e}",
+                            "resolved_url": None,
+                        }
+                    pass_results.append(r)
+                    tag = "OK" if r["ok"] else f"FAIL({r['error']})"
+                    rms = r["resolve_ms"] or 0
+                    print(f"  done: {md5} {tag} resolve={rms}ms", file=sys.stderr)
+            print(
+                f"[parallel {args.workers}w] pass wallclock: "
+                f"{int((time.monotonic() - pass_t0) * 1000)} ms",
+                file=sys.stderr,
+            )
         passes.append(
-            {"pass": pass_idx + 1, "results": pass_results, "aggregate": aggregate(pass_results)}
+            {
+                "pass": pass_idx + 1,
+                "results": pass_results,
+                "aggregate": aggregate(pass_results),
+            }
         )
     all_results = [r for p in passes for r in p["results"]]
     out = {
@@ -164,6 +218,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         "md5_file": str(args.md5_file),
         "fetch_bytes": args.fetch_bytes,
         "repeat": args.repeat,
+        "workers": args.workers,
         "wallclock_seconds": int(time.monotonic() - t0),
         "passes": passes,
         "results": all_results,
@@ -229,6 +284,12 @@ def main() -> None:
         type=int,
         default=1,
         help="iterate the md5 list N times (used to exercise the URL cache)",
+    )
+    r.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="run N resolves concurrently per pass via ProcessPoolExecutor",
     )
     r.set_defaults(func=cmd_run)
     c = sub.add_parser("compare", help="compare two bench json files")
