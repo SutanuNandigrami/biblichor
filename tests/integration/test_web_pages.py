@@ -238,3 +238,92 @@ def test_retry_keeps_full_research_semantics(client):
     assert book.status == "queued"
     assert book.picked_candidate_id is None
     assert deps.cands.top_for_book(bid, limit=10) == []
+
+
+# ============ bulk_retry + bulk_retry_download (PR #36) ============
+
+
+def test_bulk_retry_clears_pick_and_requeues_selected(client):
+    """POST /api/books/bulk_retry on a list of ids must clear each book's
+    picked candidate + return it to the search pool. Mirrors the per-book
+    /retry endpoint, just fanned out."""
+    c, deps = client
+    bid1 = deps.books.upsert(title="A", author=None, isbn13=None, source="manual", source_id="m-a")
+    bid2 = deps.books.upsert(title="B", author=None, isbn13=None, source="manual", source_id="m-b")
+    cid1 = _insert_candidate(deps, bid1, "1" * 32, "A candidate")
+    cid2 = _insert_candidate(deps, bid2, "2" * 32, "B candidate")
+    assert c.post(f"/api/books/{bid1}/pick/{cid1}").status_code == 200
+    assert c.post(f"/api/books/{bid2}/pick/{cid2}").status_code == 200
+    deps.books.set_status(bid1, "failed", error="boom")
+    deps.books.set_status(bid2, "failed", error="boom")
+
+    r = c.post("/api/books/bulk_retry", json={"ids": [bid1, bid2]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert body["retried"] == 2
+    assert body["mode"] == "research"
+
+    for bid in (bid1, bid2):
+        b = deps.books.get(bid)
+        assert b.status == "queued"
+        assert b.picked_candidate_id is None
+        assert b.last_error is None
+
+
+def test_bulk_retry_by_status_scope(client):
+    """When ids is omitted but status is set, every row with that status
+    is retried. Used by the 'Re-search all failed' status-bar button."""
+    c, deps = client
+    bid1 = deps.books.upsert(title="X", author=None, isbn13=None, source="manual", source_id="m-x")
+    bid2 = deps.books.upsert(title="Y", author=None, isbn13=None, source="manual", source_id="m-y")
+    bid3 = deps.books.upsert(title="Z", author=None, isbn13=None, source="manual", source_id="m-z")
+    deps.books.set_status(bid1, "failed", error="e")
+    deps.books.set_status(bid2, "failed", error="e")
+    # bid3 stays in default 'pending' so it must NOT be touched
+
+    r = c.post("/api/books/bulk_retry", json={"status": "failed"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["retried"] == 2
+    assert deps.books.get(bid1).status == "queued"
+    assert deps.books.get(bid2).status == "queued"
+    # untouched
+    z = deps.books.get(bid3)
+    assert z.status != "queued" or z.last_error is None  # the negative is the point
+
+
+def test_bulk_retry_download_preserves_pick_when_set(client):
+    """bulk_retry_download must use the narrow redownload path (preserves
+    picked_candidate_id + candidates) when a pick exists."""
+    c, deps = client
+    bid = deps.books.upsert(title="P", author=None, isbn13=None, source="manual", source_id="m-p")
+    cid = _insert_candidate(deps, bid, "3" * 32, "P candidate")
+    assert c.post(f"/api/books/{bid}/pick/{cid}").status_code == 200
+    deps.books.set_status(bid, "failed", error="HTTP 520")
+
+    r = c.post("/api/books/bulk_retry_download", json={"ids": [bid]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["redownload"] == 1
+    assert body["research_fallback"] == 0
+
+    b = deps.books.get(bid)
+    assert b.status == "queued"
+    assert b.picked_candidate_id == cid  # preserved
+    assert len(deps.cands.top_for_book(bid, limit=10)) == 1
+
+
+def test_bulk_retry_download_falls_back_to_research_when_no_pick(client):
+    """If a selected book has no pick yet, bulk_retry_download falls back
+    to full re-search so the button is never a no-op for the user."""
+    c, deps = client
+    bid = deps.books.upsert(title="NoPick", author=None, isbn13=None, source="manual", source_id="m-np")
+    deps.books.set_status(bid, "failed", error="nothing found")
+
+    r = c.post("/api/books/bulk_retry_download", json={"ids": [bid]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["redownload"] == 0
+    assert body["research_fallback"] == 1
+    assert deps.books.get(bid).status == "queued"

@@ -108,6 +108,22 @@ class BulkDelete(BaseModel):
     hard: bool = False
 
 
+class BulkBookFilter(BaseModel):
+    """Shared selection shape for bulk retry / retry-download actions.
+
+    Mirrors `BulkDelete` (minus `hard`) so the SPA can issue
+    {ids: [...]} for an explicit checkbox selection OR
+    {status: 'failed'} for a one-shot "re-search every failed book"
+    button without dispatching N HTTPs from the client.
+    """
+
+    ids: list[int] | None = None
+    status: str | None = None
+    source: str | None = None
+    created_after: str | None = None
+    created_before: str | None = None
+
+
 class SettingsPatch(BaseModel):
     poll_interval_minutes: int | None = None
     max_attempts: int | None = None
@@ -397,6 +413,138 @@ def register(app: FastAPI) -> None:
             message=f"manually re-queued from dashboard (retry download, pick #{pcid} preserved)",
         )
         return {"ok": True, "mode": "redownload", "picked_candidate_id": pcid}
+
+    def _resolve_bulk_ids(
+        payload: BulkBookFilter,
+        deps,
+    ) -> list[int]:
+        """Resolve a BulkBookFilter / BulkDelete payload into a concrete
+        list of book ids. Mirrors the WHERE-construction logic from
+        bulk_delete so the bulk_retry / bulk_retry_download endpoints
+        accept the same selection vocabulary (explicit ids OR a status/
+        source/date-range filter).
+
+        Returns the list of matching book ids (may be empty). Raises
+        HTTPException(400) if no filter is provided OR if a date
+        argument fails to parse.
+        """
+        where: list[str] = []
+        args: list = []
+        if payload.ids:
+            placeholders = ",".join(["?"] * len(payload.ids))
+            where.append(f"id IN ({placeholders})")
+            args.extend(payload.ids)
+        if payload.status:
+            where.append("status = ?")
+            args.append(payload.status)
+        if payload.source:
+            where.append("source = ?")
+            args.append(payload.source)
+        if payload.created_after:
+            try:
+                dt_after = datetime.fromisoformat(payload.created_after)
+            except ValueError as e:
+                raise HTTPException(400, detail=f"invalid created_after: {e}") from e
+            if dt_after.tzinfo is not None:
+                dt_after = dt_after.astimezone(UTC).replace(tzinfo=None)
+            where.append("created_at >= ?")
+            args.append(dt_after.strftime("%Y-%m-%d %H:%M:%S"))
+        if payload.created_before:
+            try:
+                dt_before = datetime.fromisoformat(payload.created_before)
+            except ValueError as e:
+                raise HTTPException(400, detail=f"invalid created_before: {e}") from e
+            if dt_before.tzinfo is not None:
+                dt_before = dt_before.astimezone(UTC).replace(tzinfo=None)
+            where.append("created_at <= ?")
+            args.append(dt_before.strftime("%Y-%m-%d %H:%M:%S"))
+        if not where:
+            raise HTTPException(400, detail="must provide at least one filter")
+        clause = " AND ".join(where)
+        with connect(deps.db_path) as conn:
+            rows = conn.execute(
+                f"SELECT id FROM books WHERE {clause}", args
+            ).fetchall()
+        return [int(r["id"]) for r in rows]
+
+    @router.post("/books/bulk_retry")
+    def bulk_retry(payload: BulkBookFilter, request: Request):
+        """Bulk re-search (full reset). Equivalent to clicking the per-row
+        Re-search button on every selected book.
+
+        Selection vocabulary mirrors /bulk_delete:
+          - {"ids": [1,2,3]}            explicit selection
+          - {"status": "failed"}        every book matching the filter
+          - combine ids + status + source + created_after/before for AND
+        """
+        deps = request.app.state.deps
+        ids = _resolve_bulk_ids(payload, deps)
+        if not ids:
+            return {"ok": True, "retried": 0, "skipped": 0}
+        retried = 0
+        for bid in ids:
+            if not deps.books.get(bid):
+                continue
+            deps.books.reset_for_research(bid)
+            deps.cands.clear_for_book(bid)
+            deps.events.append(
+                book_id=bid,
+                kind="state_change",
+                message="bulk re-queued from dashboard (full re-search)",
+            )
+            retried += 1
+        return {"ok": True, "retried": retried, "skipped": len(ids) - retried, "mode": "research"}
+
+    @router.post("/books/bulk_retry_download")
+    def bulk_retry_download(payload: BulkBookFilter, request: Request):
+        """Bulk retry-download. Per book: if picked_candidate_id is set,
+        do the narrow redownload reset (preserves pick); otherwise fall
+        through to full re-search semantics (same fallback as the
+        per-row /retry-download endpoint).
+
+        Returns the per-mode counts so the SPA can surface "12 retried
+        download, 3 fell back to re-search" rather than a single number.
+        """
+        deps = request.app.state.deps
+        ids = _resolve_bulk_ids(payload, deps)
+        redownload = 0
+        research_fallback = 0
+        skipped = 0
+        for bid in ids:
+            book = deps.books.get(bid)
+            if not book:
+                skipped += 1
+                continue
+            if book.picked_candidate_id is None:
+                deps.books.reset_for_research(bid)
+                deps.cands.clear_for_book(bid)
+                deps.events.append(
+                    book_id=bid,
+                    kind="state_change",
+                    message=(
+                        "bulk re-queued from dashboard "
+                        "(no prior pick → re-search)"
+                    ),
+                )
+                research_fallback += 1
+            else:
+                pcid = book.picked_candidate_id
+                deps.books.reset_for_redownload(bid)
+                deps.events.append(
+                    book_id=bid,
+                    kind="state_change",
+                    message=(
+                        f"bulk re-queued from dashboard "
+                        f"(retry download, pick #{pcid} preserved)"
+                    ),
+                )
+                redownload += 1
+        return {
+            "ok": True,
+            "redownload": redownload,
+            "research_fallback": research_fallback,
+            "skipped": skipped,
+        }
 
     @router.post("/books/bulk_delete")
     def bulk_delete(payload: BulkDelete, request: Request):
