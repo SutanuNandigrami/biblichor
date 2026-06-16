@@ -1,0 +1,10 @@
+# Bench fixture for tools/bench_annas.py.
+# 5 known-good md5s pulled from prod DB (status=sent, provider=annas)
+# on 2026-06-16. Mix of Bengali + English titles to exercise non-Latin
+# parser paths alongside the common case. Small sample on purpose:
+# each run hits annas N times and we don't want to trip rate limits.
+e0bf3aa4103c8c4c779dfae62b1dd52a
+bda0b45e6a5dc52470b1dde2d0ccea2f
+b33accc89f052dc98cf419b6f9dc1667
+5a74d37db3f49e617735886aee6db4d0
+6c1f9f837aadb2f49550ab26d66c903d
