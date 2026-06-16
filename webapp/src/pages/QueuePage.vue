@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Search, BookOpen, Plus, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-vue-next'
+import { Search, BookOpen, Plus, Trash2, RefreshCw, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-vue-next'
 import { api } from '@/composables/useApi'
 import { useEventStream } from '@/composables/useWebSocket'
 import { useToast } from '@/composables/useToast'
@@ -187,6 +187,69 @@ async function bulkDeleteByStatus(opts: { hard: boolean }) {
     await fetchBooks()
   } catch (e: any) { toast.error('Bulk delete failed', String(e?.message ?? e)) }
 }
+
+// ── Bulk re-search / retry-download ───────────────────────────────
+// Both endpoints accept the same selection vocabulary as bulk_delete:
+// either an explicit `ids` list (current checkbox selection) or a
+// `status` filter shorthand to act on every book of that status.
+
+interface BulkRetryResp { ok: boolean; retried: number; skipped: number; mode: string }
+interface BulkRetryDlResp {
+  ok: boolean; redownload: number; research_fallback: number; skipped: number
+}
+
+async function bulkRetry(scope: { ids?: number[]; status?: string }) {
+  const ids = scope.ids ?? [...selected.value]
+  const label = scope.status
+    ? `Re-search every book with status="${scope.status}"?`
+    : `Re-search ${ids.length} selected books? (clears their picked candidate)`
+  if (!scope.status && !ids.length) return
+  if (!confirm(label)) return
+  try {
+    const body: Record<string, unknown> = scope.status
+      ? { status: scope.status }
+      : { ids }
+    const r = await api<BulkRetryResp>('/api/books/bulk_retry', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    toast.success(
+      `Re-search queued for ${r.retried} book${r.retried === 1 ? '' : 's'}`
+      + (r.skipped > 0 ? ` (${r.skipped} skipped)` : ''),
+    )
+    if (!scope.status) selected.value = new Set()
+    await fetchBooks()
+  } catch (e: any) {
+    toast.error('Bulk re-search failed', String(e?.message ?? e))
+  }
+}
+
+async function bulkRetryDownload(scope: { ids?: number[]; status?: string }) {
+  const ids = scope.ids ?? [...selected.value]
+  const label = scope.status
+    ? `Retry download for every book with status="${scope.status}"? (books without a picked candidate will fall back to re-search)`
+    : `Retry download for ${ids.length} selected books? (preserves each book's picked candidate)`
+  if (!scope.status && !ids.length) return
+  if (!confirm(label)) return
+  try {
+    const body: Record<string, unknown> = scope.status
+      ? { status: scope.status }
+      : { ids }
+    const r = await api<BulkRetryDlResp>('/api/books/bulk_retry_download', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    const parts: string[] = []
+    if (r.redownload > 0) parts.push(`${r.redownload} download retried`)
+    if (r.research_fallback > 0) parts.push(`${r.research_fallback} fell back to re-search (no picked candidate)`)
+    if (r.skipped > 0) parts.push(`${r.skipped} skipped`)
+    toast.success(parts.join(' · ') || 'No books matched')
+    if (!scope.status) selected.value = new Set()
+    await fetchBooks()
+  } catch (e: any) {
+    toast.error('Bulk retry-download failed', String(e?.message ?? e))
+  }
+}
 </script>
 
 <template>
@@ -218,6 +281,18 @@ async function bulkDeleteByStatus(opts: { hard: boolean }) {
       <Button
         v-if="statusFilter"
         size="sm" variant="outline"
+        @click="bulkRetryDownload({ status: statusFilter })">
+        <Download class="w-3.5 h-3.5" /> Retry download all {{ statusFilter }}
+      </Button>
+      <Button
+        v-if="statusFilter"
+        size="sm" variant="outline"
+        @click="bulkRetry({ status: statusFilter })">
+        <RefreshCw class="w-3.5 h-3.5" /> Re-search all {{ statusFilter }}
+      </Button>
+      <Button
+        v-if="statusFilter"
+        size="sm" variant="outline"
         @click="bulkDeleteByStatus({ hard: false })">
         <Trash2 class="w-3.5 h-3.5" /> Clear {{ statusFilter }}
       </Button>
@@ -233,6 +308,12 @@ async function bulkDeleteByStatus(opts: { hard: boolean }) {
     <div v-if="someSelected" class="flex items-center gap-3 px-4 py-2 rounded-md bg-accent/50 border border-border">
       <span class="text-sm font-medium">{{ selected.size }} selected</span>
       <div class="flex-1"></div>
+      <Button size="sm" variant="subtle" @click="bulkRetryDownload({})">
+        <Download class="w-3.5 h-3.5" /> Retry download
+      </Button>
+      <Button size="sm" variant="outline" @click="bulkRetry({})">
+        <RefreshCw class="w-3.5 h-3.5" /> Re-search
+      </Button>
       <Button size="sm" variant="outline" @click="bulkDelete({ hard: false })">
         <Trash2 class="w-3.5 h-3.5" /> Delete selected
       </Button>
