@@ -8,6 +8,12 @@ general:
   retention_keep_events_days: 90
   retention_keep_bench_per_scraper: 200
   max_attempts: 5
+  # Process N pending books concurrently per tick via ProcessPoolExecutor.
+  # 1 = pre-PR sequential behaviour. Each extra worker has its own
+  # Chromium (~150 MB RAM). Bench at 2026-06-16 showed workers=2 cuts
+  # wallclock ~50% with annas tolerating concurrent /slow_download
+  # requests. Don't raise above 3 without watching OCI memory.
+  parallel_books: 1
   books_dir: /data/books
   log_level: INFO
   daily_summary_hour_utc: 14
