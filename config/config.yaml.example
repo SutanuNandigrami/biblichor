@@ -53,6 +53,7 @@ scrapers:
   - annas_curl
   - annas_flaresolverr
   - annas_cloakbrowser
+  - annas_patchright
   - welib_curl
   - welib_playwright
   - libgen_curl
@@ -63,6 +64,12 @@ scrapers:
     annas_flaresolverr: true
     annas_playwright: false
     annas_cloakbrowser: true
+    # annas_patchright drives stealth-Chromium (patchright) to bypass
+    # the DDoS-Guard challenge annas-archive.gl deployed on
+    # /slow_download/. The browser launch is ~150 MB RAM + ~20 s per
+    # book — keep it ordered AFTER the cheaper annas variants so it
+    # only fires when those return None.
+    annas_patchright: true
     welib_curl: true
     welib_playwright: true
     libgen_curl: true

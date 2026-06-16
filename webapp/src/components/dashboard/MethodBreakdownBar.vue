@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * MethodBreakdownBar.vue — Stacked bar showing STK vs SMTP delivery totals
- * in the last 24h.
+ * for the active dashboard window (24h / 7d / 30d).
  */
 import { computed } from "vue"
 import { Bar } from "vue-chartjs"
@@ -16,16 +16,25 @@ import {
 
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
 
+// `breakdown` may carry a `window_hours` field from the new windowed
+// snapshot, or be a plain {stk, smtp} dict for back-compat. Both forms
+// render correctly; only the chart label changes.
 const props = defineProps<{
-  breakdown: Record<string, number>
+  breakdown: Record<string, number> & { window_hours?: number }
 }>()
 
-const stk = computed(() => props.breakdown["stk"] ?? 0)
-const smtp = computed(() => props.breakdown["smtp"] ?? 0)
+const stk = computed(() => Number(props.breakdown["stk"] ?? 0))
+const smtp = computed(() => Number(props.breakdown["smtp"] ?? 0))
 const total = computed(() => stk.value + smtp.value)
+const windowLabel = computed(() => {
+  const h = props.breakdown.window_hours
+  if (h === 168) return "Last 7 days"
+  if (h === 720) return "Last 30 days"
+  return "Last 24h"
+})
 
 const chartData = computed(() => ({
-  labels: ["Last 24h"],
+  labels: [windowLabel.value],
   datasets: [
     {
       label: "STK",

@@ -16,6 +16,7 @@ from endless_library.scrapers.annas_curl import AnnasArchiveCurl
 
 def _make_scraper(captured_urls: list[str]):
     """Build an AnnasArchiveCurl that captures every URL `_get` would fetch."""
+
     def _fake_get(self, url: str) -> str | None:
         captured_urls.append(url)
         return ""  # empty HTML => parser yields no candidates, we don't care here

@@ -118,7 +118,35 @@ def poll_source_account(deps: PipelineDeps, account_id: int) -> int:
     added = 0
     try:
         src = sources_registry.build(acct.source)
-        refs = list(src.list_to_read(identifier=acct.identifier, token=acct.token))
+        # Hand the source the set of already-tracked source_ids for this
+        # account's source so sources that fetch additional per-entry
+        # metadata (e.g. GoodreadsRSS' detail-page ISBN backfill) can
+        # skip work for books we already have rows for. Sources whose
+        # list_to_read signature doesn't accept the kwarg are called
+        # the old way — no behavioural change for them.
+        kwargs: dict[str, object] = {
+            "identifier": acct.identifier,
+            "token": acct.token,
+        }
+        try:
+            import inspect as _inspect
+
+            sig_params = _inspect.signature(src.list_to_read).parameters
+            if "seen_source_ids" in sig_params:
+                from endless_library.db.schema import connect as _connect
+
+                with _connect(deps.db_path) as _conn:
+                    kwargs["seen_source_ids"] = {
+                        str(row["source_id"])
+                        for row in _conn.execute(
+                            "SELECT source_id FROM books WHERE source = ?",
+                            (acct.source,),
+                        )
+                        if row["source_id"] is not None
+                    }
+        except (ValueError, TypeError):
+            pass  # signature unavailable (C-impl or built-in); call as-is
+        refs = list(src.list_to_read(**kwargs))
     except Exception as e:
         deps.events.append(
             book_id=None,
@@ -528,7 +556,7 @@ def _search_fail_or_skip(deps: PipelineDeps, book: BookRow, error: str) -> str:
     return "failed"
 
 
-def _compute_deliverable_cap(deps) -> int:
+def _compute_deliverable_cap(deps: PipelineDeps) -> int:
     """Largest candidate filesize the active delivery path can handle.
 
     SMTP-only: SMTP attachment cap divided by ~1.4 to account for base64
@@ -536,6 +564,12 @@ def _compute_deliverable_cap(deps) -> int:
     stkclient PUTs directly to S3, no base64 wrapper). When both paths
     are available, returns the larger so the picker doesn't hard-skip
     candidates that STK could deliver just because SMTP can't.
+
+    Falls back to the SMTP-only cap on any error checking STK status
+    (secrets store unreachable, BookOrbit down, etc.) — we log at
+    debug level so the fallback isn't silent under diagnostics, but
+    don't surface as a warning/error since a missing STK config is a
+    valid runtime state.
     """
     smtp_cap = int(deps.cfg.smtp.max_attachment_mb * 1024 * 1024 / 1.4)
     try:
@@ -543,8 +577,13 @@ def _compute_deliverable_cap(deps) -> int:
 
         if KindleStkService(deps.bookorbit_service).is_configured():
             return max(smtp_cap, deps.cfg.stk.max_batch_bytes)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(
+            "compute_deliverable_cap: STK status check failed (%s: %s); "
+            "falling back to SMTP-only cap",
+            type(e).__name__,
+            e,
+        )
     return smtp_cap
 
 def process_one(deps: PipelineDeps, book: BookRow) -> str:

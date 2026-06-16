@@ -78,14 +78,28 @@ def _substitute_phrases(q: str, lang_map: dict[str, str]) -> tuple[str, int]:
 
 def _substitute_tokens(q: str, lang_map: dict[str, str]) -> tuple[str, int]:
     """Per-token substitution for tokens that didn't get caught by phrases.
-    Only replaces tokens that are pure-Latin (skip already-substituted text)."""
+    Only replaces tokens that are pure-Latin (skip already-substituted text).
+
+    Leading/trailing punctuation is preserved around the substituted form:
+    `yoga,` becomes `যোগ,` rather than `যোগ`.
+    """
     parts = q.split(" ")
     out_parts: list[str] = []
     hits = 0
+    _PUNCT = ".,;:!?\"'()[]{}"
     for tok in parts:
-        low = tok.lower().strip(".,;:!?\"'()[]{}")
-        if low and low in lang_map and all(ord(c) < 0x024F for c in tok):
-            out_parts.append(lang_map[low])
+        # Split tok into (leading punct)(core)(trailing punct) so the
+        # surrounding punctuation can be reattached after substitution.
+        i = 0
+        while i < len(tok) and tok[i] in _PUNCT:
+            i += 1
+        j = len(tok)
+        while j > i and tok[j - 1] in _PUNCT:
+            j -= 1
+        leading, core, trailing = tok[:i], tok[i:j], tok[j:]
+        low = core.lower()
+        if low and low in lang_map and all(ord(c) < 0x024F for c in core):
+            out_parts.append(f"{leading}{lang_map[low]}{trailing}")
             hits += 1
         else:
             out_parts.append(tok)

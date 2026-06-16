@@ -569,7 +569,12 @@ async function completeStkOauth(): Promise<void> {
     // Auto-recover from "verifier missing" — the PKCE session expired
     // (cert wiped between Start and Complete, or stale paste UI). Get
     // a fresh verifier + authorize URL so the next Amazon click works.
-    if (/code_verifier|start_oauth must run/i.test(msg)) {
+    // The backend uses a stable phrase: "No code_verifier in session"
+    // or "start_oauth must run before complete_oauth". Match those
+    // specific fragments so we don't false-positive on unrelated
+    // errors that happen to mention `code_verifier` (e.g. a stack
+    // trace from elsewhere).
+    if (/No code_verifier in session|start_oauth must run before complete_oauth/i.test(msg)) {
       try {
         const fresh = await api<{ authorize_url: string }>('/api/kindle-stk/oauth/start', { method: 'POST' })
         stkAuthorizeUrl.value = fresh.authorize_url
@@ -577,7 +582,9 @@ async function completeStkOauth(): Promise<void> {
         stkError.value = 'Your authorization session expired. Click "Open Amazon authorize page" below again, sign in, then paste the new redirect URL.'
         stkModalStep.value = 'paste'
       } catch (e2: any) {
-        stkError.value = 'Could not refresh authorization session: ' + (e2?.message ?? e2)
+        // Use String(e2) for object-typed errors so we never stringify
+        // to "[object Object]" — backends sometimes throw bare objects.
+        stkError.value = 'Could not refresh authorization session: ' + (e2?.message ?? String(e2))
       }
     } else {
       stkError.value = msg

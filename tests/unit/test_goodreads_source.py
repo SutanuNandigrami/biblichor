@@ -74,8 +74,30 @@ def test_parser_empty_raises():
 
 
 def test_parser_unrecognized_url_raises_actionable_error():
-    with pytest.raises(ValueError, match="Could not extract Goodreads user id"):
+    """A URL that's neither goodreads.com nor a numeric tail must be rejected.
+    With host validation, this now produces the host-refusal message
+    rather than the older 'could not extract user id'."""
+    with pytest.raises(ValueError, match="Refusing non-Goodreads host"):
         _parse_goodreads_identifier("https://example.com/nothing/here")
+
+
+def test_parser_rejects_non_goodreads_host_even_when_path_ends_in_digits():
+    """Without host validation, the parser would accept
+    `https://example.com/review/list/12345` (path looks Goodreads-ish)
+    and turn it into a Goodreads RSS poll URL. Lock in the rejection
+    so a future refactor can't reopen that hole."""
+    with pytest.raises(ValueError, match="Refusing non-Goodreads host"):
+        _parse_goodreads_identifier("https://example.com/review/list/12345")
+
+
+def test_parser_accepts_goodreads_subdomains():
+    """`www.goodreads.com` and `m.goodreads.com` must still be accepted."""
+    assert _parse_goodreads_identifier("https://www.goodreads.com/review/list/69278726") == (
+        "69278726", "to-read",
+    )
+    assert _parse_goodreads_identifier("https://m.goodreads.com/review/list/69278726") == (
+        "69278726", "to-read",
+    )
 
 
 # ---- end-to-end on list_to_read ----

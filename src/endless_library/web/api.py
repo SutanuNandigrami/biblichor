@@ -291,9 +291,14 @@ def register(app: FastAPI) -> None:
         book = deps.books.get(book_id)
         if not book:
             raise HTTPException(404)
-        # Sync the deliverable cap so the recomputed score_breakdown
-        # reflects the actual delivery path (STK -> 200MB, else SMTP cap).
-        deps.cfg.scoring.deliverable_max_bytes = _compute_deliverable_cap(deps)
+        # Build a local copy of the scoring config with the active
+        # delivery cap set, instead of mutating the shared
+        # deps.cfg.scoring (which is process-wide state shared across
+        # concurrent requests and would clobber any user-set override
+        # from /api/scoring).
+        scoring_cfg_for_view = deps.cfg.scoring.model_copy(
+            update={"deliverable_max_bytes": _compute_deliverable_cap(deps)}
+        )
         # Reusable SearchQuery for breakdown recomputation
         sq = SearchQuery(
             title=book.title,
@@ -324,7 +329,7 @@ def register(app: FastAPI) -> None:
                     raw=raw,
                 )
                 isbn_match = bool(sq.isbn13) and sq.isbn13 in (raw.get("isbns") or [])
-                sb = score_candidate(cand, sq, deps.cfg.scoring, isbn13_match=isbn_match)
+                sb = score_candidate(cand, sq, scoring_cfg_for_view, isbn13_match=isbn_match)
                 d["score_breakdown"] = {
                     "components": sb.components,
                     "is_hard_skip": sb.is_hard_skip,
@@ -2398,8 +2403,14 @@ def register(app: FastAPI) -> None:
         # One job per (scraper, query) pair. For the common single-query case
         # this collapses to the original N-scrapers-1-query fan-out.
         jobs: list[tuple[str, SearchQuery]] = [(n, q) for n in scraper_names for q in queries]
+        # Track jobs by future identity, not by scraper name. With dual
+        # queries the same scraper appears twice — keying by name caused
+        # the timeout-recovery branch to skip the second query's
+        # candidates if the first had already completed.
         with _cf.ThreadPoolExecutor(max_workers=min(len(jobs), 6)) as ex:
-            futures = {ex.submit(_run_one, j): j[0] for j in jobs}
+            futures = {ex.submit(_run_one, j): j for j in jobs}
+            done_futures: set = set()
+            errored_futures: set = set()
             # NOTE: as_completed() itself raises TimeoutError when the outer
             # deadline expires with futures still pending. PR #6 only caught
             # exceptions inside the loop body, so a slow scraper exploded the
@@ -2407,38 +2418,61 @@ def register(app: FastAPI) -> None:
             # pool-level timeout cleanly.
             try:
                 for fut in _cf.as_completed(futures, timeout=per_scraper_timeout + 1):
-                    name = futures[fut]
+                    name, query_obj = futures[fut]
+                    done_futures.add(fut)
                     try:
                         n, cands, err = fut.result(timeout=0.1)
                     except (_cf.TimeoutError, Exception) as e:
-                        skipped.append({"name": name, "reason": f"{type(e).__name__}"})
+                        skipped.append({
+                            "name": name,
+                            "query": getattr(query_obj, "title", ""),
+                            "reason": f"{type(e).__name__}",
+                        })
+                        errored_futures.add(fut)
                         continue
                     if err is not None or cands is None:
-                        skipped.append({"name": n, "reason": err or "no results"})
+                        skipped.append({
+                            "name": n,
+                            "query": getattr(query_obj, "title", ""),
+                            "reason": err or "no results",
+                        })
+                        errored_futures.add(fut)
                         continue
                     used.append(n)
                     merged.extend(cands)
             except _cf.TimeoutError:
                 # Pool-level timeout: collect anything that DID finish in time
                 # and mark the rest as skipped. The user gets fast partial
-                # results instead of a 500.
-                for fut, name in futures.items():
-                    if (
-                        fut.done()
-                        and name not in used
-                        and not any(s["name"] == name for s in skipped)
-                    ):
+                # results instead of a 500. Track per-future (not per name)
+                # so a second-query job whose sibling already finished still
+                # gets its candidates merged.
+                for fut, (name, query_obj) in futures.items():
+                    if fut in done_futures or fut in errored_futures:
+                        continue
+                    if fut.done():
                         try:
                             n, cands, err = fut.result(timeout=0.1)
                             if err is None and cands is not None:
                                 used.append(n)
                                 merged.extend(cands)
                             else:
-                                skipped.append({"name": n, "reason": err or "no results"})
+                                skipped.append({
+                                    "name": n,
+                                    "query": getattr(query_obj, "title", ""),
+                                    "reason": err or "no results",
+                                })
                         except Exception as e:
-                            skipped.append({"name": name, "reason": f"{type(e).__name__}"})
-                    elif not fut.done():
-                        skipped.append({"name": name, "reason": "timeout"})
+                            skipped.append({
+                                "name": name,
+                                "query": getattr(query_obj, "title", ""),
+                                "reason": f"{type(e).__name__}",
+                            })
+                    else:
+                        skipped.append({
+                            "name": name,
+                            "query": getattr(query_obj, "title", ""),
+                            "reason": "timeout",
+                        })
                         fut.cancel()
 
         # Dedup by md5 (first hit wins); non-md5 candidates keyed by
@@ -2534,9 +2568,15 @@ def register(app: FastAPI) -> None:
                 }
             )
         # Dedup sources_used — with dual queries the same scraper appears
-        # in `used` twice (one per query). Preserve first-seen order.
+        # in `used` twice (one per query). Preserve first-seen order
+        # without using set-mutation side effects inside a list comprehension
+        # (linting rules + readability).
         _seen_used: set[str] = set()
-        used_dedup = [n for n in used if not (n in _seen_used or _seen_used.add(n))]
+        used_dedup: list[str] = []
+        for _name in used:
+            if _name not in _seen_used:
+                _seen_used.add(_name)
+                used_dedup.append(_name)
         # has_next: heuristic — if we got at least `limit` results, assume
         # more pages exist (Annas doesn't expose a definitive total cheaply).
         # Capped by the 10-page depth limit.

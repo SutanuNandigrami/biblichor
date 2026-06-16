@@ -284,13 +284,21 @@ class WelibCurl:
             # Reject HTML wrapper responses even when HTTP 200. ipfs.io's
             # service-worker gateway returns text/html + a JS loader page;
             # accepting it would let download() try to save 10KB of HTML
-            # as a book.
+            # as a book. BUT allow `<?xml` (FB2 ebooks are XML and start
+            # with `<?xml`) and `<FictionBook` (FB2 variant). The HTML
+            # signature is specifically `<!doctype html`, `<html`, or
+            # `text/html` Content-Type.
+            stripped = sample.lstrip()[:80]
+            is_xml_ebook = (
+                stripped[:5].lower() == b"<?xml"
+                or stripped[:12].lower().startswith(b"<fictionbook")
+            )
             looks_like_html = (
                 "text/html" in ctype
-                or sample[:1] == b"<"
-                or sample[:15].lower().startswith(b"<!doctype html")
+                or stripped[:14].lower().startswith(b"<!doctype html")
+                or stripped[:5].lower() == b"<html"
             )
-            if ok and looks_like_html:
+            if ok and looks_like_html and not is_xml_ebook:
                 log.info(
                     "welib IPFS %s served HTML wrapper (ct=%s), skipping gateway",
                     url[:80], ctype,

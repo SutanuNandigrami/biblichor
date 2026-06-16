@@ -27,6 +27,11 @@ DEFAULT_CLIENT_INFO = {
 class APIError(ValueError):
     """Represents errors returned in HTTP response of the API."""
 
+    # Bound the error-message tail so an Amazon HTML page (10KB+ of
+    # service-worker shell, CloudFront wrappers, etc.) doesn't bloat
+    # logs or leak large upstream content into exception strings.
+    _MAX_RENDERED_LEN = 1000
+
     def __init__(self, msg: str, body: bytes | None):
         """Construct an APIError with a given message and response body."""
         if body is not None:
@@ -44,7 +49,12 @@ class APIError(ValueError):
             try:
                 rendered = json.dumps(parsed)
             except Exception:
-                rendered = repr(parsed)[:1000]
+                rendered = repr(parsed)
+            # Truncate every path: even a successfully-parsed JSON body
+            # can be massive (Amazon sometimes returns multi-KB error
+            # objects with full request envelopes echoed back).
+            if len(rendered) > self._MAX_RENDERED_LEN:
+                rendered = rendered[: self._MAX_RENDERED_LEN] + "...[truncated]"
             msg += f" {rendered}"
         super().__init__(msg)
 
