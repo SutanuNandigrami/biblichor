@@ -45,6 +45,23 @@ from endless_library.sources import registry as sources_registry
 log = logging.getLogger(__name__)
 
 
+def _evict_cached_url(scraper, md5: str | None) -> None:
+    """Best-effort: tell the scraper to evict its cached partner URL
+    for this md5. AnnasArchivePatchright exposes invalidate_md5; other
+    scrapers may not. Swallow everything so the failure path stays
+    correct even if the scraper has no cache (or invalidation itself
+    throws on a corrupt cache file)."""
+    if not md5:
+        return
+    invalidate = getattr(scraper, "invalidate_md5", None)
+    if invalidate is None:
+        return
+    try:
+        invalidate(md5)
+    except Exception:
+        log.debug("invalidate_md5 swallowed for %s", md5, exc_info=True)
+
+
 def _book_context(
     book,
     cfg,
@@ -489,6 +506,11 @@ def _resolve_and_download(
             deps.events.append(
                 book_id=book.id, kind="download", scraper=s_name, message=f"download failed: {e}"
             )
+            # If the scraper caches the resolved URL (annas_patchright's
+            # md5 -> /d3/ cache), evict it -- this URL just failed, so
+            # the next retry must walk the full resolve path again
+            # instead of replaying the bad URL until the 1h TTL expires.
+            _evict_cached_url(scraper, c.md5)
             continue
         deps.events.append(
             book_id=book.id,
@@ -518,6 +540,10 @@ def _resolve_and_download(
                 scraper=s_name,
                 message=f"unpack/AV rejected: {e}",
             )
+            # The cached URL produced bytes that aren't a valid archive
+            # (HTML error page, captcha, truncated download, ...).
+            # Evict so the next retry resolves fresh.
+            _evict_cached_url(scraper, c.md5)
             continue
         if unpacked.was_archive:
             deps.events.append(
