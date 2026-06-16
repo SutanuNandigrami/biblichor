@@ -211,16 +211,24 @@ def effective_mirrors(configured: list[str], cached: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 # Phase 6w.2: Mirror rotation with cool-down
 # ---------------------------------------------------------------------------
-# Mirrors rotated across active Anna's Archive domains as of 2026-05-25.
-# Updated after annas-archive.in fell out of DNS and .org was confirmed
-# dead by the user. .pk and .gd added from the wiki cache (both resolving
-# from OCI Phoenix). On 5xx / connection-refused, cool that mirror for
-# 5 minutes; pin success across calls when prefer_last_working is set.
+# Mirrors rotated across active Anna's Archive domains.
+# 2026-06-16 probe (PR #42):
+#   gl, pk, gd       -- live, full /md5 + /slow_download paths work
+#   li               -- removed: persistent SSL cert chain failure at
+#                       45.33.83.100 (unable to get local issuer cert)
+#   pm               -- removed: TLS disconnect mid-handshake at
+#                       172.236.108.16
+#   cc, is           -- not added: Anna's-branded landing pages that
+#                       404 on real md5s, so search-only fronts not
+#                       usable download mirrors
+# Per-mirror probe also confirmed all live mirrors are DDoS-Guard-
+# gated on /slow_download, so rotation does NOT bypass DDG -- only
+# helps when one mirror goes offline. On 5xx / connection-refused,
+# cool that mirror for 5 minutes; pin success across calls when
+# prefer_last_working is set.
 
 _MIRRORS = (
     "annas-archive.gl",
-    "annas-archive.li",
-    "annas-archive.pm",
     "annas-archive.pk",
     "annas-archive.gd",
 )
