@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,42 @@ from endless_library.security.unpack import UnpackError, unpack_if_archive
 from endless_library.sources import registry as sources_registry
 
 log = logging.getLogger(__name__)
+
+
+def _worker_process_one(
+    book_id: int,
+    cfg_json: str,
+    db_path_str: str,
+    batch_mode: bool,
+) -> object:
+    """ProcessPoolExecutor entry point. Each call runs in a fresh
+    subprocess that rebuilds its own PipelineDeps from the pickled
+    config + db_path, claims the book atomically (the in-process
+    `claim_for_processing` is the existing race-safe gate), and runs
+    process_one. Return value is whatever process_one returns -- str
+    status, or ("needs_delivery", Path) tuple when batch_mode is on.
+
+    On crash, log + return "failed" so the parent's accounting stays
+    consistent. Each subprocess has its own:
+      - Chromium (via the patchright BrowserPool singleton)
+      - DDG cookie cache (in-memory; shared via /data file flush)
+      - md5 -> URL cache (same)
+      - DB connection (SQLite WAL handles concurrent writes)
+    """
+    try:
+        cfg = Config.model_validate_json(cfg_json)
+        db_path = Path(db_path_str)
+        deps = PipelineDeps.build(cfg=cfg, db_path=db_path)
+        if batch_mode:
+            deps._batch_delivery_mode = True  # type: ignore[attr-defined]
+        book = deps.books.get(book_id)
+        if book is None:
+            log.warning("worker: book %d disappeared between schedule and run", book_id)
+            return "failed"
+        return process_one(deps, book)
+    except Exception as e:
+        log.exception("worker subprocess crashed on book %s: %s", book_id, e)
+        return "failed"
 
 
 def _evict_cached_url(scraper, md5: str | None) -> None:
@@ -1043,6 +1080,59 @@ def _process_from_downloaded(deps: PipelineDeps, book: BookRow, file_path: Path)
         return "failed"
 
 
+def _run_books(
+    deps: PipelineDeps, books: list[BookRow], *, batch_mode: bool
+) -> list[tuple[BookRow, object]]:
+    """Run process_one across `books`. Returns (book, status) per input.
+
+    Concurrency is gated by deps.cfg.general.parallel_books. When 1, we
+    run serially in the current process (the original behaviour). When
+    > 1, we fan out to ProcessPoolExecutor with that many workers; each
+    worker subprocess rebuilds its own deps from cfg + db_path and
+    drives its own Chromium. The atomic claim_for_processing inside
+    process_one keeps two workers from racing the same book; any
+    pre-existing-claim returns "in_flight" cleanly.
+
+    Crashes are translated to st="failed" so the caller's tally stays
+    consistent in both modes.
+    """
+    parallel = max(1, int(deps.cfg.general.parallel_books or 1))
+    if parallel <= 1 or len(books) <= 1:
+        out_serial: list[tuple[BookRow, object]] = []
+        for b in books:
+            try:
+                st = process_one(deps, b)
+            except Exception as e:
+                log.exception("pipeline crashed on book %s", b.id)
+                deps.books.set_failed(b.id, error=f"pipeline crash: {e}")
+                st = "failed"
+            out_serial.append((b, st))
+        return out_serial
+
+    cfg_json = deps.cfg.model_dump_json()
+    db_path_str = str(deps.db_path)
+    out_parallel: list[tuple[BookRow, object]] = []
+    log.info(
+        "process_queue: fanning out %d book(s) across %d worker(s)",
+        len(books),
+        parallel,
+    )
+    with ProcessPoolExecutor(max_workers=parallel) as ex:
+        futures = {
+            ex.submit(_worker_process_one, b.id, cfg_json, db_path_str, batch_mode): b
+            for b in books
+        }
+        for fut in as_completed(futures):
+            b = futures[fut]
+            try:
+                st = fut.result()
+            except Exception as e:
+                log.exception("worker future raised for book %s: %s", b.id, e)
+                st = "failed"
+            out_parallel.append((b, st))
+    return out_parallel
+
+
 def process_queue(deps: PipelineDeps) -> dict[str, int]:
     """Walk every pending book; returns a tally by terminal status.
 
@@ -1080,13 +1170,12 @@ def process_queue(deps: PipelineDeps) -> dict[str, int]:
         # but defer the actual STK send.
         deps._batch_delivery_mode = True  # type: ignore[attr-defined]
         pending_delivery: list[tuple] = []  # (book, file_path)
-        for b in deps.books.pending(max_attempts=deps.cfg.general.max_attempts):
-            try:
-                st = process_one(deps, b)
-            except Exception as e:
-                log.exception("pipeline crashed on book %s", b.id)
-                deps.books.set_failed(b.id, error=f"pipeline crash: {e}")
-                st = "failed"
+        results_batch = _run_books(
+            deps,
+            list(deps.books.pending(max_attempts=deps.cfg.general.max_attempts)),
+            batch_mode=True,
+        )
+        for b, st in results_batch:
             if isinstance(st, tuple) and st[0] == "needs_delivery":
                 _, ready_path = st
                 pending_delivery.append((b, ready_path))
@@ -1129,13 +1218,12 @@ def process_queue(deps: PipelineDeps) -> dict[str, int]:
                     tally["failed"] = tally.get("failed", 0) + 1
     else:
         # Non-STK path: single-file delivery per book (original behaviour).
-        for b in deps.books.pending(max_attempts=deps.cfg.general.max_attempts):
-            try:
-                st = process_one(deps, b)
-            except Exception as e:
-                log.exception("pipeline crashed on book %s", b.id)
-                deps.books.set_failed(b.id, error=f"pipeline crash: {e}")
-                st = "failed"
+        results_serial = _run_books(
+            deps,
+            list(deps.books.pending(max_attempts=deps.cfg.general.max_attempts)),
+            batch_mode=False,
+        )
+        for _b, st in results_serial:
             tally[st] = tally.get(st, 0) + 1
 
     return tally

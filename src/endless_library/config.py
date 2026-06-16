@@ -18,6 +18,14 @@ class GeneralCfg(BaseModel):
     retention_keep_events_days: int = 90  # OR drop older than this, whichever cuts more
     retention_keep_bench_per_scraper: int = 200
     max_attempts: int = 5
+    # When > 1, process_queue runs that many books concurrently per
+    # tick via ProcessPoolExecutor (each worker has its own Chromium
+    # for annas_patchright). Default 1 = pre-PR behaviour. Each extra
+    # worker costs ~150 MB RAM (a Chromium process). Bench at
+    # 2026-06-16 showed workers=2 -> ~50% wallclock with annas
+    # tolerating concurrent slow_download requests cleanly. Don't
+    # raise above 3 without watching OCI memory + annas rate limits.
+    parallel_books: int = 1
     books_dir: str = "/data/books"
     log_level: str = "INFO"
     daily_summary_hour_utc: int = 14
