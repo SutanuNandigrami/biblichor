@@ -38,6 +38,7 @@ from pathlib import Path
 
 from endless_library.config import ScrapersCfg
 from endless_library.domain.models import Candidate, DownloadHandle
+from endless_library.scrapers.annas_browser_pool import BrowserPool, get_default_pool
 from endless_library.scrapers.annas_curl import AnnasArchiveCurl
 from endless_library.scrapers.annas_ddg_cookies import DDGCookieCache
 
@@ -110,6 +111,7 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
         *,
         headless: bool = True,
         cookie_cache: DDGCookieCache | None = None,
+        browser_pool: BrowserPool | None = None,
     ) -> None:
         super().__init__(cfg)
         self.headless = headless
@@ -121,6 +123,9 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
         # we don't dangle a Chromium forever on a hostile shard.
         self._countdown_max_seconds = 130
         self._cookie_cache = cookie_cache or _default_cookie_cache()
+        # Persistent Chromium pool. Reuses one browser across resolves
+        # (~5 s/book saved on launch). Tests inject a mock pool.
+        self._browser_pool = browser_pool or get_default_pool()
 
     def _try_cookie_replay(self, slow_url: str) -> DownloadHandle | None:
         """Plain httpx GET of /slow_download/... with cached DDG cookies.
@@ -202,147 +207,145 @@ class AnnasArchivePatchright(AnnasArchiveCurl):
             from patchright.sync_api import (
                 TimeoutError as PWTimeout,
             )
-            from patchright.sync_api import (
-                sync_playwright,
-            )
         except ImportError:
             log.warning("annas_patchright: patchright not installed; skipping")
             return None
 
         try:
-            with sync_playwright() as pw:
-                browser = pw.chromium.launch(
-                    headless=self.headless,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-blink-features=AutomationControlled",
-                    ],
-                )
+            browser = self._browser_pool.acquire()
+        except Exception as e:
+            log.warning("annas_patchright: browser pool acquire failed: %s", e)
+            return None
+
+        try:
+            ctx = browser.new_context(
+                user_agent=_CHROMIUM_UA,
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US",
+            )
+            try:
+                page = ctx.new_page()
+
+                # 1) Warm up on root domain so DDG cookies get set in this
+                #    context. DDG sometimes 403s slow_download immediately
+                #    if the client has no prior site visit.
                 try:
-                    ctx = browser.new_context(
-                        user_agent=_CHROMIUM_UA,
-                        viewport={"width": 1920, "height": 1080},
-                        locale="en-US",
+                    page.goto(warm_url, wait_until="networkidle", timeout=30_000)
+                except PWTimeout:
+                    log.info("annas_patchright: warmup timed out, continuing")
+
+                # 2) Navigate to the actual slow_download page.
+                try:
+                    page.goto(
+                        slow_url,
+                        wait_until="domcontentloaded",
+                        timeout=30_000,
                     )
-                    page = ctx.new_page()
+                except PWTimeout:
+                    log.warning("annas_patchright: slow_download goto timed out")
+                    return None
 
-                    # 1) Warm up on root domain so DDG cookies get set in this
-                    #    browser context. DDG sometimes 403s slow_download
-                    #    immediately if the client has no prior site visit.
-                    try:
-                        page.goto(warm_url, wait_until="networkidle", timeout=30_000)
-                    except PWTimeout:
-                        log.info("annas_patchright: warmup timed out, continuing")
+                # 3) Wait for DDG's JS interstitial to clear. Real
+                #    Chromium running JS finishes the challenge in
+                #    5-8 s; we poll the title up to _ddg_resolve_seconds.
+                deadline = time.time() + self._ddg_resolve_seconds
+                while time.time() < deadline:
+                    title = (page.title() or "").lower()
+                    if not _DDG_TITLE.search(title):
+                        break
+                    time.sleep(1.5)
+                else:
+                    log.warning(
+                        "annas_patchright: DDG didn't clear within %ds",
+                        self._ddg_resolve_seconds,
+                    )
+                    return None
 
-                    # 2) Navigate to the actual slow_download page.
-                    try:
-                        page.goto(
-                            slow_url,
-                            wait_until="domcontentloaded",
-                            timeout=30_000,
+                # Capture the post-challenge __ddg* cookies for future
+                # replay before we sleep through any countdown. They
+                # are valid as soon as DDG releases the page, and we
+                # want to seed the cache even if a later step fails.
+                try:
+                    raw_cookies = ctx.cookies()
+                    ddg_cookies = {
+                        c["name"]: c["value"]
+                        for c in raw_cookies
+                        if c.get("name", "").startswith(_DDG_COOKIE_PREFIX)
+                    }
+                    if ddg_cookies:
+                        self._cookie_cache.set(self.mirrors.current, ddg_cookies, _CHROMIUM_UA)
+                        log.info(
+                            "annas_patchright: cached %d DDG cookies for %s",
+                            len(ddg_cookies),
+                            self.mirrors.current,
                         )
-                    except PWTimeout:
-                        log.warning("annas_patchright: slow_download goto timed out")
-                        return None
+                except Exception as e:
+                    log.debug("annas_patchright: cookie capture failed: %s", e)
 
-                    # 3) Wait for DDG's JS interstitial to clear. Real
-                    #    Chromium running JS finishes the challenge in
-                    #    5-8 s; we poll the title up to _ddg_resolve_seconds.
-                    deadline = time.time() + self._ddg_resolve_seconds
-                    while time.time() < deadline:
-                        title = (page.title() or "").lower()
-                        if not _DDG_TITLE.search(title):
-                            break
-                        time.sleep(1.5)
-                    else:
-                        log.warning(
-                            "annas_patchright: DDG didn't clear within %ds",
-                            self._ddg_resolve_seconds,
-                        )
-                        return None
+                # DDG cleared but the partner page is still rendering;
+                # the "Download now" link is JS-injected after a quick
+                # client-side hop. Wait for networkidle so the DOM is
+                # actually stable before extracting URLs. Cap at 15 s —
+                # long enough for slow shards, short enough not to dangle
+                # Chromium on hostile partners.
+                try:
+                    page.wait_for_load_state("networkidle", timeout=15_000)
+                except PWTimeout:
+                    pass
 
-                    # Capture the post-challenge __ddg* cookies for future
-                    # replay before we sleep through any countdown. They
-                    # are valid as soon as DDG releases the page, and we
-                    # want to seed the cache even if a later step fails.
-                    try:
-                        raw_cookies = ctx.cookies()
-                        ddg_cookies = {
-                            c["name"]: c["value"]
-                            for c in raw_cookies
-                            if c.get("name", "").startswith(_DDG_COOKIE_PREFIX)
-                        }
-                        if ddg_cookies:
-                            self._cookie_cache.set(self.mirrors.current, ddg_cookies, _CHROMIUM_UA)
-                            log.info(
-                                "annas_patchright: cached %d DDG cookies for %s",
-                                len(ddg_cookies),
-                                self.mirrors.current,
-                            )
-                    except Exception as e:
-                        log.debug("annas_patchright: cookie capture failed: %s", e)
-
-                    # DDG cleared but the partner page is still rendering;
-                    # the "Download now" link is JS-injected after a quick
-                    # client-side hop. Wait for networkidle so the DOM is
-                    # actually stable before extracting URLs. Cap at 15 s —
-                    # long enough for slow shards, short enough not to dangle
-                    # Chromium on hostile partners.
+                # 4) If the page has a countdown timer (free-tier wait),
+                #    sleep through it before trying to extract a CDN URL.
+                html = page.content()
+                cd = _COUNTDOWN_RE.search(html)
+                if cd:
+                    wait_s = min(int(cd.group(1)) + 3, self._countdown_max_seconds)
+                    log.info(
+                        "annas_patchright: countdown %ds detected; waiting",
+                        wait_s,
+                    )
+                    time.sleep(wait_s)
                     try:
                         page.wait_for_load_state("networkidle", timeout=15_000)
                     except PWTimeout:
                         pass
-
-                    # 4) If the page has a countdown timer (free-tier wait),
-                    #    sleep through it before trying to extract a CDN URL.
                     html = page.content()
-                    cd = _COUNTDOWN_RE.search(html)
-                    if cd:
-                        wait_s = min(int(cd.group(1)) + 3, self._countdown_max_seconds)
-                        log.info(
-                            "annas_patchright: countdown %ds detected; waiting",
-                            wait_s,
-                        )
-                        time.sleep(wait_s)
-                        try:
-                            page.wait_for_load_state("networkidle", timeout=15_000)
-                        except PWTimeout:
-                            pass
-                        html = page.content()
 
-                    # 5) Extract the partner CDN URL. Prefer the anchored
-                    #    "Download now" link because it's exactly what the
-                    #    user-facing button would click; fall back to any
-                    #    partner /d3/ URL in the page body.
-                    m = _DOWNLOAD_ANCHOR_RE.search(html)
-                    if m:
-                        cdn_url = m.group(1)
-                        log.info(
-                            "annas_patchright: picked download anchor: %s",
-                            cdn_url[:80],
-                        )
-                        return DownloadHandle(url=cdn_url, headers={}, expected_filename=None)
-                    m2 = _PARTNER_CDN_RE.search(html)
-                    if m2:
-                        cdn_url = m2.group(0)
-                        log.info(
-                            "annas_patchright: picked first partner /d3/: %s",
-                            cdn_url[:80],
-                        )
-                        return DownloadHandle(url=cdn_url, headers={}, expected_filename=None)
+                # 5) Extract the partner CDN URL. Prefer the anchored
+                #    "Download now" link because it's exactly what the
+                #    user-facing button would click; fall back to any
+                #    partner /d3/ URL in the page body.
+                m = _DOWNLOAD_ANCHOR_RE.search(html)
+                if m:
+                    cdn_url = m.group(1)
+                    log.info(
+                        "annas_patchright: picked download anchor: %s",
+                        cdn_url[:80],
+                    )
+                    return DownloadHandle(url=cdn_url, headers={}, expected_filename=None)
+                m2 = _PARTNER_CDN_RE.search(html)
+                if m2:
+                    cdn_url = m2.group(0)
+                    log.info(
+                        "annas_patchright: picked first partner /d3/: %s",
+                        cdn_url[:80],
+                    )
+                    return DownloadHandle(url=cdn_url, headers={}, expected_filename=None)
 
-                    log.warning("annas_patchright: no CDN URL found on resolved page")
-                    return None
-                finally:
-                    try:
-                        browser.close()
-                    except Exception:
-                        pass
-
+                log.warning("annas_patchright: no CDN URL found on resolved page")
+                return None
+            finally:
+                # Close the per-call context but leave the pooled
+                # browser running for the next resolve.
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
         except PWError as e:
             log.warning("annas_patchright: playwright error: %s", e)
+            # Browser may be in a bad state; force respawn on next acquire.
+            self._browser_pool.report_failure()
             return None
         except Exception as e:
             log.warning("annas_patchright: unexpected: %s", e)
+            self._browser_pool.report_failure()
             return None
