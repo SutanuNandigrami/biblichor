@@ -29,7 +29,17 @@ defineProps<{ kpis: Kpis }>()
         {{ kpis.in_flight.toLocaleString() }}
         <span v-if="kpis.in_flight > 0" class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 align-middle ml-1 animate-pulse" />
       </div>
-      <div class="text-[10px] text-muted-foreground mt-1">searching / downloading / sending</div>
+      <div class="text-[10px] text-muted-foreground mt-1">
+        searching / downloading / sending
+        <span
+          v-if="(kpis.oldest_in_flight_minutes ?? 0) > 0"
+          class="ml-1 tabular-nums"
+          :class="(kpis.oldest_in_flight_minutes ?? 0) > 25 ? 'text-amber-600 dark:text-amber-400 font-medium' : ''"
+          :title="`Oldest in-flight book has been mid-pipeline for ${kpis.oldest_in_flight_minutes} min. Anything above the 30 min zombie threshold means the tick itself is hung.`"
+        >
+          · oldest {{ kpis.oldest_in_flight_minutes }}m
+        </span>
+      </div>
     </div>
 
     <div class="bg-card border border-border rounded-xl p-4 shadow-sm">

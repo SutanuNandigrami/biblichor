@@ -50,6 +50,8 @@ export interface Kpis {
   // PR #49: md5 dedup visibility. Optional in TS so older backend
   // versions (no field on snapshot) don't break the SPA build.
   dedups_24h?: number
+  // PR #52: oldest mid-pipeline book age in minutes.
+  oldest_in_flight_minutes?: number
 }
 
 export interface RecentEvent {
@@ -100,6 +102,7 @@ const EMPTY_KPIS: Kpis = {
   today_sent: 0,
   recent_failures: 0,
   dedups_24h: 0,
+  oldest_in_flight_minutes: 0,
 }
 const EMPTY_STAGE_STATS: StageStats = { count: 0, p50: null, p90: null, p99: null }
 const EMPTY_STAGE_TIMINGS: StageTimings = {
