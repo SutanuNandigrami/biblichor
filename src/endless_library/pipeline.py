@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, TimeoutError as _CFTimeoutError, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -1147,19 +1147,57 @@ def _run_books(
         len(books),
         parallel,
     )
+    # Hotfix for the fan-out hang observed 2026-06-17: a worker stuck
+    # on patchright (DDG never clears, partner CDN never responds, etc.)
+    # blocked the parent's `for fut in as_completed(...)` indefinitely.
+    # That kept process_queue running past 30+ minutes, which in turn
+    # prevented the next tick + reset_zombies from firing -- starving
+    # the whole pipeline. Bound the wait at TICK_TIMEOUT seconds. Books
+    # whose futures are still pending when the budget runs out are
+    # marked failed (the row's state machine will be cleaned up by
+    # zombie reset in the NEXT tick anyway, but explicit fail makes
+    # the cause observable).
+    # Headroom math: at parallel=2, per-book wall budget ~5 min
+    # (patchright + countdown + extract) and ~12 books per pending
+    # batch -> ~30 min worst case. TICK_TIMEOUT=1800s matches the
+    # 30 min zombie-reset window so we never go past one cycle.
+    TICK_TIMEOUT_SECONDS = 1800
     with ProcessPoolExecutor(max_workers=parallel) as ex:
         futures = {
             ex.submit(_worker_process_one, b.id, cfg_json, db_path_str, batch_mode): b
             for b in books
         }
-        for fut in as_completed(futures):
-            b = futures[fut]
-            try:
-                st = fut.result()
-            except Exception as e:
-                log.exception("worker future raised for book %s: %s", b.id, e)
-                st = "failed"
-            out_parallel.append((b, st))
+        completed: set = set()
+        try:
+            for fut in as_completed(futures, timeout=TICK_TIMEOUT_SECONDS):
+                b = futures[fut]
+                completed.add(fut)
+                try:
+                    st = fut.result()
+                except Exception as e:
+                    log.exception("worker future raised for book %s: %s", b.id, e)
+                    st = "failed"
+                out_parallel.append((b, st))
+        except _CFTimeoutError:
+            # Tick budget exhausted. Mark unfinished books as failed so
+            # the queue keeps moving; their workers will be killed when
+            # the `with ex:` block exits.
+            unfinished = [(fut, b) for fut, b in futures.items() if fut not in completed]
+            log.warning(
+                "process_queue tick timed out after %ds; %d/%d futures still pending; "
+                "marking unfinished books failed",
+                TICK_TIMEOUT_SECONDS,
+                len(unfinished),
+                len(futures),
+            )
+            for _fut, b in unfinished:
+                try:
+                    deps.books.set_failed(
+                        b.id, error=f"worker tick timeout ({TICK_TIMEOUT_SECONDS}s)"
+                    )
+                except Exception:
+                    log.exception("set_failed swallow on book %s after tick timeout", b.id)
+                out_parallel.append((b, "failed"))
     return out_parallel
 
 
