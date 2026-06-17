@@ -136,6 +136,45 @@ class BookRepo:
             row = conn.execute("SELECT * FROM books WHERE isbn13 = ?", (isbn13,)).fetchone()
         return BookRow.from_row(row) if row else None
 
+    def find_downloaded_by_md5(
+        self,
+        md5: str,
+        *,
+        exclude_book_id: int | None = None,
+    ) -> BookRow | None:
+        """Return the oldest book (id ASC) that has this md5 AND a
+        non-empty file_path AND isn't the excluded book. The pipeline
+        uses this to detect post-resolve duplicates -- the same md5
+        already lives on disk from a different goodreads/manual entry
+        and we should NOT spend a download cycle on the duplicate.
+        """
+        with self._connect() as conn:
+            q = "SELECT * FROM books WHERE md5 = ? AND file_path IS NOT NULL AND file_path != '' "
+            params: list[object] = [md5]
+            if exclude_book_id is not None:
+                q += "AND id != ? "
+                params.append(exclude_book_id)
+            q += "ORDER BY id ASC LIMIT 1"
+            row = conn.execute(q, tuple(params)).fetchone()
+        return BookRow.from_row(row) if row else None
+
+    def mark_dedup(self, book_id: int, dedup_of_id: int, md5: str) -> None:
+        """Park `book_id` as a duplicate of `dedup_of_id`. Status flips
+        to 'skipped' so the queue stops cycling it; last_error records
+        the parent book id for observability. We also stamp md5 on the
+        row so future ISBN-less rediscovery still sees this row as
+        having the same content.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE books SET status = 'skipped', "
+                "last_error = ?, "
+                "md5 = ?, "
+                "updated_at = datetime('now') "
+                "WHERE id = ?",
+                (f"duplicate of book #{dedup_of_id}", md5, book_id),
+            )
+
     def count(self) -> int:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) AS c FROM books").fetchone()["c"])
