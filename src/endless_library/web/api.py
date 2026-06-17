@@ -2971,6 +2971,27 @@ def compute_dashboard_snapshot(db_path, window_hours: int = 24) -> dict:
                     (failures_cutoff,),
                 ).fetchone()["n"]
             ),
+            # PR #52: oldest-in-flight age in minutes. Surfaces hung
+            # workers + the kind of fan-out hang seen 2026-06-17 ~04:00
+            # without requiring SQL forensics. Returns 0 when nothing
+            # is in-flight. Anything above zombie_stale_minutes (30)
+            # means the zombie sweep hasn't run -- usually a sign the
+            # parent tick is itself hung.
+            "oldest_in_flight_minutes": int(
+                conn.execute(
+                    """SELECT COALESCE(
+                           CAST(
+                               (julianday('now') - julianday(MIN(updated_at)))
+                               * 24 * 60
+                               AS INTEGER
+                           ),
+                           0
+                       ) AS n
+                       FROM books
+                       WHERE status IN
+                          ('searching', 'downloading', 'converting', 'sending')""",
+                ).fetchone()["n"]
+            ),
         }
 
         # ---- 2. Throughput bucketed across the window ----
