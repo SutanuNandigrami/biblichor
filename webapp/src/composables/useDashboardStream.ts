@@ -47,6 +47,9 @@ export interface Kpis {
   in_flight: number
   today_sent: number
   recent_failures: number
+  // PR #49: md5 dedup visibility. Optional in TS so older backend
+  // versions (no field on snapshot) don't break the SPA build.
+  dedups_24h?: number
 }
 
 export interface RecentEvent {
@@ -91,7 +94,13 @@ export type ConnectionState = "connecting" | "connected" | "reconnecting" | "err
 
 const EMPTY_THROUGHPUT: Throughput = { window_hours: 24, bucket_minutes: 5, series: [] }
 const EMPTY_METHOD: MethodBreakdown = { window_hours: 24, stk: 0, smtp: 0 }
-const EMPTY_KPIS: Kpis = { queue_depth: 0, in_flight: 0, today_sent: 0, recent_failures: 0 }
+const EMPTY_KPIS: Kpis = {
+  queue_depth: 0,
+  in_flight: 0,
+  today_sent: 0,
+  recent_failures: 0,
+  dedups_24h: 0,
+}
 const EMPTY_STAGE_STATS: StageStats = { count: 0, p50: null, p90: null, p99: null }
 const EMPTY_STAGE_TIMINGS: StageTimings = {
   window_hours: 168,

@@ -54,7 +54,16 @@ defineProps<{ kpis: Kpis }>()
       >
         {{ kpis.recent_failures.toLocaleString() }}
       </div>
-      <div class="text-[10px] text-muted-foreground mt-1">failed or needs review</div>
+      <div class="text-[10px] text-muted-foreground mt-1">
+        failed or needs review
+        <span
+          v-if="(kpis.dedups_24h ?? 0) > 0"
+          class="ml-1 text-sky-600 dark:text-sky-400 tabular-nums"
+          :title="`${kpis.dedups_24h} books skipped because their md5 already existed in another row`"
+        >
+          · {{ kpis.dedups_24h }} deduped
+        </span>
+      </div>
     </div>
   </div>
 </template>

@@ -2959,6 +2959,18 @@ def compute_dashboard_snapshot(db_path, window_hours: int = 24) -> dict:
                     (failures_cutoff,),
                 ).fetchone()["n"]
             ),
+            # PR #49: visibility for the md5 post-resolve dedup. Counts
+            # books parked as 'skipped' with a "duplicate of book #N"
+            # last_error within the last 24 h.
+            "dedups_24h": int(
+                conn.execute(
+                    """SELECT COUNT(*) AS n FROM books
+                       WHERE status = 'skipped'
+                         AND last_error LIKE 'duplicate of book #%'
+                         AND updated_at >= ?""",
+                    (failures_cutoff,),
+                ).fetchone()["n"]
+            ),
         }
 
         # ---- 2. Throughput bucketed across the window ----
