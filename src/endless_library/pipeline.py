@@ -488,7 +488,29 @@ def _resolve_and_download(
     Phase 6u.7: returns (path, last_error). When the chain exhausts the
     last_error carries the most specific failure cause (truncated RAR,
     Drive HTTP 403, no candidates) so the book's failed message is
-    actionable instead of the generic 'all scrapers failed'."""
+    actionable instead of the generic 'all scrapers failed'.
+
+    md5 dedup (PR #47): if the candidate already has an md5 AND another
+    book row already has that md5 + a downloaded file_path, mark this
+    book as a duplicate and skip the download entirely. last_error
+    starts with the literal prefix "deduped:" so the caller can return
+    "skipped" directly instead of routing through
+    _search_fail_or_skip (which would bump attempts).
+    """
+    if c.md5:
+        existing = deps.books.find_downloaded_by_md5(c.md5, exclude_book_id=book.id)
+        if existing is not None:
+            deps.events.append(
+                book_id=book.id,
+                kind="dedup",
+                message=(
+                    f"md5 {c.md5[:8]}.. already downloaded as "
+                    f'book #{existing.id} ("{(existing.title or "")[:40]}"); '
+                    "marking this row as skipped"
+                ),
+            )
+            deps.books.mark_dedup(book.id, existing.id, c.md5)
+            return None, f"deduped:{existing.id}"
     last_error: str | None = None
     _is_pd, _is_recent, _book_source = _book_context(book, deps.cfg)
     for s_name in scrapers_registry.chain_for_source(
@@ -731,6 +753,10 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
             )
             file_path, dl_err = _resolve_and_download(deps, book, picked_cand)
             if not file_path:
+                if dl_err and dl_err.startswith("deduped:"):
+                    # _resolve_and_download already marked the book
+                    # as skipped (duplicate of another row).
+                    return "skipped"
                 return _search_fail_or_skip(
                     deps,
                     book,
@@ -817,6 +843,10 @@ def process_one(deps: PipelineDeps, book: BookRow) -> str:
     picked_cand = scored[0][1]
     file_path, dl_err = _resolve_and_download(deps, book, picked_cand)
     if not file_path:
+        if dl_err and dl_err.startswith("deduped:"):
+            # md5 already lives on disk under another book row;
+            # _resolve_and_download already flipped this row to skipped.
+            return "skipped"
         # Phase 6u.7: surface the actual cause (truncated RAR, Drive
         # HTTP 403, etc.) instead of the generic "all scrapers failed".
         msg = dl_err or "all scrapers failed to resolve/download"
