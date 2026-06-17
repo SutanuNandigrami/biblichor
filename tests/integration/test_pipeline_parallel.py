@@ -161,8 +161,10 @@ def test_run_books_parallel_uses_process_pool(tmp_path: Path):
 
     fake_ex.submit.side_effect = _submit
 
-    def _as_completed(futures):
-        # MagicMocks; just yield them all in insertion order.
+    def _as_completed(futures, **_kw):
+        # MagicMocks; just yield them all in insertion order. The
+        # `**_kw` absorbs the `timeout=...` kwarg the production
+        # path passes.
         return list(futures)
 
     with patch(
@@ -172,6 +174,69 @@ def test_run_books_parallel_uses_process_pool(tmp_path: Path):
 
     assert sorted(submitted_book_ids) == [1, 2, 3]
     assert [st for _b, st in out] == ["sent", "sent", "sent"]
+
+
+def test_run_books_parallel_translates_tick_timeout_to_failed(tmp_path: Path):
+    """When as_completed raises TimeoutError (the whole tick budget
+    ran out before all workers returned), unfinished futures must be
+    explicitly marked 'failed' so the queue keeps moving. Hotfix for
+    the 2026-06-17 hang where a stuck patchright blocked the tick
+    indefinitely, which in turn blocked zombie reset on the next tick."""
+    from concurrent.futures import TimeoutError as _CFTimeoutError
+    from unittest.mock import MagicMock
+
+    deps = _deps(tmp_path, parallel=2)
+    # Insert real book rows so set_failed has something to write to.
+    bid1 = deps.books.upsert(
+        title="A", author=None, isbn13=None, source="manual", source_id="m-1"
+    )
+    bid2 = deps.books.upsert(
+        title="B", author=None, isbn13=None, source="manual", source_id="m-2"
+    )
+    bid3 = deps.books.upsert(
+        title="C", author=None, isbn13=None, source="manual", source_id="m-3"
+    )
+    book_a = deps.books.get(bid1)
+    book_b = deps.books.get(bid2)
+    book_c = deps.books.get(bid3)
+    assert book_a and book_b and book_c
+
+    fake_ex = MagicMock()
+    fake_ex.__enter__ = MagicMock(return_value=fake_ex)
+    fake_ex.__exit__ = MagicMock(return_value=False)
+
+    # 3 futures: A completes "sent"; B and C never resolve.
+    fut_a = MagicMock()
+    fut_a.result.return_value = "sent"
+    fut_b = MagicMock()
+    fut_c = MagicMock()
+    submitted = [fut_a, fut_b, fut_c]
+    submit_idx = {"i": 0}
+
+    def _submit(_fn, _book_id, *_a):
+        fut = submitted[submit_idx["i"]]
+        submit_idx["i"] += 1
+        return fut
+
+    fake_ex.submit.side_effect = _submit
+
+    def _as_completed(_fs, **_kw):
+        # Yield only the first future, then raise TimeoutError.
+        yield fut_a
+        raise _CFTimeoutError("tick budget exhausted")
+
+    with patch(
+        "endless_library.pipeline.ProcessPoolExecutor", return_value=fake_ex
+    ), patch("endless_library.pipeline.as_completed", _as_completed):
+        out = _run_books(deps, [book_a, book_b, book_c], batch_mode=False)
+
+    statuses = sorted(st for _b, st in out)
+    assert statuses == ["failed", "failed", "sent"]
+    # B and C must have been persisted as failed
+    assert deps.books.get(bid2).status == "failed"
+    assert deps.books.get(bid3).status == "failed"
+    # The error message must mention the timeout
+    assert "tick timeout" in (deps.books.get(bid2).last_error or "").lower()
 
 
 def test_run_books_parallel_translates_worker_exception_to_failed(
@@ -200,7 +265,7 @@ def test_run_books_parallel_translates_worker_exception_to_failed(
 
     with patch(
         "endless_library.pipeline.ProcessPoolExecutor", return_value=fake_ex
-    ), patch("endless_library.pipeline.as_completed", lambda fs: list(fs)):
+    ), patch("endless_library.pipeline.as_completed", lambda fs, **_kw: list(fs)):
         out = _run_books(deps, books, batch_mode=False)
 
     statuses = sorted(st for _b, st in out)
