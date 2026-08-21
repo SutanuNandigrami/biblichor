@@ -324,7 +324,9 @@ def test_slow_scraper_does_not_500_the_endpoint(tmp_path):
     app, _, _ = _make_app(tmp_path)
 
     def _slow_search(_q):
-        _time.sleep(6)  # comfortably past the 4s outer as_completed budget (3s per_scraper + 1s grace)
+        _time.sleep(
+            6
+        )  # comfortably past the 4s outer as_completed budget (3s per_scraper + 1s grace)
         return []
 
     # Explicit ?sources= triggers fan-out across multiple scrapers.

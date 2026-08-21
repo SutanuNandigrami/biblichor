@@ -113,9 +113,10 @@ def test_run_books_single_book_stays_serial(tmp_path: Path):
         called.append(b.id)
         return "sent"
 
-    with patch("endless_library.pipeline.process_one", _fake_process_one), patch(
-        "endless_library.pipeline.ProcessPoolExecutor"
-    ) as ppe:
+    with (
+        patch("endless_library.pipeline.process_one", _fake_process_one),
+        patch("endless_library.pipeline.ProcessPoolExecutor") as ppe,
+    ):
         out = _run_books(deps, [book], batch_mode=False)
 
     ppe.assert_not_called()  # Pool MUST NOT be constructed for 1 book.
@@ -129,9 +130,10 @@ def test_run_books_serial_path_when_parallel_is_one(tmp_path: Path):
     deps = _deps(tmp_path, parallel=1)
     books = [_book(1), _book(2)]
 
-    with patch(
-        "endless_library.pipeline.process_one", lambda *_a: "sent"
-    ), patch("endless_library.pipeline.ProcessPoolExecutor") as ppe:
+    with (
+        patch("endless_library.pipeline.process_one", lambda *_a: "sent"),
+        patch("endless_library.pipeline.ProcessPoolExecutor") as ppe,
+    ):
         _run_books(deps, books, batch_mode=False)
 
     ppe.assert_not_called()
@@ -167,9 +169,10 @@ def test_run_books_parallel_uses_process_pool(tmp_path: Path):
         # path passes.
         return list(futures)
 
-    with patch(
-        "endless_library.pipeline.ProcessPoolExecutor", return_value=fake_ex
-    ), patch("endless_library.pipeline.as_completed", _as_completed):
+    with (
+        patch("endless_library.pipeline.ProcessPoolExecutor", return_value=fake_ex),
+        patch("endless_library.pipeline.as_completed", _as_completed),
+    ):
         out = _run_books(deps, books, batch_mode=False)
 
     assert sorted(submitted_book_ids) == [1, 2, 3]
@@ -187,15 +190,9 @@ def test_run_books_parallel_translates_tick_timeout_to_failed(tmp_path: Path):
 
     deps = _deps(tmp_path, parallel=2)
     # Insert real book rows so set_failed has something to write to.
-    bid1 = deps.books.upsert(
-        title="A", author=None, isbn13=None, source="manual", source_id="m-1"
-    )
-    bid2 = deps.books.upsert(
-        title="B", author=None, isbn13=None, source="manual", source_id="m-2"
-    )
-    bid3 = deps.books.upsert(
-        title="C", author=None, isbn13=None, source="manual", source_id="m-3"
-    )
+    bid1 = deps.books.upsert(title="A", author=None, isbn13=None, source="manual", source_id="m-1")
+    bid2 = deps.books.upsert(title="B", author=None, isbn13=None, source="manual", source_id="m-2")
+    bid3 = deps.books.upsert(title="C", author=None, isbn13=None, source="manual", source_id="m-3")
     book_a = deps.books.get(bid1)
     book_b = deps.books.get(bid2)
     book_c = deps.books.get(bid3)
@@ -225,9 +222,10 @@ def test_run_books_parallel_translates_tick_timeout_to_failed(tmp_path: Path):
         yield fut_a
         raise _CFTimeoutError("tick budget exhausted")
 
-    with patch(
-        "endless_library.pipeline.ProcessPoolExecutor", return_value=fake_ex
-    ), patch("endless_library.pipeline.as_completed", _as_completed):
+    with (
+        patch("endless_library.pipeline.ProcessPoolExecutor", return_value=fake_ex),
+        patch("endless_library.pipeline.as_completed", _as_completed),
+    ):
         out = _run_books(deps, [book_a, book_b, book_c], batch_mode=False)
 
     statuses = sorted(st for _b, st in out)
@@ -263,9 +261,10 @@ def test_run_books_parallel_translates_worker_exception_to_failed(
 
     fake_ex.submit.side_effect = _submit
 
-    with patch(
-        "endless_library.pipeline.ProcessPoolExecutor", return_value=fake_ex
-    ), patch("endless_library.pipeline.as_completed", lambda fs, **_kw: list(fs)):
+    with (
+        patch("endless_library.pipeline.ProcessPoolExecutor", return_value=fake_ex),
+        patch("endless_library.pipeline.as_completed", lambda fs, **_kw: list(fs)),
+    ):
         out = _run_books(deps, books, batch_mode=False)
 
     statuses = sorted(st for _b, st in out)

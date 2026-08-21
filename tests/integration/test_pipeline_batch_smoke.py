@@ -92,6 +92,7 @@ def test_pipeline_batch_smoke(db, svc, tmp_path, monkeypatch):
         general=SimpleNamespace(
             max_attempts=5,
             zombie_stale_minutes=30,
+            parallel_books=1,
         ),
         stk=SimpleNamespace(
             daily_cap=None,
