@@ -123,3 +123,9 @@ def test_image_tag_targets_ghcr(compose: dict):
     file must reference the same image so `docker compose pull` works."""
     img = compose["services"]["biblichor"]["image"]
     assert img.startswith("ghcr.io/"), f"image must be GHCR-hosted, got {img!r}"
+
+
+def test_biblichor_always_pulls_published_image_before_recreate(compose: dict):
+    """A plain `docker compose up` must not reuse a stale local `latest` image."""
+    bib = compose["services"]["biblichor"]
+    assert bib.get("pull_policy") == "always"

@@ -52,6 +52,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     image: ghcr.io/sutanunandigrami/biblichor:latest
+    pull_policy: always
     container_name: biblichor
     restart: unless-stopped
     ports:
