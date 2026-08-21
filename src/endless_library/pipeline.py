@@ -252,13 +252,30 @@ def poll_source_account(deps: PipelineDeps, account_id: int) -> int:
 
 def poll_sources(deps: PipelineDeps) -> int:
     """Iterate every enabled source account. Used by manual Run-Now."""
+    accounts = deps.sources.list_enabled()
     total = 0
-    for acct in deps.sources.list_enabled():
-        total += poll_source_account(deps, acct.id)
+    for position, acct in enumerate(accounts, start=1):
+        added = poll_source_account(deps, acct.id)
+        total += added
+        deps.events.append(
+            book_id=None,
+            kind="cycle",
+            message=(
+                f"source {position}/{len(accounts)} finished: "
+                f"{acct.source}; added {added}"
+            ),
+            meta={
+                "account_id": acct.id,
+                "source": acct.source,
+                "position": position,
+                "total": len(accounts),
+                "added": added,
+            },
+        )
     log.info(
         "poll_sources added %d new books across %d accounts",
         total,
-        len(deps.sources.list_enabled()),
+        len(accounts),
     )
     return total
 

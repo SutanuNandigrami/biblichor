@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -127,6 +129,74 @@ def test_cycle_status_initially_not_running(client):
     assert r.status_code == 200
     body = r.json()
     assert body["running"] is False
+
+
+def _wait_for_cycle(c: TestClient) -> dict:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        status = c.get("/api/cycle/status").json()
+        if not status["running"]:
+            return status
+        time.sleep(0.01)
+    pytest.fail("manual cycle did not finish")
+
+
+def test_run_now_records_visible_lifecycle_events(client, monkeypatch):
+    c, deps = client
+    poll_started = threading.Event()
+    release_poll = threading.Event()
+    tally = {
+        "sent": 1,
+        "failed": 0,
+        "needs_review": 0,
+        "skipped": 0,
+        "deferred": 0,
+        "in_flight": 0,
+    }
+
+    def slow_poll(_deps):
+        poll_started.set()
+        assert release_poll.wait(timeout=1)
+        return 3
+
+    monkeypatch.setattr("endless_library.pipeline.poll_sources", slow_poll)
+    monkeypatch.setattr("endless_library.pipeline.process_queue", lambda _deps: tally)
+
+    with c:
+        response = c.post("/api/cycle/run-now")
+        assert response.status_code == 200
+        assert poll_started.wait(timeout=1)
+        assert c.get("/api/cycle/status").json()["running"] is True
+        assert deps.events.recent_global(limit=1)[0].message == "manual cycle started"
+        release_poll.set()
+        assert _wait_for_cycle(c)["last_tally"] == tally
+
+    events = list(reversed(deps.events.recent_global(limit=10)))
+    cycle_events = [event for event in events if event.kind == "cycle"]
+    assert [event.message for event in cycle_events] == [
+        "manual cycle started",
+        "source polling complete; added 3 books",
+        "manual cycle complete; sent=1 failed=0 needs_review=0 skipped=0 deferred=0 in_flight=0",
+    ]
+    assert cycle_events[-1].meta == tally
+
+
+def test_run_now_records_visible_failure(client, monkeypatch):
+    c, deps = client
+
+    def fail_poll(_deps):
+        raise RuntimeError("source unavailable")
+
+    monkeypatch.setattr("endless_library.pipeline.poll_sources", fail_poll)
+
+    with c:
+        response = c.post("/api/cycle/run-now")
+        assert response.status_code == 200
+        assert _wait_for_cycle(c)["last_tally"] == {"error": "source unavailable"}
+
+    latest = deps.events.recent_global(limit=1)[0]
+    assert latest.kind == "error"
+    assert latest.message == "manual cycle failed: source unavailable"
 
 
 def test_setup_status(client):

@@ -630,15 +630,42 @@ def register(app: FastAPI) -> None:
         state = request.app.state
         if getattr(state, "_running", False):
             raise HTTPException(409, detail="already running")
+        deps.events.append(book_id=None, kind="cycle", message="manual cycle started")
         state._running = True
         state._last_tally = None
 
         async def _runner():
             try:
-                await asyncio.to_thread(poll_sources, deps)
+                added = await asyncio.to_thread(poll_sources, deps)
+                deps.events.append(
+                    book_id=None,
+                    kind="cycle",
+                    message=f"source polling complete; added {added} books",
+                    meta={"added": added},
+                )
                 state._last_tally = await asyncio.to_thread(process_queue, deps)
+                tally = state._last_tally
+                deps.events.append(
+                    book_id=None,
+                    kind="cycle",
+                    message=(
+                        "manual cycle complete; "
+                        f"sent={tally.get('sent', 0)} "
+                        f"failed={tally.get('failed', 0)} "
+                        f"needs_review={tally.get('needs_review', 0)} "
+                        f"skipped={tally.get('skipped', 0)} "
+                        f"deferred={tally.get('deferred', 0)} "
+                        f"in_flight={tally.get('in_flight', 0)}"
+                    ),
+                    meta=tally,
+                )
             except Exception as exc:
                 state._last_tally = {"error": str(exc)}
+                deps.events.append(
+                    book_id=None,
+                    kind="error",
+                    message=f"manual cycle failed: {exc}",
+                )
             finally:
                 state._running = False
 
