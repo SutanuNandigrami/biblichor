@@ -3,7 +3,8 @@ from __future__ import annotations
 import datetime
 import json
 import logging
-from concurrent.futures import ProcessPoolExecutor, TimeoutError as _CFTimeoutError, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as _CFTimeoutError
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
